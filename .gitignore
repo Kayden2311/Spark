@@ -1,0 +1,39 @@
+# Local agent and editor configuration
+.agents/
+.claude/
+.codex/
+.github/
+AGENTS.md
+skills-lock.json
+
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Build and test output
+.next/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Logs and local runtime files
+*.log
+*.pid
+*.seed
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+Documents/automation/installed-skills.json

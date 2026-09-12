@@ -1,0 +1,27 @@
+{
+  "name": "spark-core",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @spark/backend --filter @spark/frontend dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "infra:up": "docker compose -f infra/compose.yaml up -d --wait",
+    "infra:down": "docker compose -f infra/compose.yaml down",
+    "infra:logs": "docker compose -f infra/compose.yaml logs -f",
+    "db:bootstrap:local": "pwsh -NoProfile -File scripts/bootstrap-local-postgres.ps1"
+  },
+  "devDependencies": {
+    "eslint": "9.39.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.0",
+    "vitest": "5.0.0"
+  }
+}

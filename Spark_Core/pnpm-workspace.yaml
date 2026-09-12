@@ -1,0 +1,8 @@
+packages:
+  - frontend
+  - backend
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
