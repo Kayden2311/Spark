@@ -1,0 +1,5 @@
+import { PageTitle, WorkspaceShell } from "../components";
+const notifications: readonly (readonly [string, string, string, string, boolean])[] = [["ML", "Mai assigned you", "Refine investor update", "10 min ago", true], ["HF", "HN Founders accepted", "your membership request", "1 hour ago", true], ["DK", "Duy commented on", "Set up customer calls", "Yesterday", false], ["PC", "Product Circle published", "September member sessions", "Yesterday", false]];
+export default function NotificationsPage() {
+  return <WorkspaceShell current="Notifications"><PageTitle eyebrow="Inbox" title="Notifications"><button className="textButton" type="button">Mark all as read</button></PageTitle><section className="notificationList">{notifications.map(([initials, action, subject, time, unread]) => <article className={unread ? "notification unread" : "notification"} key={subject}><span className="avatar">{initials}</span><div><p>{action} <strong>{subject}</strong></p><time>{time}</time></div>{unread && <span className="unreadDot" aria-label="Unread" />}</article>)}</section></WorkspaceShell>;
+}

@@ -9,13 +9,19 @@
     "start": "node --env-file-if-exists=../.env dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file=../.env --import tsx scripts/migrate.ts",
+    "db:inspect": "node --env-file=../.env --import tsx scripts/inspect-database.ts",
+    "test:database": "node --env-file=../.env ../node_modules/vitest/vitest.mjs run --config vitest.database.config.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",
     "@fastify/helmet": "13.1.1",
     "@fastify/rate-limit": "11.2.0",
     "@fastify/swagger": "9.8.1",
+    "@node-rs/argon2": "2.2.1",
+    "drizzle-orm": "0.45.2",
     "fastify": "5.12.3",
     "ioredis": "6.0.0",
     "pg": "8.23.0"
@@ -23,6 +29,7 @@
   "devDependencies": {
     "@types/node": "22.20.2",
     "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.10",
     "tsx": "4.23.13"
   }
 }
