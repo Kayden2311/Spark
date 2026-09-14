@@ -14,7 +14,7 @@ Application code lives in `Spark_Core` as a pnpm workspace:
 - `backend`: Fastify and TypeScript, organized as a modular monolith.
 - `infra`: local Redis configuration. Local PostgreSQL runs directly on port 5432.
 
-The implemented baseline provides one health endpoint, startup configuration and dependency checks, Redis-backed rate limiting, OpenAPI, tests, and CI. Product features, authentication, authorization, migrations, RLS, search, caching, and deployment are implemented only when their stories are scheduled. Documentation must never describe a proposed capability as already operational.
+The implemented baseline provides one health endpoint, startup configuration and dependency checks, Redis-backed rate limiting, OpenAPI, and tests. CI is not configured yet. Product features, authentication, authorization, migrations, RLS, search, caching, and deployment are implemented only when their stories are scheduled. Documentation must never describe a proposed capability as already operational.
 
 ## Technology choices
 
@@ -26,7 +26,7 @@ The implemented baseline provides one health endpoint, startup configuration and
 | Cache and limiter | Redis | Shared cache, distributed rate limits, and short-lived coordination. |
 | Contracts | Fastify JSON Schema and OpenAPI | Runtime validation and generated API documentation without a premature shared package. |
 | Tests | Vitest and focused integration tests | Fast feedback with real dependency coverage where it matters. |
-| CI | GitHub Actions | Reproducible quality gate on pull requests and main. |
+| CI | GitHub Actions (planned) | A reproducible quality gate when configured and verified. |
 
 Use Node.js 24 LTS and the pnpm version pinned by the repository. Prefer a modular monolith until measured scale or team ownership justifies another deployable service. Do not add Kafka, Kubernetes, Elasticsearch, a service mesh, or a graph database for the MVP.
 
@@ -60,7 +60,7 @@ Redis backs rate limits for normal API traffic. Policies are route-specific and 
 - Per-resource authorization in application use cases and tenant filtering in database access.
 - Strict request and response schemas, body-size limits, safe error responses, and no secrets or private payloads in logs.
 - Explicit trusted proxies and HTTPS-only production origins.
-- Parameterized queries, least-privilege database roles, dependency auditing, and pinned CI dependencies.
+- Parameterized queries, least-privilege database roles, dependency auditing, and pinned CI dependencies when CI is configured.
 - Load balancers terminate TLS and forward only trusted proxy headers. Application nodes remain stateless.
 
 ## MVP user stories
