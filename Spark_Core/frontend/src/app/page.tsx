@@ -1,51 +1,74 @@
-"use client";
-
 import Link from "next/link";
-import { type PointerEvent, useRef } from "react";
 
-const particles = Array.from({ length: 252 }, (_, index) => { const column = index % 18; const row = Math.floor(index / 18); return [4 + column * 5.35 + ((row * 3 + column * 5) % 5 - 2) * 0.55, 5 + row * 6.9 + ((row * 7 + column * 2) % 5 - 2) * 0.55] as const; });
+import { HeroParticles } from "./hero-particles";
 
 function SparkMark() {
   return <svg aria-hidden="true" className="sparkMark" viewBox="0 0 48 48"><path className="sparkBolt" d="M27 2 8 27h13l-2 19 21-27H27z" /></svg>;
 }
 
-export default function HomePage() {
-  const particleRefs = useRef<(HTMLElement | null)[]>([]);
-  const resetParticles = () => particleRefs.current.forEach((particle) => particle?.style.removeProperty("transform"));
-  const trackParticles = (event: PointerEvent<HTMLElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = (event.clientX - bounds.left) / bounds.width;
-    const y = (event.clientY - bounds.top) / bounds.height;
-    event.currentTarget.style.setProperty("--cursor-x", `${x * 100}%`);
-    event.currentTarget.style.setProperty("--cursor-y", `${y * 100}%`);
-    particles.forEach(([particleX, particleY], index) => {
-      const particle = particleRefs.current[index];
-      if (!particle) return;
-      const dx = particleX / 100 - x;
-      const dy = particleY / 100 - y;
-      const distance = Math.hypot(dx, dy);
-      const strength = Math.max(0.08, 1 - distance / 0.42);
-      const scale = 1 + strength * 1.4;
-      const push = strength * 70;
-      particle.style.transform = `translate(${dx / (distance || 1) * push}px, ${dy / (distance || 1) * push}px) scale(${scale})`;
-    });
+function ArrowIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M4 10h11m-4-4 4 4-4 4" /></svg>;
+}
+
+function FeatureIcon({ type }: { type: "people" | "board" | "calendar" }) {
+  const paths = {
+    people: <><circle cx="8" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M2.5 21c.5-4 2.3-6 5.5-6s5 2 5.5 6M14 16c3.7-.4 6 1.3 6.5 5" /></>,
+    board: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18M15 3v18M5.5 7h1M11.5 9h1M17.5 6h1" /></>,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18M7 14h3M14 14h3M7 17h3" /></>,
   };
+  return <svg aria-hidden="true" className="featureIcon" viewBox="0 0 24 24">{paths[type]}</svg>;
+}
+
+export default function HomePage() {
   return <main className="sparkLanding">
+    <a className="skipLink" href="#main-content">Skip to content</a>
     <header className="sparkHeader">
-      <Link className="sparkBrand" href="/"><SparkMark /><span>Spark</span></Link>
-      <nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#teams">For teams</a><Link className="sparkNavButton" href="/workspace">Open workspace ↗</Link></nav>
+      <Link className="sparkBrand" href="/" aria-label="Spark home"><SparkMark /><span>Spark</span></Link>
+      <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#workflow">Workflow</a><a href="#community">Community</a></nav>
+      <div className="headerActions"><Link href="/workspace">Sign in</Link><Link className="sparkNavButton" href="/workspace">Start free <ArrowIcon /></Link></div>
     </header>
 
-    <section className="sparkHero" onPointerMove={trackParticles} onPointerLeave={resetParticles}>
-      <div className="particleField" aria-hidden="true">{particles.map(([x, y], index) => <i key={`${x}-${y}`} ref={(element) => { particleRefs.current[index] = element; }} style={{ left: `${x}%`, top: `${y}%` }} />)}</div>
-      <div className="sparkHeroCopy"><p className="sparkKicker"><span />Built for teams in motion</p><h1>Make the work<br /><span className="heroAccent">feel lighter.</span></h1><p className="sparkLead">Spark brings your startup community, work board, and next decision into one calm, focused place.</p><div className="sparkActions"><Link className="sparkPrimary" href="/workspace">See your workspace <span>→</span></Link><a className="sparkSecondary" href="#teams">Take a quick tour <span>↓</span></a></div></div>
-      <aside className="sparkPreview" aria-label="Workspace preview"><div className="previewTop"><span className="previewLogo"><SparkMark /></span><div><strong>Northstar</strong><small>Product launch</small></div><span className="previewMore">•••</span></div><div className="previewMeta"><span>This week</span><strong>06 tasks in motion</strong><b>58%</b></div><div className="previewProgress"><i /></div><div className="previewColumns"><section><header>To do <b>2</b></header><article><span className="previewTag orange">Growth</span><strong>Share demo with HN Founders</strong><footer><i>ML</i><small>Fri</small></footer></article><article><span className="previewTag blue">Product</span><strong>Outline onboarding emails</strong><footer><i>DK</i><small>Next week</small></footer></article></section><section><header>In progress <b>2</b></header><article><span className="previewTag green">Research</span><strong>Refine investor update</strong><footer><i>ML</i><small>Today</small></footer></article><article className="faded"><strong>Set up customer calls</strong></article></section></div></aside>
+    <section className="sparkHero" id="main-content">
+      <HeroParticles />
+      <div className="heroGlow" aria-hidden="true" />
+      <div className="sparkHeroCopy">
+        <p className="sparkKicker"><span />Built for startup teams</p>
+        <h1>Turn scattered work into <span>forward motion.</span></h1>
+        <p className="sparkLead">Spark brings your startup community, member work, and shared schedule into one focused workspace, so every conversation has a clear next step.</p>
+        <div className="sparkActions"><Link className="sparkPrimary" href="/workspace">Open your workspace <ArrowIcon /></Link><a className="sparkSecondary" href="#product">See how it works</a></div>
+        <div className="heroProof" aria-label="Product highlights"><span><b>01</b> One shared view</span><span><b>02</b> Clear ownership</span><span><b>03</b> Less status chasing</span></div>
+      </div>
+
+      <aside className="sparkPreview" aria-label="Spark workspace preview">
+        <div className="previewRail"><span className="previewRailLogo"><SparkMark /></span><span className="railActive" /><span /><span /><span /><i>ML</i></div>
+        <div className="previewBody">
+          <div className="previewTop"><div><small>Northstar / Product</small><strong>Launch workspace</strong></div><button type="button" aria-label="More workspace options">•••</button></div>
+          <div className="previewStats"><div><span>Weekly progress</span><strong>68%</strong></div><div className="previewProgress"><i /></div></div>
+          <div className="previewColumns">
+            <section><header><span>To do</span><b>3</b></header><article><span className="previewTag blue">Product</span><strong>Finalize onboarding flow</strong><footer><i>DK</i><small>Today</small></footer></article><article><span className="previewTag orange">Growth</span><strong>Share launch update</strong><footer><i>ML</i><small>Fri</small></footer></article></section>
+            <section><header><span>In progress</span><b>2</b></header><article><span className="previewTag green">Research</span><strong>Founder interviews</strong><footer><i>HN</i><small>2 days</small></footer></article><article className="previewNote"><small>Next community session</small><strong>Product Circle · 14:00</strong></article></section>
+          </div>
+        </div>
+      </aside>
     </section>
 
-    <section className="sparkStrip" id="how-it-works"><p><span className="stripBolt">↯</span> One place for the people and the work that matters</p><div><span>01</span><strong>Find your circle</strong><span>02</span><strong>Plan the work</strong><span>03</span><strong>Keep momentum</strong></div></section>
+    <section className="sparkSignal" aria-label="Spark capabilities"><p>One calm operating system for</p><div><span>Startup communities</span><span>Product teams</span><span>Founder networks</span><span>Accelerators</span></div></section>
 
-    <section className="sparkTeams" id="teams"><p className="sparkKicker"><span />The everyday operating system</p><div className="teamsHeading"><h2>Clear enough for the team.<br />Quiet enough to think.</h2><p>Projects, schedules and community signals live together, so work does not disappear between tools.</p></div><div className="sparkFeatureGrid"><article><span className="featureIcon">▦</span><h3>Work that stays visible</h3><p>A practical board for what needs attention today, this week, and later.</p><Link href="/workspace">Explore the board →</Link></article><article><span className="featureIcon">◷</span><h3>Time with a purpose</h3><p>See customer calls, member sessions, and team moments in one schedule.</p><Link href="/schedule">Open schedule →</Link></article><article><span className="featureIcon">✦</span><h3>Signal, not noise</h3><p>Keep important decisions close without a stream of busywork.</p><Link href="/notifications">View notifications →</Link></article></div></section>
+    <section className="sparkProduct" id="product">
+      <div className="sectionIntro"><p className="sparkKicker"><span />Everything in context</p><h2>The people, the plan, and the next move.</h2><p>Replace fragmented updates with one place for community activity, member work, and the people who can help.</p></div>
+      <div className="sparkFeatureGrid">
+        <article className="featureMain" id="community"><div className="featureCopy"><FeatureIcon type="people" /><p className="featureIndex">01 / Community</p><h3>Connect the people who can unblock the work.</h3><p>Discover startup communities by topic, location, or stage, then turn member conversations into owners, milestones, and community sessions.</p></div><div className="networkVisual" aria-hidden="true"><p>Founder network</p><span className="memberCard memberA"><b>ML</b><span>Mai Linh<small>Founder · Fintech</small></span></span><span className="memberCard memberB"><b>DK</b><span>Diep Khanh<small>Product · SaaS</small></span></span><span className="memberCard memberC"><b>HN</b><span>Hai Nguyen<small>Growth · Climate</small></span></span><i /><i /><i /></div></article>
+        <article><FeatureIcon type="board" /><p className="featureIndex">02 / Projects</p><h3>Keep momentum visible.</h3><p>A practical Jira-like board without the ceremony. Priorities, ownership, and progress stay easy to read.</p><Link href="/workspace">Explore boards <ArrowIcon /></Link></article>
+        <article><FeatureIcon type="calendar" /><p className="featureIndex">03 / Schedule</p><h3>Make time match the work.</h3><p>Coordinate meetings, community sessions, and delivery dates from the same operating view.</p><Link href="/schedule">View schedule <ArrowIcon /></Link></article>
+      </div>
+    </section>
 
-    <footer className="sparkFooter"><Link className="sparkBrand" href="/"><SparkMark /><span>Spark</span></Link><p>Startup work, with more signal.</p><Link href="/workspace">Enter workspace ↗</Link></footer>
+    <section className="workflowSection" id="workflow">
+      <div className="workflowCopy"><p className="sparkKicker"><span />A lighter workflow</p><h2>From signal to done, without losing context.</h2><p>Every step stays connected to the people and decisions behind it.</p></div>
+      <ol><li><span>01</span><div><h3>Bring your circle together</h3><p>Create a focused space for a startup, cohort, or working group.</p></div></li><li><span>02</span><div><h3>Shape the work</h3><p>Turn conversations into owned tasks, milestones, and scheduled moments.</p></div></li><li><span>03</span><div><h3>Keep the signal clear</h3><p>Receive useful updates without another noisy stream demanding attention.</p></div></li></ol>
+    </section>
+
+    <section className="sparkCta"><div><p className="sparkKicker"><span />Ready when you are</p><h2>Give your team one clear place to move forward.</h2></div><Link className="sparkPrimary" href="/workspace">Start with Spark <ArrowIcon /></Link></section>
+    <footer className="sparkFooter"><Link className="sparkBrand" href="/"><SparkMark /><span>Spark</span></Link><p>Startup work, with more signal.</p><div><a href="#product">Product</a><a href="#community">Community</a><Link href="/workspace">Workspace</Link></div></footer>
   </main>;
 }
