@@ -40,13 +40,13 @@ export function HeroParticles() {
         pendingPointer = false;
       }
 
+      context.shadowBlur = 6;
+      context.shadowColor = "rgba(16, 185, 129, .75)";
       for (const dot of dots) {
         dot.x += (dot.targetX - dot.x) * .2;
         dot.y += (dot.targetY - dot.y) * .2;
         moving ||= Math.abs(dot.targetX - dot.x) > .2 || Math.abs(dot.targetY - dot.y) > .2;
         context.beginPath();
-        context.shadowBlur = 6;
-        context.shadowColor = "rgba(16, 185, 129, .75)";
         context.fillStyle = "rgba(5, 150, 105, .88)";
         context.arc(dot.x, dot.y, dot.size, 0, Math.PI * 2);
         context.fill();
