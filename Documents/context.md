@@ -28,7 +28,7 @@ The implemented baseline provides one health endpoint, startup configuration and
 | Tests | Vitest and focused integration tests | Fast feedback with real dependency coverage where it matters. |
 | CI | GitHub Actions (planned) | A reproducible quality gate when configured and verified. |
 
-Use Node.js 24 LTS and the pnpm version pinned by the repository. Prefer a modular monolith until measured scale or team ownership justifies another deployable service. Do not add Kafka, Kubernetes, Elasticsearch, a service mesh, or a graph database for the MVP.
+Use Node.js 26 and the pnpm version pinned by the repository. Prefer a modular monolith until measured scale or team ownership justifies another deployable service. Do not add Kafka, Kubernetes, Elasticsearch, a service mesh, or a graph database for the MVP.
 
 ## Architectural rules
 

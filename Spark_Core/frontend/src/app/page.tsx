@@ -24,7 +24,7 @@ export default function HomePage() {
     <a className="skipLink" href="#main-content">Skip to content</a>
     <header className="sparkHeader">
       <Link className="sparkBrand" href="/" aria-label="Spark home"><SparkMark /><span>Spark</span></Link>
-      <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#workflow">Workflow</a><a href="#community">Community</a></nav>
+      <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#workflow">Workflow</a><Link href="/communities">Community</Link></nav>
       <div className="headerActions"><Link href="/workspace">Sign in</Link><Link className="sparkNavButton" href="/workspace">Start free <ArrowIcon /></Link></div>
     </header>
 
@@ -52,6 +52,7 @@ export default function HomePage() {
       </aside>
     </section>
 
+    <section className="sparkWordmarkReveal" aria-label="Spark"><div className="sparkWordmarkLockup"><SparkMark /><span aria-hidden="true">PARK</span></div></section>
     <section className="sparkSignal" aria-label="Spark capabilities"><p>One calm operating system for</p><div><span>Startup communities</span><span>Product teams</span><span>Founder networks</span><span>Accelerators</span></div></section>
 
     <section className="sparkProduct" id="product">
