@@ -14,3 +14,4 @@ try {
   console.error(`Local migration failed (${code}): ${msg}`);
   process.exitCode = 1;
 } finally { await client.end(); }
+

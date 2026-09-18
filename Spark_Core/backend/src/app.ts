@@ -8,6 +8,7 @@ import type { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 
 import type { AppConfig } from "./config.js";
+import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoute } from "./routes/health.js";
 
@@ -107,6 +108,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerHealthRoute(app);
   if (options.pool) {
     registerAuthRoutes(app, { pool: options.pool });
+    registerAdminRoutes(app, { pool: options.pool });
   }
 
   app.setNotFoundHandler(async (request, reply) =>
