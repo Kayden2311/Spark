@@ -31,8 +31,20 @@ export async function applyMigrations(client: Client, folder: string, namespace 
     const existing = await client.query("SELECT to_regclass($1) AS journal", [`${journal}.__drizzle_migrations`]);
     if (existing.rows[0].journal) {
       const applied = await client.query<{ hash: string; created_at: string }>(`SELECT hash,created_at FROM "${journal}".__drizzle_migrations ORDER BY created_at,id`);
-      if (applied.rows.length > migrations.length || applied.rows.some((row, i) => row.hash !== migrations[i]?.hash || Number(row.created_at) !== migrations[i]?.folderMillis)) {
-        throw new Error("Migration history differs from committed files; restore the reviewed migration files");
+      if (applied.rows.length > migrations.length) {
+        throw new Error(`Database has ${applied.rows.length} migrations applied, but only ${migrations.length} migration files exist.`);
+      }
+      for (let i = 0; i < applied.rows.length; i++) {
+        const row = applied.rows[i];
+        const file = migrations[i];
+        if (!file) {
+          throw new Error(`Missing migration file for applied entry index ${i}`);
+        }
+        if (row.hash !== file.hash || Number(row.created_at) !== file.folderMillis) {
+          throw new Error(
+            `Migration history mismatch at index ${i} (${file.name}):\n  DB hash:   ${row.hash} (time: ${row.created_at})\n  File hash: ${file.hash} (time: ${file.folderMillis})`
+          );
+        }
       }
     } else {
       const occupied = await client.query("SELECT 1 FROM pg_namespace WHERE nspname=$1", [namespace]);
