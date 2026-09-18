@@ -220,7 +220,7 @@ export default function AdminPage() {
                         href={`/communities/${c.slug}`}
                         style={{ color: "#38bdf8", textDecoration: "none", fontSize: "0.8rem", fontWeight: 600 }}
                       >
-                        Inspect Circle →
+                        Inspect Circle
                       </Link>
                     </td>
                   </tr>
@@ -328,7 +328,7 @@ export default function AdminPage() {
                         type="button"
                         style={{ padding: "0.25rem 0.6rem", fontSize: "0.75rem", borderRadius: "0.35rem", background: "rgba(56, 189, 248, 0.2)", border: "1px solid rgba(56, 189, 248, 0.4)", color: "#38bdf8", cursor: "pointer" }}
                       >
-                        Review Creative →
+                        Review Creative
                       </button>
                     </td>
                   </tr>

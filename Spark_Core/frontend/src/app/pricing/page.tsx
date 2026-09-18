@@ -364,7 +364,7 @@ export default function PricingPage() {
                 href={plan.ctaHref}
                 className={`planActionBtn ${plan.isPopular ? "primary" : "secondary"}`}
               >
-                {plan.ctaText} →
+                {plan.ctaText}
               </Link>
             </article>
           );
@@ -423,16 +423,39 @@ export default function PricingPage() {
         </div>
       </section>
 
-      {/* Bottom Conversion Section */}
-      <section className="pricingBottomCTA">
-        <h2>Ready to bring clarity to your startup workflow?</h2>
-        <p>
-          Join hundreds of founders and startup circles who use Spark every day to organize work,
-          schedule releases, and build together.
-        </p>
-        <Link className="sparkPrimary" href="/signup?redirect=/workspace">
-          Start your free workspace <PointerClickIcon />
-        </Link>
+      {/* High-Impact Bottom Conversion Section */}
+      <section className="sparkCtaSection" aria-labelledby="pricing-cta-heading">
+        <div className="ctaBackgroundGlow" aria-hidden="true" />
+        <div className="sparkCtaCard">
+          <div className="ctaRadarField" aria-hidden="true">
+            <span className="ctaRadarRing ctaRadarRing1" />
+            <span className="ctaRadarRing ctaRadarRing2" />
+          </div>
+          <div className="sparkCtaContent">
+            <div className="sparkKicker ctaKicker">
+              <span className="ctaPulseDot" />
+              Get started today
+            </div>
+            <h2 id="pricing-cta-heading">Ready to bring clarity to your startup workflow?</h2>
+            <p className="ctaDescription">
+              Join hundreds of founders and startup circles who use Spark every day to organize work,
+              schedule releases, and build together.
+            </p>
+            <div className="ctaActions">
+              <Link className="ctaPrimaryBtn" href={isAuthenticated ? "/workspace" : "/signup?redirect=/workspace"}>
+                Start your free workspace <PointerClickIcon />
+              </Link>
+              <Link className="ctaSecondaryBtn" href="/communities">
+                Explore communities
+              </Link>
+            </div>
+            <div className="ctaTrustRow">
+              <span>✓ Free 14-day trial on paid tiers</span>
+              <span>✓ No credit card required for Starter</span>
+              <span>✓ Instant workspace setup</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* Fully Styled Spark Footer */}

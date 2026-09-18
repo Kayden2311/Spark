@@ -242,7 +242,7 @@ function LoginForm() {
             disabled={isSubmitting || authLoading}
             className="authSubmitBtn"
           >
-            {isSubmitting ? "Authenticating..." : "Sign in →"}
+            {isSubmitting ? "Authenticating..." : "Sign in"}
           </button>
         </form>
 

@@ -259,7 +259,7 @@ function SignupForm() {
             disabled={isSubmitting || authLoading}
             className="authSubmitBtn"
           >
-            {isSubmitting ? "Creating account..." : "Create account →"}
+            {isSubmitting ? "Creating account..." : "Create account"}
           </button>
         </form>
 
