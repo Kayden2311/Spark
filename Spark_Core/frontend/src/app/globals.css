@@ -1316,7 +1316,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   padding: clamp(4rem, 8vw, 7rem) 0 clamp(5rem, 9vw, 8rem);
   overflow: hidden;
   isolation: isolate;
-  background: #ffffff;
+  background: transparent;
 }
 
 .ctaBackgroundGlow {
