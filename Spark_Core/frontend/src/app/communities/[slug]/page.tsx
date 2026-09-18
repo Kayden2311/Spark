@@ -11,17 +11,7 @@ function SparkMark() {
   );
 }
 
-function ArrowRightIcon() {
-  return (
-    <svg className="btnInlineIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-      <path
-        fillRule="evenodd"
-        d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
-        clipRule="evenodd"
-      />
-    </svg>
-  );
-}
+
 
 function CheckCircleIcon() {
   return (
@@ -124,7 +114,7 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
         <div className="headerActions">
           <Link href="/login">Sign in</Link>
           <Link className="sparkNavButton" href={`/signup?redirect=/communities/${community.slug}`}>
-            Join Circle <ArrowRightIcon />
+            Join Circle
           </Link>
         </div>
       </header>
@@ -176,7 +166,7 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
                 className="circlePrimaryJoinBtn"
                 href={`/signup?redirect=/communities/${community.slug}`}
               >
-                Join this Circle <ArrowRightIcon />
+                Join this Circle
               </Link>
               <div className="circleActionSubtext">
                 <span className="circleLiveDot" aria-hidden="true" />
@@ -381,7 +371,7 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
               className="circleSidebarCtaBtn"
               href={`/signup?redirect=/communities/${community.slug}`}
             >
-              Join this Circle <ArrowRightIcon />
+              Join this Circle
             </Link>
             <p className="sidebarCtaNotice">Instant access upon sign up · No credit card required</p>
           </div>
@@ -486,7 +476,7 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
                 className="ctaPrimaryBtn"
                 href={`/signup?redirect=/communities/${community.slug}`}
               >
-                Join {community.name} <ArrowRightIcon />
+                Join {community.name}
               </Link>
               <Link className="ctaSecondaryBtn" href="/communities">
                 Explore all circles

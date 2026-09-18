@@ -16,23 +16,6 @@ function SparkMark() {
   return <svg aria-hidden="true" className="sparkMark" viewBox="0 0 48 48"><path className="sparkBolt" d="M27 2 8 27h13l-2 19 21-27H27z" /></svg>;
 }
 
-function PointerClickIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M4 3l7.07 16.97 2.51-7.39 7.39-2.51L4 3z" />
-      <path d="M13 13l6 6" />
-    </svg>
-  );
-}
-
-function ComputerIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <rect x="2" y="3" width="20" height="14" rx="2" />
-      <path d="M8 21h8M12 17v4" />
-    </svg>
-  );
-}
 
 function PlayVideoIcon() {
   return (
@@ -119,11 +102,11 @@ export default function HomePage() {
       <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#pathways">Pathways</a><a href="#workflow">Workflow</a><Link href="/pricing">Pricing</Link><Link href="/communities">Community</Link></nav>
       <div className="headerActions">
         {isAuthenticated ? (
-          <Link className="sparkNavButton" href="/workspace">Workspace <PointerClickIcon /></Link>
+          <Link className="sparkNavButton" href="/workspace">Workspace</Link>
         ) : (
           <>
             <Link href="/login">Sign in</Link>
-            <Link className="sparkNavButton" href="/signup?redirect=/workspace">Start free <PointerClickIcon /></Link>
+            <Link className="sparkNavButton" href="/signup?redirect=/workspace">Start free</Link>
           </>
         )}
       </div>
@@ -138,7 +121,7 @@ export default function HomePage() {
           <HeroTypingHeadline />
           <p className="sparkLead">Spark brings your startup community, member work, and shared schedule into one focused workspace, so every conversation has a clear next step.</p>
           <div className="sparkActions">
-            <Link className="sparkPrimary" href={workspaceTarget}>Open your workspace <ComputerIcon /></Link>
+            <Link className="sparkPrimary" href={workspaceTarget}>Open your workspace</Link>
             <a className="sparkSecondary" href="#product"><PlayVideoIcon /> See how it works</a>
           </div>
           <div className="heroProof" aria-label="Product highlights"><span><b>01</b> One shared view</span><span><b>02</b> Clear ownership</span><span><b>03</b> Less status chasing</span></div>
@@ -215,7 +198,7 @@ export default function HomePage() {
           </p>
           <div className="ctaActions">
             <Link className="ctaPrimaryBtn" href={workspaceTarget}>
-              Start with Spark <ComputerIcon />
+              Start with Spark
             </Link>
             <Link className="ctaSecondaryBtn" href="/communities">
               Explore communities

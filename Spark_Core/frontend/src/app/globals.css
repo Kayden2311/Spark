@@ -154,15 +154,15 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .sparkLead { max-width: 35rem; color: var(--landing-muted); font-size: 1.08rem; line-height: 1.7; }
 .sparkActions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 2rem; }
 .sparkPrimary, .sparkSecondary { min-height: 3rem; padding: .78rem 1.25rem; font-size: .9rem; font-weight: 750; border-radius: .65rem; }
-.sparkSecondary { display: inline-flex; align-items: center; justify-content: center; gap: .6rem; border: 1.5px solid #cbd7e8; color: var(--landing-ink); background: rgba(255, 255, 255, 0.96); box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06); backdrop-filter: blur(8px); transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.sparkSecondary { display: inline-flex; align-items: center; justify-content: center; gap: .6rem; border: 1.5px solid #cbd7e8; color: var(--landing-ink); background: #ffffff; box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06); transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease; }
 .sparkSecondary svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
 .sparkSecondary:hover { border-color: var(--landing-blue); color: var(--landing-blue); background: #ffffff; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.14); transform: translateY(-2px); }
 .heroProof { display: flex; flex-wrap: wrap; gap: 1.25rem; margin-top: 3rem; color: var(--landing-muted); font-size: .72rem; font-weight: 600; }
 .heroProof span { display: flex; align-items: center; gap: .4rem; }
 .heroProof b { color: var(--landing-blue); font-variant-numeric: tabular-nums; }
 
-.sparkPreview { position: relative; z-index: 1; display: grid; width: min(100%, 34rem); min-width: 0; justify-self: end; grid-template-columns: 3.25rem 1fr; overflow: hidden; border: 1px solid rgba(189, 205, 226, .88); border-radius: 1.2rem; background: rgba(255, 255, 255, .88); box-shadow: 0 32px 80px rgba(42, 70, 119, .18); backdrop-filter: blur(16px); transform: rotate(1.5deg); }
-.previewRail { display: flex; min-height: 25rem; flex-direction: column; align-items: center; gap: 1.1rem; padding: .85rem .6rem; border-right: 1px solid #e6edf6; background: rgba(245, 248, 253, .85); }
+.sparkPreview { position: relative; z-index: 1; display: grid; width: min(100%, 34rem); min-width: 0; justify-self: end; grid-template-columns: 3.25rem 1fr; overflow: hidden; border: 1px solid #cbd5e1; border-radius: 1.2rem; background: #ffffff; box-shadow: 0 32px 80px rgba(42, 70, 119, .14); transform: rotate(1.5deg); }
+.previewRail { display: flex; min-height: 25rem; flex-direction: column; align-items: center; gap: 1.1rem; padding: .85rem .6rem; border-right: 1px solid #e2e8f0; background: #f8fafc; }
 .previewRail > span:not(.previewRailLogo) { width: 1.25rem; height: 1.25rem; border-radius: .35rem; border: 1px solid #cbd7e8; }
 .previewRail > span.railActive { border-color: var(--landing-blue); background: #dce8ff; box-shadow: inset 0 0 0 4px var(--landing-blue); }
 .previewRailLogo { display: grid; width: 2rem; height: 2rem; place-items: center; margin-bottom: .3rem; border-radius: .55rem; background: #e6efff; }
@@ -3803,9 +3803,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 /* Breadcrumb Navigation */
 .circleBreadcrumbBar {
   width: 100%;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(12px);
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
   position: relative;
   z-index: 5;
 }
@@ -3863,7 +3862,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 .circleHeroCard {
   background: #ffffff;
-  border: 1px solid rgba(226, 232, 240, 0.9);
+  border: 1px solid #cbd5e1;
   border-radius: 1.5rem;
   box-shadow: 0 10px 35px -10px rgba(15, 23, 42, 0.07);
   overflow: hidden;
@@ -3875,8 +3874,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   grid-template-columns: auto 1fr auto;
   gap: 2rem;
   align-items: center;
-  border-bottom: 1px solid #f1f5f9;
-  background: linear-gradient(180deg, #ffffff 0%, #fafcff 100%);
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
 }
 
 .circleAvatarWrap {
@@ -4105,7 +4104,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 /* Circle Content Card */
 .circleCard {
   background: #ffffff;
-  border: 1px solid rgba(226, 232, 240, 0.9);
+  border: 1px solid #e2e8f0;
   border-radius: 1.25rem;
   padding: clamp(1.75rem, 2.5vw, 2.25rem);
   box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
@@ -4179,10 +4178,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
   display: flex;
   align-items: flex-start;
   gap: 0.85rem;
-  padding: 1rem 1.25rem;
-  background: #f8fafc;
-  border: 1px solid #f1f5f9;
+  padding: 1.1rem 1.25rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 0.85rem;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.02);
 }
 
 .normCheck {
@@ -4225,16 +4225,17 @@ button, a { -webkit-tap-highlight-color: transparent; }
   gap: 1rem;
   align-items: center;
   padding: 1.1rem 1.25rem;
-  background: #f8fafc;
-  border: 1px solid #f1f5f9;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 0.85rem;
   transition: all 0.15s ease;
 }
 
 .circleDiscussionRow:hover {
   background: #ffffff;
-  border-color: #cbd5e1;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+  border-color: #93c5fd;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.06);
+  transform: translateY(-1px);
 }
 
 .discussionAvatar {
@@ -4311,16 +4312,17 @@ button, a { -webkit-tap-highlight-color: transparent; }
   gap: 1.25rem;
   align-items: center;
   padding: 1.1rem 1.25rem;
-  background: #f8fafc;
-  border: 1px solid #f1f5f9;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 0.85rem;
   border-left: 4px solid var(--landing-blue, #2563eb);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.02);
 }
 
 .eventDateBox {
   width: 3.5rem;
   height: 3.5rem;
-  background: #ffffff;
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 0.65rem;
   display: flex;
@@ -4328,13 +4330,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
 }
 
 .eventDateMonth {
   font-size: 0.65rem;
   font-weight: 800;
-  color: #ef4444;
+  color: #2563eb;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -4372,16 +4373,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
 /* Sidebar Components */
 .circleSidebarCard {
   background: #ffffff;
-  border: 1px solid rgba(226, 232, 240, 0.9);
+  border: 1px solid #e2e8f0;
   border-radius: 1.25rem;
   padding: 1.5rem;
   box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
 }
 
 .circleJoinStickyCard {
-  border-color: #bfdbfe;
-  background: linear-gradient(180deg, #ffffff 0%, #f0f7ff 100%);
-  box-shadow: 0 10px 30px -5px rgba(37, 99, 235, 0.12);
+  border: 1.5px solid #93c5fd;
+  background: #ffffff;
+  box-shadow: 0 8px 24px -4px rgba(37, 99, 235, 0.1);
 }
 
 .sidebarCardHeader {
@@ -4562,14 +4563,14 @@ button, a { -webkit-tap-highlight-color: transparent; }
   padding: 0.65rem 0.75rem;
   border-radius: 0.65rem;
   text-decoration: none;
-  background: #f8fafc;
-  border: 1px solid #f1f5f9;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   transition: all 0.15s ease;
 }
 
 .relatedCircleItem:hover {
   background: #ffffff;
-  border-color: #cbd5e1;
+  border-color: #93c5fd;
   transform: translateX(2px);
 }
 

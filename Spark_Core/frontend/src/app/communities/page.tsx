@@ -15,14 +15,7 @@ function SparkMark() {
   );
 }
 
-function PointerClickIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M4 3l7.07 16.97 2.51-7.39 7.39-2.51L4 3z" />
-      <path d="M13 13l6 6" />
-    </svg>
-  );
-}
+
 
 function SearchIcon() {
   return (
@@ -113,13 +106,13 @@ export default function CommunitiesPage() {
         <div className="headerActions">
           {isAuthenticated ? (
             <Link className="sparkNavButton" href="/workspace">
-              Workspace <PointerClickIcon />
+              Workspace
             </Link>
           ) : (
             <>
               <Link href="/login">Sign in</Link>
               <Link className="sparkNavButton" href="/signup?redirect=/workspace">
-                Start free <PointerClickIcon />
+                Start free
               </Link>
             </>
           )}
@@ -301,7 +294,7 @@ export default function CommunitiesPage() {
             </p>
             <div className="ctaActions">
               <Link className="ctaPrimaryBtn" href={isAuthenticated ? "/workspace" : "/signup?redirect=/workspace"}>
-                Create a circle <PointerClickIcon />
+                Create a circle
               </Link>
               <Link className="ctaSecondaryBtn" href="/pricing">
                 View pricing plans
