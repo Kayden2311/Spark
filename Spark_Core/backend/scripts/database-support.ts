@@ -4,7 +4,13 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import type { Client } from "pg";
 
 export function localConnection(name: string): string {
-  const raw = process.env[name];
+  const raw =
+    process.env[name] ||
+    (name === "MIGRATION_DATABASE_URL"
+      ? "postgresql://spark_migrator:spark_migrate_local_only@127.0.0.1:5432/spark"
+      : name === "DATABASE_URL"
+        ? "postgresql://spark_app:spark_app_local_only@127.0.0.1:5432/spark"
+        : undefined);
   if (!raw) throw new Error(`${name} is required`);
   const url = new URL(raw);
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
