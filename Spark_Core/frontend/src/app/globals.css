@@ -2940,4 +2940,352 @@ button, a { -webkit-tap-highlight-color: transparent; }
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
+/* ==========================================================================
+   PRICING PAGE UI (THEME MATCHED & RESPONSIVE)
+   ========================================================================== */
+.pricingPageRoot {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  background: var(--landing-bg, #f8fafc);
+  color: var(--landing-ink, #17233d);
+  overflow-x: clip;
+  isolation: isolate;
+}
+
+.pricingHero {
+  position: relative;
+  width: 100%;
+  padding: 4.5rem 1.5rem 3rem;
+  text-align: center;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.pricingHeroInner {
+  position: relative;
+  z-index: 1;
+  max-width: 48rem;
+  margin: 0 auto;
+}
+
+.pricingHero h1 {
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 750;
+  line-height: 1.05;
+  letter-spacing: -0.055em;
+  color: #0b2457;
+  margin: 1rem 0 1.25rem;
+  text-wrap: balance;
+}
+
+.pricingHero p.pricingLead {
+  font-size: 1.08rem;
+  color: #53627a;
+  line-height: 1.65;
+  max-width: 40rem;
+  margin: 0 auto 2.25rem;
+}
+
+/* Billing Toggle */
+.billingToggleWrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem;
+  background: #edf2f7;
+  border: 1px solid #dce5f1;
+  border-radius: 9999px;
+  margin-bottom: 2rem;
+}
+
+.billingToggleBtn {
+  position: relative;
+  padding: 0.55rem 1.25rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #53627a;
+  background: transparent;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.billingToggleBtn.active {
+  color: #0b2457;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.discountPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #15803d;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+  margin-left: 0.35rem;
+}
+
+/* Pricing Grid */
+.pricingCardsContainer {
+  position: relative;
+  z-index: 1;
+  width: min(100% - 3rem, 76rem);
+  margin: 0 auto 5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
+  gap: 1.75rem;
+  align-items: stretch;
+}
+
+.pricingCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 2.5rem 2.25rem;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1.5px solid #dce5f1;
+  border-radius: 1.35rem;
+  box-shadow: 0 20px 45px -12px rgba(15, 36, 87, 0.07);
+  backdrop-filter: blur(16px);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pricingCard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 28px 56px -12px rgba(15, 36, 87, 0.12);
+  border-color: #cbd7e8;
+}
+
+.pricingCard.popular {
+  border: 2px solid #2563eb;
+  box-shadow: 0 28px 64px -12px rgba(37, 99, 235, 0.18), 0 0 0 1px rgba(37, 99, 235, 0.2);
+}
+
+.popularBadge {
+  position: absolute;
+  top: -0.85rem;
+  right: 2rem;
+  padding: 0.3rem 0.85rem;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 9999px;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+.planName {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #0b2457;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.4rem;
+}
+
+.planDescription {
+  font-size: 0.86rem;
+  color: #53627a;
+  line-height: 1.5;
+  min-height: 2.6rem;
+  margin-bottom: 1.75rem;
+}
+
+.priceWrapper {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+}
+
+.priceCurrency {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0b2457;
+}
+
+.priceAmount {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #0b2457;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.pricePeriod {
+  font-size: 0.85rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.priceSubnote {
+  font-size: 0.78rem;
+  color: #8a99ad;
+  margin-bottom: 1.75rem;
+}
+
+.planDivider {
+  height: 1px;
+  background: #edf2f7;
+  margin-bottom: 1.75rem;
+}
+
+.planFeatureTitle {
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  margin-bottom: 1rem;
+}
+
+.planFeaturesList {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 2rem 0;
+  display: grid;
+  gap: 0.85rem;
+  flex: 1;
+}
+
+.planFeaturesList li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  font-size: 0.88rem;
+  color: #17233d;
+  line-height: 1.45;
+}
+
+.checkIcon {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+  color: #2563eb;
+  margin-top: 0.1rem;
+}
+
+.planActionBtn {
+  display: inline-flex;
+  width: 100%;
+  min-height: 2.9rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.65rem;
+  font-size: 0.9rem;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.planActionBtn.primary {
+  background: #2563eb;
+  color: #ffffff;
+  border: 0;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
+}
+
+.planActionBtn.primary:hover {
+  background: #1d4ed8;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}
+
+.planActionBtn.secondary {
+  background: #ffffff;
+  color: #0b2457;
+  border: 1.5px solid #dce5f1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.planActionBtn.secondary:hover {
+  background: #f8fafc;
+  border-color: #2563eb;
+  color: #2563eb;
+  transform: translateY(-1px);
+}
+
+/* FAQ Section */
+.pricingFAQSection {
+  width: min(100% - 3rem, 54rem);
+  margin: 0 auto 5rem;
+}
+
+.pricingFAQHeader {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.pricingFAQHeader h2 {
+  font-size: 2rem;
+  font-weight: 750;
+  color: #0b2457;
+  letter-spacing: -0.04em;
+  margin-top: 0.5rem;
+}
+
+.faqGrid {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.faqCard {
+  padding: 1.5rem 1.75rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
+}
+
+.faqCard h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0b2457;
+  margin-bottom: 0.5rem;
+}
+
+.faqCard p {
+  font-size: 0.88rem;
+  color: #53627a;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Bottom CTA Banner */
+.pricingBottomCTA {
+  width: min(100% - 3rem, 76rem);
+  margin: 0 auto 5rem;
+  padding: 3.5rem 2.5rem;
+  text-align: center;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(14, 165, 233, 0.04));
+  border: 1.5px solid rgba(56, 189, 248, 0.25);
+  border-radius: 1.5rem;
+}
+
+.pricingBottomCTA h2 {
+  font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+  font-weight: 750;
+  color: #0b2457;
+  letter-spacing: -0.04em;
+  margin-bottom: 0.75rem;
+}
+
+.pricingBottomCTA p {
+  font-size: 1.05rem;
+  color: #53627a;
+  max-width: 32rem;
+  margin: 0 auto 2rem;
+  line-height: 1.6;
+}
+
 

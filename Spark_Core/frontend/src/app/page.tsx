@@ -112,7 +112,7 @@ export default function HomePage() {
     <a className="skipLink" href="#main-content">Skip to content</a>
     <header className="sparkHeader">
       <Link className="sparkBrand" href="/" aria-label="Spark home"><SparkMark /><span>Spark</span></Link>
-      <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#pathways">Pathways</a><a href="#workflow">Workflow</a><Link href="/communities">Community</Link></nav>
+      <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#pathways">Pathways</a><a href="#workflow">Workflow</a><Link href="/pricing">Pricing</Link><Link href="/communities">Community</Link></nav>
       <div className="headerActions">
         {isAuthenticated ? (
           <Link className="sparkNavButton" href="/workspace">Workspace <PointerClickIcon /></Link>
@@ -274,7 +274,7 @@ export default function HomePage() {
             <h4 className="footerColTitle">Trust & Resources</h4>
             <ul className="footerLinksList">
               <li><a href="#workflow">Workflow Guide</a></li>
-              <li><Link href="/billing">Plans & Billing</Link></li>
+              <li><Link href="/pricing">Pricing & Plans</Link></li>
               <li><a href="#main-content">Privacy Policy</a></li>
               <li><a href="#main-content">Terms of Service</a></li>
               <li><a href="#main-content">Security & RLS</a></li>
