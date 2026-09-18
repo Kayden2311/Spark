@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useMemo } from "react";
 import { useAuth } from "../auth-context";
+import { HeroParticles } from "../hero-particles";
 import { SignalParticles } from "../signal-particles";
 import { communities, type Community } from "./mock-data";
 
@@ -127,6 +128,7 @@ export default function CommunitiesPage() {
 
       {/* Hero Section */}
       <section className="communityHeroSection">
+        <HeroParticles />
         <div className="heroGlow" aria-hidden="true" />
         <div className="communityHeroContent">
           <div className="sparkKicker" style={{ justifyContent: "center" }}>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "../auth-context";
+import { HeroParticles } from "../hero-particles";
 import { SignalParticles } from "../signal-particles";
 
 function SparkMark() {
@@ -288,6 +289,7 @@ export default function PricingPage() {
 
       {/* Hero Section */}
       <section className="pricingHero">
+        <HeroParticles />
         <div className="authHeroGlow1" aria-hidden="true" />
         <div className="authHeroGlow2" aria-hidden="true" />
 
