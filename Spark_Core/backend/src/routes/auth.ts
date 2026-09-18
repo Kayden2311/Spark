@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool } from "pg";
 
-import { verifyPassword } from "../infrastructure/database/password.js";
+import { hashPassword, verifyPassword } from "../infrastructure/database/password.js";
 import {
   passwordCredentials,
   platformRoleAssignments,
@@ -63,6 +63,161 @@ function clearSessionCookie(reply: FastifyReply): void {
 
 export function registerAuthRoutes(app: FastifyInstance, options: AuthPluginOptions): void {
   const db = drizzle(options.pool);
+
+  // POST /api/v1/auth/password/sign-up
+  app.post(
+    "/api/v1/auth/password/sign-up",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["displayName", "email", "password"],
+          properties: {
+            displayName: { type: "string", minLength: 1, maxLength: 100 },
+            email: { type: "string", format: "email" },
+            password: { type: "string", minLength: 12 },
+          },
+          additionalProperties: false,
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Body: { displayName: string; email: string; password: string };
+      }>,
+      reply: FastifyReply,
+    ) => {
+      reply.header("Cache-Control", "private, no-store");
+      const displayName = request.body.displayName.trim();
+      const normalizedEmail = request.body.email.trim().toLowerCase();
+      const plainPassword = request.body.password;
+
+      // 1. Check if email already exists
+      const existingEmail = await db
+        .select({ id: userEmails.id })
+        .from(userEmails)
+        .where(eq(userEmails.normalizedEmail, normalizedEmail))
+        .limit(1);
+
+      if (existingEmail.length > 0) {
+        return reply.code(409).type("application/problem+json").send({
+          type: "about:blank",
+          title: "Conflict",
+          status: 409,
+          code: "email_already_exists",
+          detail: "An account with this email address already exists.",
+          instance: request.url,
+          requestId: request.id,
+        });
+      }
+
+      // 2. Hash password with Argon2id
+      const hashedPassword = await hashPassword(plainPassword);
+
+      // 3. Create user record
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          displayName,
+          locale: "en",
+          timezone: "UTC",
+          status: "active",
+        })
+        .returning({
+          id: users.id,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+        });
+
+      if (!newUser) {
+        return reply.code(500).type("application/problem+json").send({
+          type: "about:blank",
+          title: "Internal Server Error",
+          status: 500,
+          code: "user_creation_failed",
+          detail: "Could not create user account.",
+          instance: request.url,
+          requestId: request.id,
+        });
+      }
+
+      // 4. Create primary email and password credentials
+      await Promise.all([
+        db.insert(userEmails).values({
+          userId: newUser.id,
+          email: request.body.email.trim(),
+          normalizedEmail,
+          isPrimary: true,
+          verifiedAt: new Date(),
+        }),
+        db.insert(passwordCredentials).values({
+          userId: newUser.id,
+          passwordHash: hashedPassword,
+        }),
+      ]);
+
+      // 5. Create default workspace and assign ownership
+      const workspaceSlug = `ws-${newUser.id.replace(/-/g, "").slice(0, 10)}`;
+      const [newWorkspace] = await db
+        .insert(workspaces)
+        .values({
+          slug: workspaceSlug,
+          name: `${displayName}'s Space`,
+          status: "active",
+          createdByUserId: newUser.id,
+        })
+        .returning({
+          id: workspaces.id,
+          name: workspaces.name,
+          slug: workspaces.slug,
+        });
+
+      if (newWorkspace) {
+        await db.insert(workspaceMemberships).values({
+          tenantId: newWorkspace.id,
+          userId: newUser.id,
+          role: "owner",
+          status: "active",
+        });
+      }
+
+      // 6. Create session token and set cookie
+      const rawToken = randomBytes(32).toString("hex");
+      const tokenHashBuffer = createHash("sha256").update(rawToken).digest();
+      const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
+
+      await db.insert(sessions).values({
+        userId: newUser.id,
+        tokenHash: tokenHashBuffer,
+        authMethod: "password",
+        expiresAt,
+        lastSeenAt: new Date(),
+      });
+
+      setSessionCookie(reply, rawToken, SESSION_TTL_DAYS * 24 * 60 * 60);
+
+      const userWorkspace = newWorkspace
+        ? {
+            workspaceId: newWorkspace.id,
+            workspaceName: newWorkspace.name,
+            workspaceSlug: newWorkspace.slug,
+            role: "owner",
+          }
+        : null;
+
+      return reply.code(201).send({
+        user: {
+          id: newUser.id,
+          email: normalizedEmail,
+          displayName: newUser.displayName,
+          avatarUrl: newUser.avatarUrl,
+        },
+        workspace: userWorkspace,
+        workspaces: userWorkspace ? [userWorkspace] : [],
+        platformRoles: [],
+      });
+    },
+  );
 
   // POST /api/v1/auth/password/sign-in
   app.post(
