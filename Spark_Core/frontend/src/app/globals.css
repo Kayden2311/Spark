@@ -196,7 +196,16 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .sparkSignal div { display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(1.5rem, 5vw, 4rem); margin-top: 1rem; color: #40516d; font-size: .85rem; font-weight: 700; }
 
 /* Live Signal Flow Section (Edge-to-Edge Particles & Open Architecture) */
-.liveFlowSection { position: relative; width: 100%; margin: 0; padding: clamp(5rem, 9vw, 8rem) 0 clamp(4rem, 7vw, 6rem); overflow: hidden; isolation: isolate; }
+.liveFlowSection {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  padding: clamp(5rem, 9vw, 8rem) 0 clamp(4rem, 7vw, 6rem);
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--landing-bg, #f8fafc);
+  z-index: 1;
+}
 .flowParticleFullBleed { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
 .flowParticleCanvas { width: 100%; height: 100%; display: block; }
 
