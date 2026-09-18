@@ -3800,8 +3800,21 @@ button, a { -webkit-tap-highlight-color: transparent; }
   min-height: 100vh;
 }
 
-/* Breadcrumb Navigation */
-.circleBreadcrumbBar {
+/* ==========================================================================
+   Community Detail (Circle) Redesign Styling
+   ========================================================================== */
+
+.circleDetailRoot {
+  width: 100%;
+  background: var(--landing-bg, #f8fafc);
+  color: var(--landing-ink, #17233d);
+  overflow-x: clip;
+  isolation: isolate;
+  min-height: 100vh;
+}
+
+/* Breadcrumb Sub-Header */
+.circleBreadcrumbHeader {
   width: 100%;
   border-bottom: 1px solid #e2e8f0;
   background: #ffffff;
@@ -3809,13 +3822,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
   z-index: 5;
 }
 
-.circleBreadcrumbInner {
+.circleBreadcrumbContainer {
   width: min(100% - 3rem, 76rem);
   margin: 0 auto;
   padding: 0.85rem 0;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   font-size: 0.84rem;
   color: #64748b;
 }
@@ -3824,9 +3837,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
   color: var(--landing-blue, #2563eb);
   font-weight: 650;
   text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
   transition: transform 0.15s ease, color 0.15s ease;
 }
 
@@ -3835,7 +3845,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   transform: translateX(-2px);
 }
 
-.circleBreadcrumbSeparator {
+.circleBreadcrumbDivider {
   color: #cbd5e1;
 }
 
@@ -3847,57 +3857,53 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .circleBreadcrumbCurrent {
   color: #0f172a;
   font-weight: 650;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* Hero Container & Hero Card */
-.circleHeroContainer {
+/* Main Page Container */
+.circlePageContainer {
   width: min(100% - 3rem, 76rem);
-  margin: 2rem auto 2.5rem;
+  margin: 2.5rem auto 6rem;
   position: relative;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
 }
 
-.circleHeroCard {
+/* Hero Header (Direct & Engaging Identity) */
+.circleHeroHeader {
   background: #ffffff;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #e2e8f0;
   border-radius: 1.5rem;
-  box-shadow: 0 10px 35px -10px rgba(15, 23, 42, 0.07);
-  overflow: hidden;
-}
-
-.circleHeroTop {
   padding: clamp(2rem, 3.5vw, 2.75rem);
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 2rem;
-  align-items: center;
-  border-bottom: 1px solid #e2e8f0;
-  background: #ffffff;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
 }
 
-.circleAvatarWrap {
+.circleHeroIdentityRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.75rem;
+}
+
+.circleMonogramBadge {
   position: relative;
-  width: 5.25rem;
-  height: 5.25rem;
-}
-
-.circleAvatarMonogram {
-  width: 100%;
-  height: 100%;
+  width: 5.5rem;
+  height: 5.5rem;
   border-radius: 1.25rem;
   display: grid;
   place-items: center;
   color: #ffffff;
-  font-size: 1.85rem;
+  font-size: 1.9rem;
   font-weight: 850;
   letter-spacing: -0.02em;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
-.circleVerifiedPill {
+.circleVerifiedMarker {
   position: absolute;
   bottom: -0.25rem;
   right: -0.25rem;
@@ -3909,336 +3915,273 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 .circleVerifiedIcon {
-  width: 1.2rem;
-  height: 1.2rem;
+  width: 1.25rem;
+  height: 1.25rem;
   color: #2563eb;
   fill: currentColor;
 }
 
-.circleHeroMainInfo {
-  min-width: 0;
+.circleHeroTitleBlock {
+  flex: 1;
 }
 
-.circlePillsRow {
+.circleTagBadgesRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.6rem;
-}
-
-.circlePill {
-  display: inline-flex;
   align-items: center;
-  font-size: 0.76rem;
-  font-weight: 650;
-  padding: 0.22rem 0.65rem;
-  border-radius: 9999px;
-  border: 1px solid transparent;
-}
-
-.circlePillFeatured {
-  background: #fef3c7;
-  color: #92400e;
-  border-color: #fde68a;
-}
-
-.circlePillCategory {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-color: #dbeafe;
-}
-
-.circlePillStage {
-  background: #f1f5f9;
-  color: #475569;
-  border-color: #e2e8f0;
-}
-
-.circlePillLocation {
-  background: #f8fafc;
-  color: #64748b;
-  border-color: #e2e8f0;
-}
-
-.circleTitle {
-  font-size: clamp(1.75rem, 3.2vw, 2.35rem);
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  color: #0b2457;
-  margin: 0 0 0.4rem;
-  line-height: 1.15;
-}
-
-.circleSubtitle {
-  font-size: 0.98rem;
-  color: #475569;
-  line-height: 1.55;
-  margin: 0;
-  max-width: 42rem;
-}
-
-/* Primary Hero Join Button & Action Box */
-.circleHeroActionBox {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.65rem;
-}
-
-.circlePrimaryJoinBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  min-height: 2.85rem;
-  padding: 0.75rem 1.75rem;
-  border-radius: 0.75rem;
-  background: var(--landing-blue, #2563eb);
-  color: #ffffff !important;
-  font-size: 0.95rem;
-  font-weight: 700;
-  text-decoration: none;
-  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35);
-  transition: all 0.18s ease;
-  white-space: nowrap;
-}
-
-.circlePrimaryJoinBtn:hover {
-  background: var(--landing-blue-dark, #1d4ed8);
-  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.45);
-  transform: translateY(-2px);
-}
-
-.btnInlineIcon {
-  width: 1.05rem;
-  height: 1.05rem;
-  flex-shrink: 0;
-  fill: currentColor;
-  transition: transform 0.15s ease;
-}
-
-.circlePrimaryJoinBtn:hover .btnInlineIcon,
-.circleSidebarCtaBtn:hover .btnInlineIcon,
-.ctaPrimaryBtn:hover .btnInlineIcon {
-  transform: translateX(3px);
-}
-
-.circleActionSubtext {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.78rem;
-  color: #64748b;
-  font-weight: 550;
-}
-
-.circleLiveDot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
-  display: inline-block;
-}
-
-/* Metrics Ribbon */
-.circleMetricsRibbon {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  background: #f8fafc;
-  padding: 1.25rem 2rem;
-  gap: 1.5rem;
-}
-
-.circleMetricItem {
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
-}
-
-.circleStatIcon {
-  width: 1.4rem;
-  height: 1.4rem;
-  color: #3b82f6;
-  flex-shrink: 0;
-}
-
-.metricVal {
-  display: block;
-  font-size: 0.95rem;
-  font-weight: 750;
-  color: #0b2457;
-  line-height: 1.2;
-}
-
-.metricLabel {
-  display: block;
-  font-size: 0.74rem;
-  color: #64748b;
-  font-weight: 550;
-  margin-top: 0.15rem;
-}
-
-/* Main Body Layout (68% / 32%) */
-.circleBodyContainer {
-  width: min(100% - 3rem, 76rem);
-  margin: 0 auto 5rem;
-  display: grid;
-  grid-template-columns: 1fr 24rem;
-  gap: 2rem;
-  align-items: start;
-}
-
-.circleMainCol {
-  display: flex;
-  flex-direction: column;
-  gap: 1.75rem;
-}
-
-.circleSidebarCol {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-/* Circle Content Card */
-.circleCard {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 1.25rem;
-  padding: clamp(1.75rem, 2.5vw, 2.25rem);
-  box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
-}
-
-.circleCardHeader {
-  margin-bottom: 1rem;
-}
-
-.circleCardHeaderWithAction {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1.25rem;
-}
-
-.circleCard h2 {
-  font-size: 1.35rem;
-  font-weight: 750;
-  letter-spacing: -0.03em;
-  color: #0b2457;
-  margin: 0.4rem 0 0;
-}
-
-.circleBodyParagraph {
-  color: #475569;
-  line-height: 1.65;
-  font-size: 0.95rem;
-  margin: 0 0 1.25rem;
-}
-
-.circleTagsSection {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  padding-top: 1rem;
-  border-top: 1px solid #f1f5f9;
-}
-
-.circleTagsLabel {
-  font-size: 0.8rem;
-  font-weight: 650;
-  color: #64748b;
-}
-
-.circleTagsList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.6rem;
+  margin-bottom: 0.65rem;
 }
 
 .circleTagBadge {
   font-size: 0.76rem;
   font-weight: 650;
-  color: #2563eb;
+  padding: 0.22rem 0.65rem;
+  border-radius: 9999px;
+}
+
+.circleTagFeatured {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.circleTagCategory {
   background: #eff6ff;
+  color: #1d4ed8;
   border: 1px solid #dbeafe;
-  padding: 0.2rem 0.6rem;
-  border-radius: 0.45rem;
 }
 
-/* Norms Grid */
-.circleNormsGrid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
+.circleTagMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  margin-left: 0.25rem;
 }
 
-.circleNormItem {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.85rem;
-  padding: 1.1rem 1.25rem;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.85rem;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.02);
-}
-
-.normCheck {
-  display: flex;
-  margin-top: 0.15rem;
-}
-
-.circleCheckIcon {
-  width: 1.15rem;
-  height: 1.15rem;
-  color: #10b981;
+.metaInlineIcon {
+  width: 0.95rem;
+  height: 0.95rem;
   fill: currentColor;
   flex-shrink: 0;
 }
 
-.circleNormItem h4 {
-  font-size: 0.92rem;
-  font-weight: 700;
+.circleMainTitle {
+  font-size: clamp(2rem, 3.6vw, 2.75rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
   color: #0b2457;
-  margin: 0 0 0.25rem;
+  line-height: 1.15;
+  margin: 0 0 0.65rem;
 }
 
-.circleNormItem p {
-  font-size: 0.84rem;
+.circleMainDescription {
+  font-size: 1.05rem;
+  color: #475569;
+  line-height: 1.6;
+  margin: 0;
+  max-width: 50rem;
+}
+
+/* Social Proof & Join Action Bar */
+.circleHeroActionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.circleMemberStack {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.avatarGroup {
+  display: flex;
+  align-items: center;
+}
+
+.memberAvatarPill {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: #dbeafe;
+  color: #1e40af;
+  border: 2px solid #ffffff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  margin-left: -0.5rem;
+}
+
+.memberAvatarPill:first-child {
+  margin-left: 0;
+}
+
+.memberStackText strong {
+  display: block;
+  font-size: 0.92rem;
+  color: #0b2457;
+}
+
+.memberStackText span {
+  display: block;
+  font-size: 0.78rem;
   color: #64748b;
-  line-height: 1.5;
+}
+
+.circleActionGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.circleCtaBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.7rem 1.65rem;
+  border-radius: 0.75rem;
+  background: var(--landing-blue, #2563eb);
+  color: #ffffff !important;
+  font-size: 0.92rem;
+  font-weight: 750;
+  text-decoration: none;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.32);
+  transition: all 0.18s ease;
+}
+
+.circleCtaBtn:hover {
+  background: var(--landing-blue-dark, #1d4ed8);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.42);
+  transform: translateY(-2px);
+}
+
+/* Topic Pills Row */
+.circleTopicPills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.circleTopicLabel {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #64748b;
+  margin-right: 0.25rem;
+}
+
+.circlePillTag {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: #2563eb;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 0.25rem 0.65rem;
+  border-radius: 0.5rem;
+}
+
+/* 2-Column Content Grid */
+.circleTwoColLayout {
+  display: grid;
+  grid-template-columns: 1fr 22rem;
+  gap: 2rem;
+  align-items: start;
+}
+
+.circleFeedCol {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.circleAsideCol {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Section Card */
+.circleSectionCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 1.25rem;
+  padding: clamp(1.5rem, 2.5vw, 2rem);
+  box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
+}
+
+.circleSectionHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.circleKicker {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--landing-blue, #2563eb);
+  margin-bottom: 0.25rem;
+}
+
+.circleSectionHeading h2 {
+  font-size: 1.3rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: #0b2457;
   margin: 0;
 }
 
-/* Discussions List */
-.circleDiscussionsList {
+.circleThreadCount {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #475569;
+  background: #f1f5f9;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+/* Threads List */
+.circleThreadsList {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
 }
 
-.circleDiscussionRow {
+.circleThreadCard {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 1rem;
   align-items: center;
-  padding: 1.1rem 1.25rem;
+  padding: 1rem 1.25rem;
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 0.85rem;
   transition: all 0.15s ease;
 }
 
-.circleDiscussionRow:hover {
-  background: #ffffff;
+.circleThreadCard:hover {
   border-color: #93c5fd;
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.06);
   transform: translateY(-1px);
 }
 
-.discussionAvatar {
+.threadAvatar {
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 50%;
@@ -4251,7 +4194,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
   flex-shrink: 0;
 }
 
-.discussionTitle {
+.threadContent {
+  min-width: 0;
+}
+
+.threadTitle {
   font-size: 0.92rem;
   font-weight: 700;
   color: #1e293b;
@@ -4259,7 +4206,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   line-height: 1.4;
 }
 
-.discussionMeta {
+.threadMetaRow {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -4267,61 +4214,51 @@ button, a { -webkit-tap-highlight-color: transparent; }
   color: #64748b;
 }
 
-.discussionMeta strong {
+.threadAuthor {
+  font-weight: 650;
   color: #334155;
 }
 
-.discussionRepliesBadge {
+.threadDot {
+  color: #cbd5e1;
+}
+
+.threadRepliesBadge {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.76rem;
+  gap: 0.35rem;
+  font-size: 0.78rem;
   font-weight: 700;
   color: var(--landing-blue, #2563eb);
   background: #eff6ff;
   border: 1px solid #dbeafe;
-  padding: 0.3rem 0.7rem;
+  padding: 0.25rem 0.65rem;
   border-radius: 9999px;
   white-space: nowrap;
 }
 
-.discussionRepliesBadge svg {
-  width: 0.9rem;
-  height: 0.9rem;
-}
-
-.circleCountPill {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #475569;
-  background: #f1f5f9;
-  padding: 0.25rem 0.65rem;
-  border-radius: 9999px;
-}
-
-/* Events Grid */
-.circleEventsGrid {
+/* Events List */
+.circleEventsList {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.85rem;
 }
 
-.circleEventCard {
+.circleEventRow {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 1.25rem;
   align-items: center;
-  padding: 1.1rem 1.25rem;
+  padding: 1rem 1.25rem;
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 0.85rem;
   border-left: 4px solid var(--landing-blue, #2563eb);
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.02);
 }
 
-.eventDateBox {
-  width: 3.5rem;
-  height: 3.5rem;
+.eventCalendarTile {
+  width: 3.25rem;
+  height: 3.25rem;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 0.65rem;
@@ -4332,7 +4269,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   flex-shrink: 0;
 }
 
-.eventDateMonth {
+.eventCalMonth {
   font-size: 0.65rem;
   font-weight: 800;
   color: #2563eb;
@@ -4340,223 +4277,176 @@ button, a { -webkit-tap-highlight-color: transparent; }
   text-transform: uppercase;
 }
 
-.eventDateDay {
+.eventCalDay {
   font-size: 1.15rem;
   font-weight: 850;
   color: #0b2457;
   line-height: 1;
 }
 
-.eventTitle {
+.eventHeading {
   font-size: 0.94rem;
   font-weight: 750;
   color: #0b2457;
   margin: 0 0 0.35rem;
 }
 
-.eventMetaRow {
+.eventDetailsMeta {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.eventMetaChip {
-  font-size: 0.76rem;
+  gap: 0.85rem;
+  font-size: 0.78rem;
   color: #64748b;
   font-weight: 600;
 }
 
-.eventFormatChip {
-  color: #2563eb;
-}
-
-/* Sidebar Components */
-.circleSidebarCard {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 1.25rem;
-  padding: 1.5rem;
-  box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
-}
-
-.circleJoinStickyCard {
-  border: 1.5px solid #93c5fd;
-  background: #ffffff;
-  box-shadow: 0 8px 24px -4px rgba(37, 99, 235, 0.1);
-}
-
-.sidebarCardHeader {
-  display: flex;
+.eventDetailsMeta span {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
+  gap: 0.35rem;
 }
 
-.sidebarCardHeader h3 {
-  font-size: 1.05rem;
+.eventFormatTag {
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.4rem;
+  font-size: 0.72rem;
+}
+
+/* Operating Norms Row */
+.circleNormsRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+}
+
+.normBlock {
+  padding: 1.1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.85rem;
+}
+
+.normBlock h4 {
+  font-size: 0.88rem;
   font-weight: 750;
   color: #0b2457;
+  margin: 0 0 0.35rem;
+}
+
+.normBlock p {
+  font-size: 0.82rem;
+  color: #64748b;
+  line-height: 1.5;
   margin: 0;
 }
 
-.sidebarPriceTag {
-  font-size: 0.78rem;
-  font-weight: 800;
-  color: #166534;
-  background: #dcfce7;
-  border: 1px solid #bbf7d0;
-  padding: 0.2rem 0.55rem;
-  border-radius: 9999px;
+/* Sidebar Panels */
+.circleSidebarPanel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 1.25rem;
+  padding: 1.4rem;
+  box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
 }
 
-.sidebarSubtext {
-  font-size: 0.84rem;
-  color: #475569;
-  line-height: 1.5;
-  margin: 0 0 1.25rem;
-}
-
-.sidebarPerksList {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-}
-
-.sidebarPerksList li {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  font-size: 0.82rem;
-  color: #334155;
-  line-height: 1.45;
-}
-
-.circleSidebarCtaBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  width: 100%;
-  min-height: 2.85rem;
-  padding: 0.75rem 1.25rem;
-  border-radius: 0.75rem;
-  background: var(--landing-blue, #2563eb);
-  color: #ffffff !important;
-  font-size: 0.92rem;
-  font-weight: 750;
-  text-decoration: none;
-  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
-  transition: all 0.18s ease;
-}
-
-.circleSidebarCtaBtn:hover {
-  background: var(--landing-blue-dark, #1d4ed8);
-  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.45);
-  transform: translateY(-2px);
-}
-
-.sidebarCtaNotice {
-  font-size: 0.72rem;
-  color: #64748b;
-  text-align: center;
-  margin: 0.65rem 0 0;
-}
-
-/* Host Profile Box */
-.hostProfileBox {
+.hostCompactRow {
   display: flex;
   align-items: center;
   gap: 0.85rem;
-  margin-bottom: 0.85rem;
+  margin: 0.75rem 0;
 }
 
-.hostAvatarLarge {
-  width: 3rem;
-  height: 3rem;
+.hostAvatarBox {
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: 50%;
   background: #dbeafe;
   color: #1d4ed8;
   display: grid;
   place-items: center;
   font-weight: 850;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   flex-shrink: 0;
 }
 
-.hostNameRow {
+.hostNameVerified {
   display: flex;
   align-items: center;
   gap: 0.35rem;
 }
 
-.hostNameRow strong {
+.hostNameVerified strong {
   font-size: 0.94rem;
   color: #0b2457;
 }
 
-.hostVerifiedBadge {
-  font-size: 0.75rem;
+.hostNameVerified svg {
+  width: 1rem;
+  height: 1rem;
   color: #2563eb;
-  font-weight: 850;
+  fill: currentColor;
 }
 
-.hostRoleTitle {
+.hostRoleText {
   font-size: 0.78rem;
   color: #64748b;
   display: block;
 }
 
-.hostBioText {
+.hostSummary {
   font-size: 0.82rem;
   color: #475569;
   line-height: 1.5;
   margin: 0;
 }
 
-/* Circle Specifications Definition List */
-.circleSpecsDl {
-  margin: 0;
+/* Logistics List */
+.logisticsList {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
-.specRow {
+.logisticsList li {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 0.82rem;
-  padding-bottom: 0.6rem;
+  padding-bottom: 0.55rem;
   border-bottom: 1px solid #f1f5f9;
 }
 
-.specRow:last-child {
+.logisticsList li:last-child {
   border-bottom: none;
   padding-bottom: 0;
 }
 
-.specRow dt {
+.logisticsList span {
   color: #64748b;
 }
 
-.specRow dd {
-  margin: 0;
-  font-weight: 650;
+.logisticsList strong {
   color: #0b2457;
+  font-weight: 650;
   text-align: right;
 }
 
-/* Related Circles Widget */
-.relatedCirclesList {
+/* Related Circles Grid */
+.relatedCirclesGrid {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  margin-top: 0.75rem;
 }
 
-.relatedCircleItem {
+.relatedCircleRow {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -4568,13 +4458,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
   transition: all 0.15s ease;
 }
 
-.relatedCircleItem:hover {
+.relatedCircleRow:hover {
   background: #ffffff;
   border-color: #93c5fd;
   transform: translateX(2px);
 }
 
-.relatedCircleAvatar {
+.relatedInitials {
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 0.5rem;
@@ -4586,61 +4476,45 @@ button, a { -webkit-tap-highlight-color: transparent; }
   flex-shrink: 0;
 }
 
-.relatedCircleInfo h4 {
+.relatedText h4 {
   font-size: 0.85rem;
   font-weight: 700;
   color: #0b2457;
   margin: 0;
 }
 
-.relatedCircleInfo span {
+.relatedText span {
   font-size: 0.74rem;
   color: #64748b;
 }
 
 /* Responsive Rules */
-@media (max-width: 960px) {
-  .circleHeroTop {
-    grid-template-columns: 1fr;
+@media (max-width: 900px) {
+  .circleHeroIdentityRow {
+    flex-direction: column;
     text-align: center;
-  }
-
-  .circleAvatarWrap {
-    margin: 0 auto;
-  }
-
-  .circlePillsRow {
-    justify-content: center;
-  }
-
-  .circleHeroActionBox {
     align-items: center;
   }
 
-  .circleMetricsRibbon {
-    grid-template-columns: repeat(2, 1fr);
+  .circleTagBadgesRow {
+    justify-content: center;
   }
 
-  .circleBodyContainer {
+  .circleHeroActionBar {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .circleTopicPills {
+    justify-content: center;
+  }
+
+  .circleTwoColLayout {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 600px) {
-  .circleMetricsRibbon {
-    grid-template-columns: 1fr;
-    gap: 1rem;
-    padding: 1.25rem;
-  }
-
-  .circleDiscussionRow {
-    grid-template-columns: 1fr;
-  }
-
-  .discussionRepliesBadge {
-    align-self: flex-start;
-  }
-}
 
 
 
