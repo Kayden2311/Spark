@@ -4,13 +4,16 @@ import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { Redis } from "ioredis";
+import type { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 
 import type { AppConfig } from "./config.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoute } from "./routes/health.js";
 
 export interface BuildAppOptions {
   readonly config: AppConfig;
+  readonly pool?: Pool;
   readonly redis?: Redis;
   readonly rateLimit?: boolean;
   readonly logger?: boolean;
@@ -102,6 +105,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
 
   registerHealthRoute(app);
+  if (options.pool) {
+    registerAuthRoutes(app, { pool: options.pool });
+  }
 
   app.setNotFoundHandler(async (request, reply) =>
     reply

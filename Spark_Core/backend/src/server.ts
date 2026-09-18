@@ -14,7 +14,7 @@ const redis = new Redis(config.redisUrl, {
   enableOfflineQueue: false,
   maxRetriesPerRequest: 1,
 });
-const app = await buildApp({ config, redis });
+const app = await buildApp({ config, redis, pool: postgres });
 
 postgres.on("error", (error) => app.log.error({ err: error }, "PostgreSQL error"));
 redis.on("error", (error) => app.log.error({ err: error }, "Redis error"));

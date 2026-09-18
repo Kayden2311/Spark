@@ -1,0 +1,145 @@
+import pg from "pg";
+import { hashPassword } from "../src/infrastructure/database/password.js";
+
+const connectionString =
+  process.env.MIGRATION_DATABASE_URL ||
+  process.env.DATABASE_URL ||
+  "postgresql://spark_migrator:spark_migrate_local_only@127.0.0.1:5432/spark";
+
+
+
+
+const client = new pg.Client({ connectionString, connectionTimeoutMillis: 5000 });
+
+try {
+  await client.connect();
+  await client.query("SET ROLE spark_owner");
+  console.log("Connected to PostgreSQL for seeding...");
+
+  // Helper to ensure user exists
+  async function ensureUser(opts: {
+    email: string;
+    displayName: string;
+    password: string;
+  }): Promise<string> {
+    const normalizedEmail = opts.email.trim().toLowerCase();
+    const existingEmail = await client.query(
+      "SELECT user_id FROM spark.user_emails WHERE normalized_email = $1 LIMIT 1",
+      [normalizedEmail],
+    );
+
+    let userId: string;
+    const hashed = await hashPassword(opts.password);
+
+    if (existingEmail.rows.length > 0) {
+      userId = existingEmail.rows[0].user_id;
+      console.log(`User ${normalizedEmail} exists (${userId}). Updating credentials...`);
+      await client.query("UPDATE spark.users SET status = 'active' WHERE id = $1", [userId]);
+      await client.query(
+        `INSERT INTO spark.password_credentials (user_id, password_hash, password_changed_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (user_id) DO UPDATE SET password_hash = EXCLUDED.password_hash, password_changed_at = NOW()`,
+        [userId, hashed],
+      );
+    } else {
+      const userRes = await client.query(
+        `INSERT INTO spark.users (id, display_name, status, locale, timezone)
+         VALUES (gen_random_uuid(), $1, 'active', 'en', 'UTC')
+         RETURNING id`,
+        [opts.displayName],
+      );
+      userId = userRes.rows[0].id;
+
+      await client.query(
+        `INSERT INTO spark.user_emails (id, user_id, email, normalized_email, is_primary, verified_at)
+         VALUES (gen_random_uuid(), $1, $2, $3, true, NOW())`,
+        [userId, opts.email, normalizedEmail],
+      );
+
+      await client.query(
+        `INSERT INTO spark.password_credentials (user_id, password_hash, password_changed_at)
+         VALUES ($1, $2, NOW())`,
+        [userId, hashed],
+      );
+      console.log(`Created user ${normalizedEmail} (${userId})`);
+    }
+    return userId;
+  }
+
+  // 1. Ensure Admin User
+  const adminId = await ensureUser({
+    email: "admin@spark.app",
+    displayName: "Spark Admin",
+    password: "AdminPassword123!",
+  });
+
+  // Assign platform role to Admin
+  await client.query(
+    `INSERT INTO spark.platform_role_assignments (id, user_id, role, granted_by_user_id)
+     VALUES (gen_random_uuid(), $1, 'campaign_moderator', $1)
+     ON CONFLICT DO NOTHING`,
+    [adminId],
+  );
+
+  // 2. Ensure Regular User
+  const user1Id = await ensureUser({
+    email: "user1@spark.app",
+    displayName: "Spark User 1",
+    password: "UserPassword123!",
+  });
+
+  // 3. Ensure Default Workspace and initial owner (User 1) commit together in one transaction
+  let workspaceResult = await client.query(
+    "SELECT id, slug, name FROM spark.workspaces WHERE slug = 'spark-lab' LIMIT 1",
+  );
+
+  let workspaceId: string;
+  if (workspaceResult.rows.length === 0) {
+    await client.query("BEGIN");
+    try {
+      const wsId = (await client.query("SELECT gen_random_uuid() AS id")).rows[0].id;
+      await client.query(
+        `INSERT INTO spark.workspaces (id, slug, name, status, created_by_user_id)
+         VALUES ($1, 'spark-lab', 'Spark Lab', 'active', $2)`,
+        [wsId, user1Id],
+      );
+      await client.query(
+        `INSERT INTO spark.workspace_memberships (id, tenant_id, user_id, role, status, joined_at)
+         VALUES (gen_random_uuid(), $1, $2, 'owner', 'active', NOW())`,
+        [wsId, user1Id],
+      );
+      await client.query("COMMIT");
+      workspaceId = wsId;
+      console.log("Atomically created workspace 'spark-lab' with owner User 1:", workspaceId);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    }
+  } else {
+    workspaceId = workspaceResult.rows[0].id;
+    console.log("Found existing workspace 'spark-lab':", workspaceId);
+    await client.query(
+      `INSERT INTO spark.workspace_memberships (id, tenant_id, user_id, role, status, joined_at)
+       VALUES (gen_random_uuid(), $1, $2, 'owner', 'active', NOW())
+       ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = 'owner', status = 'active'`,
+      [workspaceId, user1Id],
+    );
+  }
+
+  // 4. Ensure Admin has NO workspace membership (Platform Admin oversees entire platform, not a single workspace)
+  await client.query(
+    "DELETE FROM spark.workspace_memberships WHERE user_id = $1",
+    [adminId],
+  );
+
+  console.log("\n==============================================");
+  console.log("SEEDED USERS SUCCESSFULLY:");
+  console.log("1. User 1: user1@spark.app / UserPassword123! (Role: owner of workspace 'spark-lab')");
+  console.log("2. Admin:  admin@spark.app / AdminPassword123! (Platform Role: campaign_moderator / Platform Overseer)");
+  console.log("==============================================\n");
+} catch (error) {
+  console.error("Seeding failed:", error);
+  process.exitCode = 1;
+} finally {
+  await client.end();
+}
