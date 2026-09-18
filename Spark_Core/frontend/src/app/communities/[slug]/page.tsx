@@ -11,11 +11,82 @@ function SparkMark() {
   );
 }
 
-function PointerClickIcon() {
+function ArrowRightIcon() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M4 3l7.07 16.97 2.51-7.39 7.39-2.51L4 3z" />
-      <path d="M13 13l6 6" />
+    <svg className="btnInlineIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function CheckCircleIcon() {
+  return (
+    <svg className="circleCheckIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function VerifiedBadgeIcon() {
+  return (
+    <svg className="circleVerifiedIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function UsersIcon() {
+  return (
+    <svg className="circleStatIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg className="circleStatIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function ChatBubbleIcon() {
+  return (
+    <svg className="circleStatIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-5 0H8v2h2V9z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function ShieldCheckIcon() {
+  return (
+    <svg className="circleStatIcon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+        clipRule="evenodd"
+      />
     </svg>
   );
 }
@@ -25,12 +96,17 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
   const community: Community | undefined = communities.find((entry) => entry.slug === slug);
   if (!community) notFound();
 
+  // Find related communities in similar category
+  const relatedCommunities = communities
+    .filter((c) => c.slug !== community.slug)
+    .slice(0, 2);
+
   return (
-    <main className="sparkLanding communityPageRoot">
-      {/* Global Background Particles (Live Signal Flow wave) */}
+    <main className="sparkLanding circleDetailPageRoot">
+      {/* Global Background Wave Particles */}
       <SignalParticles />
 
-      {/* Spark Header */}
+      {/* Spark Standard Header */}
       <header className="sparkHeader">
         <Link className="sparkBrand" href="/" aria-label="Spark home">
           <SparkMark />
@@ -48,160 +124,344 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
         <div className="headerActions">
           <Link href="/login">Sign in</Link>
           <Link className="sparkNavButton" href={`/signup?redirect=/communities/${community.slug}`}>
-            Join Circle <PointerClickIcon />
+            Join Circle <ArrowRightIcon />
           </Link>
         </div>
       </header>
 
-      {/* Hero Profile */}
-      <section className="communityDetailHero">
-        <Link className="communityBackLink" href="/communities">
-          ← Back to all communities
-        </Link>
+      {/* Breadcrumb Navigation Bar */}
+      <nav className="circleBreadcrumbBar" aria-label="Breadcrumb">
+        <div className="circleBreadcrumbInner">
+          <Link href="/communities" className="circleBackLink">
+            <span aria-hidden="true">←</span> Directory
+          </Link>
+          <span className="circleBreadcrumbSeparator">/</span>
+          <span className="circleBreadcrumbCategory">{community.category}</span>
+          <span className="circleBreadcrumbSeparator">/</span>
+          <span className="circleBreadcrumbCurrent" aria-current="page">
+            {community.name}
+          </span>
+        </div>
+      </nav>
 
-        <div className="communityProfileCard">
-          <div className="communityDetailMonogram" style={{ background: community.gradient }}>
-            {community.initials}
-          </div>
-
-          <div className="communityProfileInfo">
-            <div className="communityCardBadges" style={{ justifyContent: "flex-start", marginBottom: "0.4rem" }}>
-              {community.featured && <span className="communityFeaturedBadge">Featured Circle</span>}
-              <span className="communityTopicBadge">{community.topic}</span>
+      {/* Premium Circle Header Hero */}
+      <section className="circleHeroContainer">
+        <div className="circleHeroCard">
+          <div className="circleHeroTop">
+            <div className="circleAvatarWrap">
+              <div className="circleAvatarMonogram" style={{ background: community.gradient }}>
+                {community.initials}
+              </div>
+              <div className="circleVerifiedPill" title="Verified Spark Circle">
+                <VerifiedBadgeIcon />
+              </div>
             </div>
-            <h1>{community.name}</h1>
-            <p>{community.description}</p>
+
+            <div className="circleHeroMainInfo">
+              <div className="circlePillsRow">
+                {community.featured && (
+                  <span className="circlePill circlePillFeatured">Featured Circle</span>
+                )}
+                <span className="circlePill circlePillCategory">{community.category}</span>
+                <span className="circlePill circlePillStage">{community.stage}</span>
+                <span className="circlePill circlePillLocation">📍 {community.location}</span>
+              </div>
+
+              <h1 className="circleTitle">{community.name}</h1>
+              <p className="circleSubtitle">{community.description}</p>
+            </div>
+
+            <div className="circleHeroActionBox">
+              <Link
+                className="circlePrimaryJoinBtn"
+                href={`/signup?redirect=/communities/${community.slug}`}
+              >
+                Join this Circle <ArrowRightIcon />
+              </Link>
+              <div className="circleActionSubtext">
+                <span className="circleLiveDot" aria-hidden="true" />
+                <span>{community.members} · Free to participate</span>
+              </div>
+            </div>
           </div>
 
-          <div className="communityProfileActions">
-            <Link
-              className="communityJoinBtn"
-              href={`/signup?redirect=/communities/${community.slug}`}
-            >
-              Join this circle <PointerClickIcon />
-            </Link>
-            <span className="communityJoinBtnNotice">
-              {community.members} · Free to participate
-            </span>
+          {/* Quick Metrics Ribbon */}
+          <div className="circleMetricsRibbon">
+            <div className="circleMetricItem">
+              <UsersIcon />
+              <div>
+                <strong className="metricVal">{community.members}</strong>
+                <span className="metricLabel">Verified Members</span>
+              </div>
+            </div>
+            <div className="circleMetricItem">
+              <ChatBubbleIcon />
+              <div>
+                <strong className="metricVal">{community.recentTopics.length * 7}+ discussions</strong>
+                <span className="metricLabel">Weekly Signal Velocity</span>
+              </div>
+            </div>
+            <div className="circleMetricItem">
+              <CalendarIcon />
+              <div>
+                <strong className="metricVal">{community.upcomingEvents[0]?.date || "Bi-weekly"}</strong>
+                <span className="metricLabel">Next Live Session</span>
+              </div>
+            </div>
+            <div className="circleMetricItem">
+              <ShieldCheckIcon />
+              <div>
+                <strong className="metricVal">High Context</strong>
+                <span className="metricLabel">Zero Spam Policy</span>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Two-Column Detail Body */}
-      <div className="communityDetailBody">
-        {/* Main Column */}
-        <div className="communityDetailMainCol">
-          {/* About Section */}
-          <div className="communityDetailSectionCard">
-            <div className="sparkKicker" style={{ marginBottom: "0.5rem" }}>
-              <span></span>
-              About this Circle
+      {/* Two-Column Structured Content Body */}
+      <div className="circleBodyContainer">
+        {/* Main Content Column (68%) */}
+        <div className="circleMainCol">
+          {/* Mission & Purpose Card */}
+          <section className="circleCard" aria-labelledby="section-about">
+            <div className="circleCardHeader">
+              <div className="sparkKicker">
+                <span></span>
+                Circle Overview
+              </div>
+              <h2 id="section-about">About this community</h2>
             </div>
-            <h2>Small rooms, high context, real follow-through.</h2>
-            <p className="sectionBodyText">{community.longDescription}</p>
+            <p className="circleBodyParagraph">{community.longDescription}</p>
 
-            <div className="communityTagsRow" style={{ margin: "1rem 0 0" }}>
-              {community.tags.map((tag) => (
-                <span key={tag} className="communityTagChip">
-                  #{tag}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          {/* Active Discussion Topics Preview */}
-          <div className="communityDetailSectionCard">
-            <div className="sparkKicker" style={{ marginBottom: "0.5rem" }}>
-              <span></span>
-              Recent Circle Discussions
-            </div>
-            <h2>Topics being discussed this week</h2>
-            <div className="communityTopicsList">
-              {community.recentTopics.map((topic, idx) => (
-                <div key={idx} className="communityTopicItem">
-                  <div>
-                    <h4>{topic.title}</h4>
-                    <small>
-                      Started by <b>{topic.author}</b> · {topic.time}
-                    </small>
-                  </div>
-                  <span className="communityTopicRepliesBadge">
-                    {topic.replies} replies
+            <div className="circleTagsSection">
+              <span className="circleTagsLabel">Core focus areas:</span>
+              <div className="circleTagsList">
+                {community.tags.map((tag) => (
+                  <span key={tag} className="circleTagBadge">
+                    #{tag}
                   </span>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Guidelines & High-Trust Norms */}
+          <section className="circleCard" aria-labelledby="section-norms">
+            <div className="circleCardHeader">
+              <div className="sparkKicker">
+                <span></span>
+                Circle Norms
+              </div>
+              <h2 id="section-norms">How this circle operates</h2>
+            </div>
+            <div className="circleNormsGrid">
+              <div className="circleNormItem">
+                <div className="normCheck"><CheckCircleIcon /></div>
+                <div>
+                  <h4>High Signal, Zero Self-Promotion</h4>
+                  <p>All discussions are focused on solving tactical engineering, GTM, and operational hurdles without sales pitches.</p>
+                </div>
+              </div>
+              <div className="circleNormItem">
+                <div className="normCheck"><CheckCircleIcon /></div>
+                <div>
+                  <h4>Peer Confidentiality</h4>
+                  <p>Private room discussions, tear-downs, and sprint metrics shared inside this circle remain confidential.</p>
+                </div>
+              </div>
+              <div className="circleNormItem">
+                <div className="normCheck"><CheckCircleIcon /></div>
+                <div>
+                  <h4>Real Follow-Through</h4>
+                  <p>Action items, resources, and insights from weekly syncs are documented directly into your Spark workspace.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Active Discussions Preview */}
+          <section className="circleCard" aria-labelledby="section-discussions">
+            <div className="circleCardHeaderWithAction">
+              <div>
+                <div className="sparkKicker">
+                  <span></span>
+                  Active Discussions
+                </div>
+                <h2 id="section-discussions">Recent conversations & questions</h2>
+              </div>
+              <span className="circleCountPill">{community.recentTopics.length} active threads</span>
+            </div>
+
+            <div className="circleDiscussionsList">
+              {community.recentTopics.map((topic, idx) => (
+                <div key={idx} className="circleDiscussionRow">
+                  <div className="discussionAvatar">
+                    {topic.author.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                  </div>
+                  <div className="discussionMain">
+                    <h3 className="discussionTitle">{topic.title}</h3>
+                    <div className="discussionMeta">
+                      <span>Started by <strong>{topic.author}</strong></span>
+                      <span>·</span>
+                      <span>{topic.time}</span>
+                    </div>
+                  </div>
+                  <div className="discussionRepliesBadge">
+                    <ChatBubbleIcon />
+                    <span>{topic.replies} replies</span>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
+          </section>
+
+          {/* Upcoming Events & Live Syncs */}
+          <section className="circleCard" aria-labelledby="section-events">
+            <div className="circleCardHeader">
+              <div className="sparkKicker">
+                <span></span>
+                Scheduled Sessions
+              </div>
+              <h2 id="section-events">Upcoming events & syncs</h2>
+            </div>
+
+            <div className="circleEventsGrid">
+              {community.upcomingEvents.map((evt, idx) => (
+                <div key={idx} className="circleEventCard">
+                  <div className="eventDateBox">
+                    <span className="eventDateMonth">{evt.date.split(" ")[1] || "SEP"}</span>
+                    <span className="eventDateDay">{evt.date.split(" ")[2] || "24"}</span>
+                  </div>
+                  <div className="eventDetails">
+                    <h3 className="eventTitle">{evt.title}</h3>
+                    <div className="eventMetaRow">
+                      <span className="eventMetaChip">⏰ {evt.time}</span>
+                      <span className="eventMetaChip eventFormatChip">📍 {evt.format}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
 
-        {/* Side Column */}
-        <div className="communityDetailSideCol">
-          {/* Host Card */}
-          <div className="communityDetailSectionCard">
+        {/* Sidebar Column (32%) */}
+        <aside className="circleSidebarCol">
+          {/* Quick Join Card */}
+          <div className="circleSidebarCard circleJoinStickyCard">
+            <div className="sidebarCardHeader">
+              <h3>Participate in {community.name}</h3>
+              <span className="sidebarPriceTag">Free</span>
+            </div>
+            <p className="sidebarSubtext">
+              Join this verified founder circle to participate in discussions, attend live rooms, and share resources.
+            </p>
+
+            <ul className="sidebarPerksList">
+              <li>
+                <CheckCircleIcon />
+                <span>Full access to circle channels & discussions</span>
+              </li>
+              <li>
+                <CheckCircleIcon />
+                <span>Invites to weekly live rooms & tear-downs</span>
+              </li>
+              <li>
+                <CheckCircleIcon />
+                <span>Shared sprint templates & resource vault</span>
+              </li>
+              <li>
+                <CheckCircleIcon />
+                <span>Direct peer DM network with verified founders</span>
+              </li>
+            </ul>
+
+            <Link
+              className="circleSidebarCtaBtn"
+              href={`/signup?redirect=/communities/${community.slug}`}
+            >
+              Join this Circle <ArrowRightIcon />
+            </Link>
+            <p className="sidebarCtaNotice">Instant access upon sign up · No credit card required</p>
+          </div>
+
+          {/* Circle Host Card */}
+          <div className="circleSidebarCard">
             <div className="sparkKicker" style={{ marginBottom: "0.5rem" }}>
               <span></span>
               Circle Host
             </div>
-            <h2>Organized by</h2>
-            <div className="communityHostCard">
-              <div className="communityHostAvatar">
+            <div className="hostProfileBox">
+              <div className="hostAvatarLarge">
                 {community.host.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
               </div>
-              <div className="communityHostInfo">
-                <strong>{community.host.name}</strong>
-                <span>{community.host.role}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Upcoming Events */}
-          <div className="communityDetailSectionCard">
-            <div className="sparkKicker" style={{ marginBottom: "0.5rem" }}>
-              <span></span>
-              Upcoming Events
-            </div>
-            <h2>Circle schedule</h2>
-            <div className="communityEventsList">
-              {community.upcomingEvents.map((evt, idx) => (
-                <div key={idx} className="communityEventItem">
-                  <h4>{evt.title}</h4>
-                  <div className="communityEventMeta">
-                    <span>📅 {evt.date}</span>
-                    <span>⏰ {evt.time}</span>
-                    <span>📍 {evt.format}</span>
-                  </div>
+              <div className="hostProfileInfo">
+                <div className="hostNameRow">
+                  <strong>{community.host.name}</strong>
+                  <span className="hostVerifiedBadge" title="Verified Host">✓</span>
                 </div>
-              ))}
+                <span className="hostRoleTitle">{community.host.role}</span>
+              </div>
             </div>
+            <p className="hostBioText">
+              Curates high-signal peer discussions and facilitates weekly founder syncs across Southeast Asian venture hubs.
+            </p>
           </div>
 
-          {/* Metadata Card */}
-          <div className="communityDetailSectionCard">
+          {/* Circle Specs Card */}
+          <div className="circleSidebarCard">
             <div className="sparkKicker" style={{ marginBottom: "0.5rem" }}>
               <span></span>
-              Key Attributes
+              Specifications
             </div>
-            <h2>Circle Details</h2>
-            <dl className="communityMetaDl" style={{ margin: 0 }}>
-              <div>
-                <dt>Location</dt>
-                <dd>{community.location}</dd>
+            <dl className="circleSpecsDl">
+              <div className="specRow">
+                <dt>Category</dt>
+                <dd>{community.category}</dd>
               </div>
-              <div>
+              <div className="specRow">
                 <dt>Target Stage</dt>
                 <dd>{community.stage}</dd>
               </div>
-              <div>
-                <dt>Active Size</dt>
-                <dd>{community.members}</dd>
+              <div className="specRow">
+                <dt>Primary Location</dt>
+                <dd>{community.location}</dd>
               </div>
-              <div>
-                <dt>Access Type</dt>
+              <div className="specRow">
+                <dt>Access Policy</dt>
                 <dd>Open Public Circle</dd>
+              </div>
+              <div className="specRow">
+                <dt>Workspace Sync</dt>
+                <dd>Enabled (Spark Outbox)</dd>
               </div>
             </dl>
           </div>
-        </div>
+
+          {/* Related Circles */}
+          {relatedCommunities.length > 0 && (
+            <div className="circleSidebarCard">
+              <div className="sparkKicker" style={{ marginBottom: "0.5rem" }}>
+                <span></span>
+                Related Circles
+              </div>
+              <div className="relatedCirclesList">
+                {relatedCommunities.map((rel) => (
+                  <Link key={rel.slug} href={`/communities/${rel.slug}`} className="relatedCircleItem">
+                    <div className="relatedCircleAvatar" style={{ background: rel.gradient }}>
+                      {rel.initials}
+                    </div>
+                    <div className="relatedCircleInfo">
+                      <h4>{rel.name}</h4>
+                      <span>{rel.members} · {rel.category}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
 
       {/* Bottom Conversion Section */}
@@ -217,19 +477,19 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
               <span className="ctaPulseDot" />
               Get started
             </div>
-            <h2 id="community-detail-cta">Ready to join {community.name}?</h2>
+            <h2 id="community-detail-cta">Ready to collaborate with {community.name}?</h2>
             <p className="ctaDescription">
-              Connect with founders, join upcoming discussions, and link this circle directly to your Spark workspace.
+              Connect with founders, participate in weekly syncs, and link this circle directly into your Spark execution workspace.
             </p>
             <div className="ctaActions">
               <Link
                 className="ctaPrimaryBtn"
                 href={`/signup?redirect=/communities/${community.slug}`}
               >
-                Join {community.name} <PointerClickIcon />
+                Join {community.name} <ArrowRightIcon />
               </Link>
               <Link className="ctaSecondaryBtn" href="/communities">
-                Explore other circles
+                Explore all circles
               </Link>
             </div>
           </div>
@@ -325,3 +585,4 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
     </main>
   );
 }
+
