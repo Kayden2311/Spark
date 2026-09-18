@@ -10,6 +10,9 @@ export const metadata: Metadata = {
     template: "%s | Spark",
   },
   description: "Discover startup communities and collaborate in your workspace.",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 type RootLayoutProps = Readonly<{
@@ -18,7 +21,7 @@ type RootLayoutProps = Readonly<{
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="en">
+    <html lang="en" data-scroll-behavior="smooth">
       <body>
         <AuthProvider>{children}</AuthProvider>
       </body>
