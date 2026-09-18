@@ -14,7 +14,13 @@ type Dot = {
 
 const maxDots = 1600;
 
-export function HeroParticles() {
+export function HeroParticles({
+  className,
+  fixed = false,
+}: {
+  className?: string;
+  fixed?: boolean;
+} = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -182,5 +188,11 @@ export function HeroParticles() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="heroParticleMotion" aria-hidden="true" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className={className ?? (fixed ? "globalBackgroundParticles" : "heroParticleMotion")}
+      aria-hidden="true"
+    />
+  );
 }

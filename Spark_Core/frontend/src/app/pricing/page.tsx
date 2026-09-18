@@ -252,6 +252,9 @@ export default function PricingPage() {
 
   return (
     <main className="sparkLanding pricingPageRoot">
+      {/* Global Background Particles */}
+      <HeroParticles fixed />
+
       {/* Spark Header */}
       <header className="sparkHeader">
         <Link className="sparkBrand" href="/" aria-label="Spark home">
@@ -285,7 +288,6 @@ export default function PricingPage() {
 
       {/* Hero Section */}
       <section className="pricingHero">
-        <HeroParticles />
         <div className="authHeroGlow1" aria-hidden="true" />
         <div className="authHeroGlow2" aria-hidden="true" />
 

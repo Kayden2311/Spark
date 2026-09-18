@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { HeroParticles } from "../../hero-particles";
 import { communities, type Community } from "../mock-data";
 
 function SparkMark() {
@@ -26,6 +27,9 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
 
   return (
     <main className="sparkLanding communityPageRoot">
+      {/* Global Background Particles */}
+      <HeroParticles fixed />
+
       {/* Spark Header */}
       <header className="sparkHeader">
         <Link className="sparkBrand" href="/" aria-label="Spark home">

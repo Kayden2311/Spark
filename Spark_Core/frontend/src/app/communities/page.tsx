@@ -91,6 +91,9 @@ export default function CommunitiesPage() {
 
   return (
     <main className="sparkLanding communityPageRoot">
+      {/* Global Background Particles */}
+      <HeroParticles fixed />
+
       {/* Top Header */}
       <header className="sparkHeader">
         <Link className="sparkBrand" href="/" aria-label="Spark home">
@@ -124,7 +127,6 @@ export default function CommunitiesPage() {
 
       {/* Hero Section */}
       <section className="communityHeroSection">
-        <HeroParticles />
         <div className="heroGlow" aria-hidden="true" />
         <div className="communityHeroContent">
           <div className="sparkKicker" style={{ justifyContent: "center" }}>
