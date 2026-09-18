@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 
 import { useAuth } from "./auth-context";
 import { HeroParticles } from "./hero-particles";
+import { SignalParticles } from "./signal-particles";
 import { SparkWordmarkReveal } from "./spark-wordmark-reveal";
 import { LiveSignalFlow } from "./live-signal-flow";
 import { PathwayShowcase } from "./pathway-showcase";
@@ -109,6 +110,9 @@ export default function HomePage() {
   const workspaceTarget = isAuthenticated ? "/workspace" : "/login?redirect=/workspace";
 
   return <main className="sparkLanding">
+    {/* Global Background Signal Particles */}
+    <SignalParticles />
+
     <a className="skipLink" href="#main-content">Skip to content</a>
     <header className="sparkHeader">
       <Link className="sparkBrand" href="/" aria-label="Spark home"><SparkMark /><span>Spark</span></Link>
