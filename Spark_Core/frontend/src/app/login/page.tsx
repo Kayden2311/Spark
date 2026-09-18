@@ -70,9 +70,12 @@ function LoginForm() {
   // If already authenticated, redirect to appropriate destination
   useEffect(() => {
     if (isAuthenticated && !authLoading) {
+      const isPlatformStaff = platformRoles.some((r) =>
+        ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"].includes(r)
+      );
       if (redirectQuery) {
         router.replace(redirectQuery);
-      } else if (platformRoles.includes("campaign_moderator") && workspaces.length === 0) {
+      } else if (isPlatformStaff && workspaces.length === 0) {
         router.replace("/admin");
       } else {
         router.replace("/workspace");

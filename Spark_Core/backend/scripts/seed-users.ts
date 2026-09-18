@@ -66,20 +66,39 @@ try {
     return userId;
   }
 
-  // 1. Ensure Admin User
+  // Update platform_role_assignments constraint to support multiple moderator roles
+  await client.query(
+    "ALTER TABLE spark.platform_role_assignments DROP CONSTRAINT IF EXISTS platform_role_assignments_role_allowed",
+  );
+  await client.query(
+    `ALTER TABLE spark.platform_role_assignments ADD CONSTRAINT platform_role_assignments_role_allowed
+     CHECK (role IN ('super_admin', 'platform_admin', 'community_moderator', 'content_moderator', 'campaign_moderator'))`,
+  );
+
+  // 1. Ensure Admin User (Super Admin & Multi-role Platform Moderator)
   const adminId = await ensureUser({
     email: "admin@spark.app",
     displayName: "Spark Admin",
     password: "AdminPassword123!",
   });
 
-  // Assign platform role to Admin
-  await client.query(
-    `INSERT INTO spark.platform_role_assignments (id, user_id, role, granted_by_user_id)
-     VALUES (gen_random_uuid(), $1, 'campaign_moderator', $1)
-     ON CONFLICT DO NOTHING`,
-    [adminId],
-  );
+  // Assign multiple platform roles to Admin
+  const adminRoles = [
+    "super_admin",
+    "platform_admin",
+    "community_moderator",
+    "content_moderator",
+    "campaign_moderator",
+  ];
+
+  for (const role of adminRoles) {
+    await client.query(
+      `INSERT INTO spark.platform_role_assignments (id, user_id, role, granted_by_user_id)
+       VALUES (gen_random_uuid(), $1, $2, $1)
+       ON CONFLICT DO NOTHING`,
+      [adminId, role],
+    );
+  }
 
   // 2. Ensure Regular User
   const user1Id = await ensureUser({
