@@ -12,6 +12,7 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=../.env --import tsx scripts/migrate.ts",
+    "db:seed": "node --env-file-if-exists=../.env --import tsx scripts/seed-users.ts",
     "db:inspect": "node --env-file-if-exists=../.env --import tsx scripts/inspect-database.ts",
     "test:database": "node --env-file-if-exists=../.env ../node_modules/vitest/vitest.mjs run --config vitest.database.config.ts"
   },

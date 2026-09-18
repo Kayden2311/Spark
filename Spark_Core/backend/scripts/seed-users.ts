@@ -145,16 +145,78 @@ try {
     );
   }
 
-  // 4. Ensure Admin has NO workspace membership (Platform Admin oversees entire platform, not a single workspace)
-  await client.query(
-    "DELETE FROM spark.workspace_memberships WHERE user_id = $1",
-    [adminId],
-  );
+  // 5. Ensure sample communities, posts, and moderation reports for Admin Console testing
+  let comm1 = (await client.query("SELECT id FROM spark.communities WHERE slug = 'hyperdrive' LIMIT 1")).rows[0];
+  if (!comm1) {
+    await client.query("BEGIN");
+    try {
+      const commId = (await client.query("SELECT gen_random_uuid() AS id")).rows[0].id;
+      await client.query(
+        `INSERT INTO spark.communities (id, tenant_id, slug, name, description, stage, visibility, created_by_user_id)
+         VALUES ($1, $2, 'hyperdrive', 'Hyperdrive Founders', 'Pre-seed to Series A peer group for technical founders building hardtech and AI systems.', 'Pre-Seed', 'public', $3)`,
+        [commId, workspaceId, user1Id],
+      );
+
+      await client.query(
+        `INSERT INTO spark.community_memberships (id, tenant_id, community_id, user_id, role, status)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'owner', 'active')`,
+        [workspaceId, commId, user1Id],
+      );
+
+      // Create a sample post
+      const postId = (await client.query("SELECT gen_random_uuid() AS id")).rows[0].id;
+      await client.query(
+        `INSERT INTO spark.posts (id, tenant_id, community_id, author_user_id, title, body, visibility, moderation_status)
+         VALUES ($1, $2, $3, $4, 'Check out this external crypto trading bot investment opportunity', 'Sign up here with 50x guaranteed return on telegram @bot_spam', 'public', 'visible')`,
+        [postId, workspaceId, commId, user1Id],
+      );
+
+      // Create a content report for this post
+      await client.query(
+        `INSERT INTO spark.content_reports (id, tenant_id, community_id, reporter_user_id, post_id, reason_code, details, status)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'Potential spam / solicitation', 'Unsolicited bot investment links in technical channel.', 'open')`,
+        [workspaceId, commId, user1Id, postId],
+      );
+
+      await client.query("COMMIT");
+      comm1 = { id: commId };
+      console.log("Atomically created community 'hyperdrive' with post and report.");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    }
+  }
+
+  let comm2 = (await client.query("SELECT id FROM spark.communities WHERE slug = 'zero-to-one' LIMIT 1")).rows[0];
+  if (!comm2) {
+    await client.query("BEGIN");
+    try {
+      const comm2Id = (await client.query("SELECT gen_random_uuid() AS id")).rows[0].id;
+      await client.query(
+        `INSERT INTO spark.communities (id, tenant_id, slug, name, description, stage, visibility, created_by_user_id)
+         VALUES ($1, $2, 'zero-to-one', 'Zero-to-One SaaS', 'B2B software builders scaling from first 10 customers to repeatable revenue.', 'Seed', 'public', $3)`,
+        [comm2Id, workspaceId, user1Id],
+      );
+
+      await client.query(
+        `INSERT INTO spark.community_memberships (id, tenant_id, community_id, user_id, role, status)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'owner', 'active')`,
+        [workspaceId, comm2Id, user1Id],
+      );
+
+      await client.query("COMMIT");
+      comm2 = { id: comm2Id };
+      console.log("Atomically created community 'zero-to-one'.");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    }
+  }
 
   console.log("\n==============================================");
-  console.log("SEEDED USERS SUCCESSFULLY:");
-  console.log("1. User 1: user1@spark.app / UserPassword123! (Role: owner of workspace 'spark-lab')");
-  console.log("2. Admin:  admin@spark.app / AdminPassword123! (Platform Role: campaign_moderator / Platform Overseer)");
+  console.log("SEEDED USERS & GOVERNANCE DEMO DATA SUCCESSFULLY:");
+  console.log("1. Admin:  admin@spark.app / AdminPassword123! (Super Admin & Platform Governance)");
+  console.log("2. User 1: user1@spark.app / UserPassword123! (Owner of 'Spark Lab' and 'Hyperdrive')");
   console.log("==============================================\n");
 } catch (error) {
   console.error("Seeding failed:", error);

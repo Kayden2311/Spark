@@ -16,7 +16,8 @@
     "infra:up": "docker compose -f infra/compose.yaml up -d --wait",
     "infra:down": "docker compose -f infra/compose.yaml down",
     "infra:logs": "docker compose -f infra/compose.yaml logs -f",
-    "db:bootstrap:local": "powershell -NoProfile -File scripts/bootstrap-local-postgres.ps1"
+    "db:bootstrap:local": "powershell -NoProfile -File scripts/bootstrap-local-postgres.ps1",
+    "db:seed": "pnpm --filter @spark/backend db:seed"
   },
   "devDependencies": {
     "eslint": "9.39.5",
