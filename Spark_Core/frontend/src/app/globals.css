@@ -2972,7 +2972,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .pricingHero {
   position: relative;
   width: 100%;
-  padding: 4.5rem 1.5rem 3rem;
+  min-height: 28rem;
+  padding: clamp(5rem, 8vw, 7rem) 1.5rem clamp(4rem, 6vw, 5.5rem);
   text-align: center;
   overflow: hidden;
   isolation: isolate;
@@ -3385,7 +3386,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .communityHeroSection {
   position: relative;
   width: 100%;
-  padding: clamp(3.5rem, 6vw, 5.5rem) 0 clamp(2.5rem, 4vw, 3.5rem);
+  min-height: 28rem;
+  padding: clamp(5rem, 8vw, 7rem) 0 clamp(4rem, 6vw, 5.5rem);
   text-align: center;
   overflow: hidden;
 }

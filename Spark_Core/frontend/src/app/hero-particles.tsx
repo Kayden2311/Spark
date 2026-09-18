@@ -41,7 +41,8 @@ export function HeroParticles() {
       canvas.height = Math.round(bounds.height * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
 
-      sphereRadius = Math.min(bounds.width, bounds.height) * 0.36;
+      const baseDim = Math.max(bounds.height, Math.min(bounds.width * 0.65, 700));
+      sphereRadius = Math.min(bounds.width * 0.42, Math.max(160, baseDim * 0.36));
       captureRadius = sphereRadius * 1.8;
 
       // Default initial position of the bubble block before hover
