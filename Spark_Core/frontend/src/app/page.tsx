@@ -41,15 +41,6 @@ function PlayVideoIcon() {
   );
 }
 
-function FeatureIcon({ type }: { type: "people" | "board" | "calendar" }) {
-  const paths = {
-    people: <><circle cx="8" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M2.5 21c.5-4 2.3-6 5.5-6s5 2 5.5 6M14 16c3.7-.4 6 1.3 6.5 5" /></>,
-    board: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18M15 3v18M5.5 7h1M11.5 9h1M17.5 6h1" /></>,
-    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18M7 14h3M14 14h3M7 17h3" /></>,
-  };
-  return <svg aria-hidden="true" className="featureIcon" viewBox="0 0 24 24">{paths[type]}</svg>;
-}
-
 const heroHeadline = "Turn scattered work into forward motion.";
 
 function HeroTypingHeadline() {
@@ -128,7 +119,7 @@ export default function HomePage() {
         ) : (
           <>
             <Link href="/login">Sign in</Link>
-            <Link className="sparkNavButton" href="/login?redirect=/workspace">Start free <PointerClickIcon /></Link>
+            <Link className="sparkNavButton" href="/signup?redirect=/workspace">Start free <PointerClickIcon /></Link>
           </>
         )}
       </div>

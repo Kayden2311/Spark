@@ -45,6 +45,15 @@ function GoogleIcon() {
   );
 }
 
+function UserIcon() {
+  return (
+    <svg className="authInputIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
 function MailIcon() {
   return (
     <svg className="authInputIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -63,58 +72,57 @@ function LockIcon() {
   );
 }
 
-function LoginForm() {
+function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectQuery = searchParams.get("redirect");
 
-  const { isAuthenticated, platformRoles, workspaces, login, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, signup, isLoading: authLoading } = useAuth();
 
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // If already authenticated, redirect to appropriate destination
+  // If already authenticated, redirect to workspace
   useEffect(() => {
     if (isAuthenticated && !authLoading) {
-      const isPlatformStaff = platformRoles.some((r) =>
-        ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"].includes(r)
-      );
       if (redirectQuery) {
         router.replace(redirectQuery);
-      } else if (isPlatformStaff && workspaces.length === 0) {
-        router.replace("/admin");
       } else {
         router.replace("/workspace");
       }
     }
-  }, [isAuthenticated, authLoading, platformRoles, workspaces, redirectQuery, router]);
+  }, [isAuthenticated, authLoading, redirectQuery, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError("Please provide both email and password.");
+    if (!displayName || !email || !password) {
+      setError("Please fill in all required fields.");
+      return;
+    }
+
+    if (password.length < 12) {
+      setError("Password must be at least 12 characters.");
       return;
     }
 
     setError(null);
     setIsSubmitting(true);
 
-    const result = await login(email, password);
+    const result = await signup(displayName, email, password);
     setIsSubmitting(false);
 
     if (result.success) {
       if (redirectQuery) {
         router.push(redirectQuery);
-      } else if (email.toLowerCase().includes("admin")) {
-        router.push("/admin");
       } else {
         router.push("/workspace");
       }
     } else {
-      setError(result.error || "Authentication failed.");
+      setError(result.error || "Registration failed.");
     }
   };
 
@@ -134,12 +142,12 @@ function LoginForm() {
           <span className="authBrandName">Spark</span>
         </Link>
 
-        <h1 className="authHeading">Sign in to Spark</h1>
+        <h1 className="authHeading">Create your account</h1>
         <p className="authSubheading">
-          The calm operating system for startup teams and founder circles.
+          Start building your startup workspace and community today.
         </p>
 
-        {/* OAuth Social Login Buttons */}
+        {/* OAuth Social Signup Buttons */}
         <div className="oauthButtonGroup">
           <button
             type="button"
@@ -160,7 +168,7 @@ function LoginForm() {
         </div>
 
         <div className="authDivider">
-          <span>or continue with email</span>
+          <span>or register with email</span>
         </div>
 
         {/* Error Alert */}
@@ -177,8 +185,27 @@ function LoginForm() {
           </div>
         )}
 
-        {/* Login Form */}
+        {/* Signup Form */}
         <form onSubmit={handleSubmit} className="authForm" noValidate>
+          <div className="authField">
+            <label htmlFor="auth-name" className="authLabel">
+              Full name or founder handle
+            </label>
+            <div className="authInputWrapper">
+              <UserIcon />
+              <input
+                id="auth-name"
+                type="text"
+                required
+                autoComplete="name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Alex Morgan"
+                className="authInput"
+              />
+            </div>
+          </div>
+
           <div className="authField">
             <label htmlFor="auth-email" className="authLabel">
               Work email
@@ -192,7 +219,7 @@ function LoginForm() {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="founder@startup.io"
+                placeholder="alex@startup.io"
                 className="authInput"
               />
             </div>
@@ -201,18 +228,8 @@ function LoginForm() {
           <div className="authField">
             <div className="authLabelRow">
               <label htmlFor="auth-password" className="authLabel">
-                Password
+                Password (min 12 characters)
               </label>
-              <a
-                href="#reset"
-                className="authForgotLink"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setError("Password reset instructions will be sent to your work email.");
-                }}
-              >
-                Forgot password?
-              </a>
             </div>
             <div className="authInputWrapper">
               <LockIcon />
@@ -220,7 +237,7 @@ function LoginForm() {
                 id="auth-password"
                 type={showPassword ? "text" : "password"}
                 required
-                autoComplete="current-password"
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
@@ -242,19 +259,19 @@ function LoginForm() {
             disabled={isSubmitting || authLoading}
             className="authSubmitBtn"
           >
-            {isSubmitting ? "Authenticating..." : "Sign in →"}
+            {isSubmitting ? "Creating account..." : "Create account →"}
           </button>
         </form>
 
         <div className="authSwitchNotice">
-          <span>Don&apos;t have an account? </span>
-          <Link href={`/signup${redirectQuery ? `?redirect=${encodeURIComponent(redirectQuery)}` : ""}`}>
-            Create an account
+          <span>Already have an account? </span>
+          <Link href={`/login${redirectQuery ? `?redirect=${encodeURIComponent(redirectQuery)}` : ""}`}>
+            Sign in
           </Link>
         </div>
 
         <p className="authTermsNotice">
-          By signing in, you agree to Spark’s{" "}
+          By signing up, you agree to Spark’s{" "}
           <Link href="/terms">Terms of Service</Link> and{" "}
           <Link href="/privacy">Privacy Policy</Link>.
         </p>
@@ -263,7 +280,7 @@ function LoginForm() {
   );
 }
 
-export default function LoginPage() {
+export default function SignupPage() {
   return (
     <Suspense
       fallback={
@@ -274,8 +291,7 @@ export default function LoginPage() {
         </div>
       }
     >
-      <LoginForm />
+      <SignupForm />
     </Suspense>
   );
 }
-

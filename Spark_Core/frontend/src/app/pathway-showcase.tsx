@@ -271,7 +271,10 @@ function PathwayHolocronWidget({
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeRef = useRef(active);
-  activeRef.current = active;
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -443,6 +446,7 @@ function PathwayHolocronWidget({
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type]);
 
   return <canvas ref={canvasRef} className="pathwayHolocronCanvas" aria-hidden="true" />;

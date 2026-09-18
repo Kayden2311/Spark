@@ -32,6 +32,7 @@ export interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signup: (displayName: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
 }
@@ -72,8 +73,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refreshSession();
-  }, [refreshSession]);
+    let isMounted = true;
+    const checkAuth = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/me`, {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+
+        if (!isMounted) return;
+        if (res.ok) {
+          const data = await res.json();
+          setUser(data.user);
+          setWorkspaces(data.workspaces || []);
+          setPlatformRoles(data.platformRoles || []);
+        } else {
+          setUser(null);
+          setWorkspaces([]);
+          setPlatformRoles([]);
+        }
+      } catch {
+        if (!isMounted) return;
+        setUser(null);
+        setWorkspaces([]);
+        setPlatformRoles([]);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void checkAuth();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const login = async (
     email: string,
@@ -114,6 +150,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signup = async (
+    displayName: string,
+    email: string,
+    password: string,
+  ): Promise<{ success: boolean; error?: string }> => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/password/sign-up`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, application/problem+json",
+        },
+        body: JSON.stringify({ displayName, email, password }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+        if (data.workspace) setWorkspaces([data.workspace]);
+        setIsLoading(false);
+        return { success: true };
+      }
+
+      const errData = await res.json().catch(() => ({}));
+      setIsLoading(false);
+      return {
+        success: false,
+        error: errData.detail || errData.title || "Sign up failed. Please check your details.",
+      };
+    } catch {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: "Unable to connect to authentication server. Please ensure backend is running.",
+      };
+    }
+  };
+
   const logout = async () => {
     setIsLoading(true);
     try {
@@ -140,6 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         login,
+        signup,
         logout,
         refreshSession,
       }}
