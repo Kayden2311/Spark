@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "../auth-context";
-import { HeroParticles } from "../hero-particles";
+import { SignalParticles } from "../signal-particles";
 
 function SparkMark() {
   return (
@@ -252,8 +252,8 @@ export default function PricingPage() {
 
   return (
     <main className="sparkLanding pricingPageRoot">
-      {/* Global Background Particles */}
-      <HeroParticles fixed />
+      {/* Global Background Particles (Live Signal Flow wave) */}
+      <SignalParticles />
 
       {/* Spark Header */}
       <header className="sparkHeader">

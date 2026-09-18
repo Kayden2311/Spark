@@ -109,9 +109,6 @@ export default function HomePage() {
   const workspaceTarget = isAuthenticated ? "/workspace" : "/login?redirect=/workspace";
 
   return <main className="sparkLanding">
-    {/* Global Background Particles */}
-    <HeroParticles fixed />
-
     <a className="skipLink" href="#main-content">Skip to content</a>
     <header className="sparkHeader">
       <Link className="sparkBrand" href="/" aria-label="Spark home"><SparkMark /><span>Spark</span></Link>
@@ -129,6 +126,7 @@ export default function HomePage() {
     </header>
 
     <section className="sparkHero" id="main-content">
+      <HeroParticles />
       <div className="heroGlow" aria-hidden="true" />
       <div className="sparkHeroInner">
         <div className="sparkHeroCopy">

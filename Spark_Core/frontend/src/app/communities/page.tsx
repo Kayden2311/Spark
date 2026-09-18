@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useMemo } from "react";
 import { useAuth } from "../auth-context";
-import { HeroParticles } from "../hero-particles";
+import { SignalParticles } from "../signal-particles";
 import { communities, type Community } from "./mock-data";
 
 function SparkMark() {
@@ -91,8 +91,8 @@ export default function CommunitiesPage() {
 
   return (
     <main className="sparkLanding communityPageRoot">
-      {/* Global Background Particles */}
-      <HeroParticles fixed />
+      {/* Global Background Particles (Live Signal Flow wave) */}
+      <SignalParticles />
 
       {/* Top Header */}
       <header className="sparkHeader">
