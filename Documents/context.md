@@ -10,19 +10,20 @@ All repository content must be English. This includes source code, identifiers, 
 
 Application code lives in `Spark_Core` as a pnpm workspace:
 
-- `frontend`: Next.js and TypeScript.
-- `backend`: Fastify and TypeScript, organized as a modular monolith.
-- `infra`: local Redis configuration. Local PostgreSQL runs directly on port 5432.
+- `frontend`: Next.js 16, React 19, and TypeScript with UI/UX Pro Max design system (dark glassmorphism, responsive navigation, production-ready login with OAuth suite, interactive Platform Governance Console at `/admin`, and landing page showcases).
+- `backend`: Fastify and TypeScript, organized as a pragmatic Clean Architecture modular monolith.
+- `infra`: local Redis configuration and local PostgreSQL on port 5432.
 
-The implemented baseline provides one health endpoint, startup configuration and dependency checks, Redis-backed rate limiting, OpenAPI, and tests. CI is not configured yet. Product features, authentication, authorization, migrations, RLS, search, caching, and deployment are implemented only when their stories are scheduled. Documentation must never describe a proposed capability as already operational.
+The implemented backend baseline provides process health (`GET /health`), clean REST authentication (`POST /api/v1/auth/password/sign-in`, `GET /api/v1/me`, `POST /api/v1/auth/sign-out`), Argon2id password hashing, SHA-256 bytea session tokens, Drizzle ORM migrations (`0000_init` to `0005_platform_roles`), multi-role platform governance (`super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`), startup configuration checks, Redis-backed rate limiting, OpenAPI docs, and integration tests. CI is planned. Product domain features (workspaces, communities, Kanban, notifications, billing) are implemented iteratively as scheduled. Documentation must never describe an unverified capability as operational.
 
 ## Technology choices
 
 | Area | Choice | Reason |
 | --- | --- | --- |
-| Frontend | Next.js, React, TypeScript | Server rendering, routing, and a mature ecosystem. |
-| Backend | Fastify, TypeScript | Small runtime, schema-first HTTP APIs, and good performance. |
-| Database | PostgreSQL through `pg` | Transactions, constraints, and indexing. Add Drizzle when the first product schema exists. |
+| Frontend | Next.js, React, TypeScript | Server rendering, routing, accessible design tokens, and glassmorphic UI. |
+| Backend | Fastify, TypeScript | Small runtime, schema-first HTTP APIs, Clean Architecture, and good performance. |
+| Database | PostgreSQL through `pg` & Drizzle ORM | ACID transactions, strict schema constraints, Drizzle migrations (`0000`–`0005`), and RLS. |
+| Security & Auth | Argon2id, SHA-256 bytea sessions | Robust password hashing, opaque session token management, and platform role RBAC. |
 | Cache and limiter | Redis | Shared cache, distributed rate limits, and short-lived coordination. |
 | Contracts | Fastify JSON Schema and OpenAPI | Runtime validation and generated API documentation without a premature shared package. |
 | Tests | Vitest and focused integration tests | Fast feedback with real dependency coverage where it matters. |

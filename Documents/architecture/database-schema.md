@@ -1,6 +1,6 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations, baseline constraints, FORCE RLS, and read-only runtime grants are implemented. Authentication APIs, write use cases, worker adapters, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_init.sql` to `0005_platform_roles.sql`), baseline constraints, FORCE RLS, read-only runtime grants, and authentication APIs (`/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) are implemented and verified. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
 
@@ -33,12 +33,13 @@ Initial design choices: billing is per workspace; projects are visible to active
 | auth_identities | id, user_id, provider text, issuer text, provider_subject text, provider_email text?, provider_email_verified boolean, linked_at timestamptz, last_login_at timestamptz? | UNIQUE (provider, issuer, provider_subject); subject is opaque and case-sensitive. Supports Google/GitHub/Apple through provider adapters. |
 | sessions | id, user_id, token_hash bytea, authenticated_identity_id?, auth_method text, last_seen_at timestamptz, expires_at timestamptz, revoked_at timestamptz?, rotated_from_id? | UNIQUE token_hash; hash a cryptographically random opaque token. Expiry after creation. Identity and predecessor FKs include user_id. |
 | account_tokens | id, user_id, user_email_id?, purpose text, token_hash bytea, expires_at timestamptz, consumed_at timestamptz? | UNIQUE token_hash. Purpose verify_email/reset_password; verification requires email FK belonging to user. Atomic single-use consumption while unexpired. |
+| platform_role_assignments | id, user_id, role text, granted_by_user_id?, revoked_at timestamptz? | Global platform staff roles: `super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`. Partial UNIQUE (user_id, role) WHERE revoked_at IS NULL. Separately provisioned from workspace memberships. |
 
 A Google-only user has no password_credentials row. No plaintext, reversible password storage, dummy passwords, or password hashes in DTOs/logs/audit. Password setup/reset requires verified ownership and replaces credentials and revokes affected sessions transactionally. Secure-cookie opaque sessions rotate and can be revoked server-side.
 
 Never auto-link accounts based only on matching provider email. Require reauthenticated explicit linking or verified recovery on collision. Validate issuer/audience/signature/expiry, OAuth state, nonce and PKCE where applicable. Reject unlinking the last usable login/recovery method. OAuth state/PKCE material belongs in expiring server storage. Login-only OAuth does not persist access/refresh tokens; later calendar integration uses a separate encrypted grants table with scopes, key reference, expiry and revocation.
 
-A narrowly scoped authentication adapter accesses credential/session tables; ordinary product queries cannot enumerate them. Login/reset endpoints use existing Redis rate limits and non-enumerating errors. This is an implementation contract, not operational authentication.
+A narrowly scoped authentication adapter accesses credential/session tables; ordinary product queries cannot enumerate them. Login/reset endpoints use existing Redis rate limits and non-enumerating errors. Platform staff roles (`super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`) are strictly for global Spark platform governance, completely decoupled from tenant-level workspace or community memberships.
 
 ## Workspaces, startup profiles, teams, connections
 

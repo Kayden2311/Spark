@@ -2,9 +2,9 @@
 
 ## Current state
 
-The database entity model is defined in `Spark_Core/backend/src/infrastructure/database/schema.ts`. It mirrors the current `spark` migration files and exposes `DatabaseRow<TTable>` and `DatabaseInsert<TTable>` for infrastructure adapters. These are persistence types, not domain entities or API DTOs.
+The database entity model is defined in `Spark_Core/backend/src/infrastructure/database/schema.ts` and managed via Drizzle ORM migrations (`0000_init.sql` through `0005_platform_roles.sql`). It mirrors the `spark` schema and exposes `DatabaseRow<TTable>` and `DatabaseInsert<TTable>` for infrastructure adapters.
 
-The backend currently exposes only process health. No product routes, authentication flow, worker, payment integration, cache, or public discovery endpoint is implemented. The items below are a delivery order, not a statement of current behavior.
+The backend currently exposes process health (`GET /health`), clean REST authentication (`POST /api/v1/auth/password/sign-in`, `GET /api/v1/me`, `POST /api/v1/auth/sign-out`), session lookup with Argon2id password verification, SHA-256 bytea session tokens, and multi-role platform governance (`super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`). Product routes (workspaces, communities, Kanban, notifications, billing, promotions) are in the delivery backlog below.
 
 ## Delivery rules
 
@@ -18,8 +18,8 @@ The backend currently exposes only process health. No product routes, authentica
 
 ## 1. Runtime foundation
 
-1. Create a PostgreSQL Drizzle client and transaction helper that applies the request's database role/context safely for pooled connections.
-2. Add request authentication context and an authorization guard that resolves active workspace and community memberships.
+1. [Implemented] PostgreSQL Drizzle client, connection pool, and migrations (0000–0005).
+2. [Implemented] Request authentication context and session resolution with platform role query.
 3. Add a reusable cursor codec for ordered public collection endpoints; reject invalid cursors and clamp page limits.
 4. Add an idempotency store adapter over `idempotency_requests` for mutation flows that can be retried.
 5. Add an outbox dispatcher with leasing, bounded retries, and idempotent delivery handlers. It must run only after committed database writes.
@@ -31,13 +31,14 @@ Security and operations: rotate opaque session tokens, hash every bearer token b
 
 Resources and commands:
 
-- `POST /api/v1/auth/password/sign-up`
-- `POST /api/v1/auth/password/sign-in`
-- `POST /api/v1/auth/oauth/{provider}/start` and callback handling
-- `POST /api/v1/auth/sign-out`
-- `POST /api/v1/auth/sessions/{sessionId}/revoke`
-- `POST /api/v1/auth/password-reset-requests` and reset completion
-- `GET/PATCH /api/v1/me`
+- `POST /api/v1/auth/password/sign-in` (Implemented — Argon2id verification, SHA-256 bytea session creation, cookie emission)
+- `GET /api/v1/me` (Implemented — session token authentication, user profile, platform roles resolution)
+- `POST /api/v1/auth/sign-out` (Implemented — session revocation, cookie clearing)
+- `POST /api/v1/auth/password/sign-up` (Backlog)
+- `POST /api/v1/auth/oauth/{provider}/start` and callback handling (Backlog)
+- `POST /api/v1/auth/sessions/{sessionId}/revoke` (Backlog)
+- `POST /api/v1/auth/password-reset-requests` and reset completion (Backlog)
+- `PATCH /api/v1/me` (Backlog)
 
 Implement password hashing with Argon2id, verified email ownership, OAuth subject-to-user linking, session rotation and revocation, CSRF protection for cookie-authenticated mutations, strict redirect URI allowlists, and per-IP plus per-account throttling for sign-in/reset attempts. Never expose whether an email exists. Do not cache account responses.
 

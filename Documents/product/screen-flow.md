@@ -49,13 +49,35 @@ Filters at step 2: keyword, topic, location, and startup stage. The eventual API
 | 2 | Moderator queue | Review authorized reports | Resolve report | Planned |
 | 3 | Moderation record | Preserve actor, target, reason, and time | Return to queue | Planned |
 
+## Journey 5: Authentication and account access
+
+| Step | Route | Goal | Primary action | Mockup state |
+| --- | --- | --- | --- | --- |
+| 1 | `/login` | Authenticate into Spark | Sign in with email/password or OAuth (GitHub, Google) | Implemented (UI/UX Pro Max) |
+| 2 | `/login` (Sign out) | Terminate current session | Revoke session & clear cookie | Implemented |
+| 3 | `/signup` | Register new user account | Submit credentials | Planned |
+| 4 | `/forgot-password` | Initiate password recovery | Request reset token | Planned |
+
+## Journey 6: Platform governance and moderation
+
+| Step | Route | Goal | Primary action | Mockup state |
+| --- | --- | --- | --- | --- |
+| 1 | `/admin` | Global platform administration | Select governance domain (Communities, Reports, Campaigns, Users) | Implemented (Platform Admin Console) |
+| 2 | `/admin` (Communities) | Moderate communities across platform | Feature, freeze, or archive community | Implemented |
+| 3 | `/admin` (Reports) | Resolve flagged content & violations | Dismiss or take action | Implemented |
+| 4 | `/admin` (Campaigns) | Review sponsored startup promotions | Approve or reject campaign | Implemented |
+| 5 | `/admin` (Users) | Manage platform user status | Suspend, reactivate, or audit roles | Implemented |
+
 ## Delivery order
 
-1. Discovery list and community detail mockups.
-2. Membership request and pending-state mockups.
-3. Community feed and post detail mockups.
-4. Refine the existing workspace mockups from feedback.
-5. Add API contracts and authorization only when the corresponding story is scheduled.
+1. [Implemented] Landing page showcase with interactive live previews and responsive navigation.
+2. [Implemented] Production-ready `/login` page with dark glassmorphism, OAuth suite, and Fastify REST auth backend.
+3. [Implemented] Platform Governance Console at `/admin` for multi-role platform moderation (`super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`).
+4. Discovery list and community detail mockups (`/communities`, `/communities/[slug]`).
+5. Membership request and pending-state mockups.
+6. Community feed and post detail mockups.
+7. Refine the existing workspace mockups (`/workspace`, `/schedule`, `/notifications`, `/billing`).
+8. Add API contracts and authorization only when the corresponding story is scheduled.
 
 ## Mock data rules
 
