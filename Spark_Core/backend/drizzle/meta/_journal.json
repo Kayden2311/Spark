@@ -36,6 +36,13 @@
       "when": 1789218454029,
       "tag": "0004_review_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789726500000,
+      "tag": "0005_platform_roles",
+      "breakpoints": true
     }
   ]
 }
