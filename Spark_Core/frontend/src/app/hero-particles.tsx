@@ -2,7 +2,15 @@
 
 import { useEffect, useRef } from "react";
 
-type Dot = { x: number; y: number; originX: number; originY: number; targetX: number; targetY: number; size: number; angle: number };
+type Dot = {
+  x: number;
+  y: number;
+  originX: number;
+  originY: number;
+  size: number;
+  angle: number;
+  phase: number;
+};
 
 const maxDots = 1600;
 
@@ -16,68 +24,15 @@ export function HeroParticles() {
 
     let frame = 0;
     let dots: Dot[] = [];
-    let active = false;
-    let pointerX = -1;
-    let pointerY = -1;
-    let pendingPointer = false;
-    let sphereRadius = 154;
-    let captureRadius = 270;
+    // Smooth moving bubble dome center (interpolates towards mouse)
+    let domeX = -1000;
+    let domeY = -1000;
+    let targetX = -1000;
+    let targetY = -1000;
+
+    let sphereRadius = 160;
+    let captureRadius = 290;
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-    const draw = () => {
-      const bounds = canvas.getBoundingClientRect();
-      context.clearRect(0, 0, bounds.width, bounds.height);
-      let moving = false;
-
-      if (pendingPointer) {
-        active = pointerX >= 0 && pointerX <= bounds.width && pointerY >= 0 && pointerY <= bounds.height;
-        for (const dot of dots) {
-          const dx = dot.originX - pointerX;
-          const dy = dot.originY - pointerY;
-          const distance = Math.hypot(dx, dy);
-          const surface = Math.min(distance / sphereRadius, 1);
-          const curve = active && surface < 1 ? sphereRadius * .12 * Math.sin(surface * Math.PI) : 0;
-          const clothPull = active ? sphereRadius * .06 / (1 + distance / captureRadius) : 0;
-          const directionX = distance ? dx / distance : Math.cos(dot.angle);
-          const directionY = distance ? dy / distance : Math.sin(dot.angle);
-          dot.targetX = dot.originX + directionX * (curve - clothPull);
-          dot.targetY = dot.originY + directionY * (curve - clothPull);
-        }
-        pendingPointer = false;
-      }
-
-      const breathing = active ? 1 + Math.sin(performance.now() / 700) * .09 : 1;
-      context.shadowBlur = active ? 14 : 7;
-      context.shadowColor = active ? "rgba(96, 165, 250, .95)" : "rgba(59, 130, 246, .72)";
-      for (const dot of dots) {
-        dot.x += (dot.targetX - dot.x) * .2;
-        dot.y += (dot.targetY - dot.y) * .2;
-        moving ||= active || Math.abs(dot.targetX - dot.x) > .2 || Math.abs(dot.targetY - dot.y) > .2;
-        const inSphere = active && Math.hypot(dot.x - pointerX, dot.y - pointerY) <= sphereRadius * 1.05;
-        const x = inSphere ? pointerX + (dot.x - pointerX) * breathing : dot.x;
-        const y = inSphere ? pointerY + (dot.y - pointerY) * breathing : dot.y;
-        const depth = inSphere ? Math.max(0, 1 - Math.hypot(x - pointerX, y - pointerY) / sphereRadius) : 0;
-        context.beginPath();
-        context.fillStyle = active ? "rgba(96, 165, 250, .98)" : "rgba(37, 99, 235, .84)";
-        context.globalAlpha = active ? .45 + depth * .55 : 1;
-        context.arc(x, y, dot.size * (inSphere ? .9 + depth * .9 : 1), 0, Math.PI * 2);
-        context.fill();
-      }
-      context.globalAlpha = 1;
-
-      frame = moving ? requestAnimationFrame(draw) : 0;
-    };
-
-    const schedule = () => { if (!frame) frame = requestAnimationFrame(draw); };
-
-    const settle = () => {
-      active = false;
-      for (const dot of dots) {
-        dot.targetX = dot.originX;
-        dot.targetY = dot.originY;
-      }
-      schedule();
-    };
 
     const resize = () => {
       const bounds = canvas.getBoundingClientRect();
@@ -85,40 +40,145 @@ export function HeroParticles() {
       canvas.width = Math.round(bounds.width * ratio);
       canvas.height = Math.round(bounds.height * ratio);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      sphereRadius = Math.min(bounds.width, bounds.height) * .38;
+
+      sphereRadius = Math.min(bounds.width, bounds.height) * 0.36;
       captureRadius = sphereRadius * 1.8;
-      const columns = Math.ceil(Math.sqrt(maxDots * bounds.width / bounds.height));
+
+      // Default initial position of the bubble block before hover
+      if (targetX < -500) {
+        targetX = bounds.width * 0.65;
+        targetY = bounds.height * 0.48;
+        domeX = targetX;
+        domeY = targetY;
+      }
+
+      const columns = Math.ceil(Math.sqrt((maxDots * bounds.width) / bounds.height));
       const rows = Math.ceil(maxDots / columns);
+
       dots = Array.from({ length: maxDots }, (_, index) => {
-        const x = ((index % columns) + .5) * bounds.width / columns;
-        const y = (Math.floor(index / columns) + .5) * bounds.height / rows;
-        return { x, y, originX: x, originY: y, targetX: x, targetY: y, size: index % 3 === 0 ? 1.8 : 1.25, angle: index * 2.4 };
+        const x = (((index % columns) + 0.5) * bounds.width) / columns;
+        const y = ((Math.floor(index / columns) + 0.5) * bounds.height) / rows;
+        return {
+          x,
+          y,
+          originX: x,
+          originY: y,
+          size: index % 3 === 0 ? 1.8 : 1.25,
+          angle: index * 2.4,
+          phase: x * 0.008 + y * 0.01,
+        };
       });
-      schedule();
+    };
+
+    const draw = (time: number) => {
+      const bounds = canvas.getBoundingClientRect();
+      context.clearRect(0, 0, bounds.width, bounds.height);
+
+      if (motion.matches) {
+        frame = requestAnimationFrame(draw);
+        return;
+      }
+
+      const t = time * 0.0015;
+
+      // Smoothly glide the entire bubble volume towards cursor target
+      domeX += (targetX - domeX) * 0.08;
+      domeY += (targetY - domeY) * 0.08;
+
+      // Global breathing wave ripple inside the bubble block
+      const bubbleBreath = Math.sin(t * 2.2) * 0.15;
+      const currentRadius = sphereRadius * (1 + bubbleBreath * 0.4);
+
+      context.shadowBlur = 12;
+      context.shadowColor = "rgba(96, 165, 250, 0.85)";
+
+      for (const dot of dots) {
+        // Distance from dot to the moving 3D bubble center
+        const dx = dot.originX - domeX;
+        const dy = dot.originY - domeY;
+        const distance = Math.hypot(dx, dy);
+
+        // Spherical surface displacement calculation (Bubble wave volume)
+        const normDist = distance / currentRadius;
+
+        let curX = dot.originX;
+        let curY = dot.originY;
+        let inBubble = false;
+        let depth = 0;
+
+        if (normDist < 1.0) {
+          inBubble = true;
+          // 3D spherical dome elevation + harmonic ripple wave
+          const elevation = Math.sqrt(1 - normDist * normDist); // 0 at edge, 1 at peak
+          const waveRipple = Math.sin(normDist * Math.PI * 3 - t * 3.5) * 0.12 * elevation;
+          depth = Math.max(0, elevation + waveRipple);
+
+          // Radial displacement pushing outwards along sphere surface curvature
+          const surfaceDisplace = (elevation * 0.45 + waveRipple * 0.5) * currentRadius * 0.35;
+          const dirX = distance > 0 ? dx / distance : Math.cos(dot.angle);
+          const dirY = distance > 0 ? dy / distance : Math.sin(dot.angle);
+
+          curX = dot.originX + dirX * surfaceDisplace;
+          curY = dot.originY + dirY * surfaceDisplace;
+        } else if (distance < captureRadius) {
+          // Subtle cloth tension suction towards bubble edge
+          const suction = ((captureRadius - distance) / (captureRadius - currentRadius)) * 8;
+          const dirX = dx / distance;
+          const dirY = dy / distance;
+          curX = dot.originX - dirX * suction;
+          curY = dot.originY - dirY * suction;
+        }
+
+        // Smooth position transition
+        dot.x += (curX - dot.x) * 0.25;
+        dot.y += (curY - dot.y) * 0.25;
+
+        // Render point with glowing bubble appearance
+        const renderSize = dot.size * (inBubble ? 1 + depth * 1.35 : 1);
+
+        context.beginPath();
+        if (inBubble && depth > 0.25) {
+          context.fillStyle = `rgba(96, 165, 250, ${Math.min(1, 0.7 + depth * 0.35)})`;
+          context.shadowBlur = depth * 12;
+        } else {
+          context.fillStyle = "rgba(37, 99, 235, 0.7)";
+          context.shadowBlur = 0;
+        }
+
+        context.globalAlpha = inBubble ? 0.6 + depth * 0.4 : 0.38;
+        context.arc(dot.x, dot.y, Math.max(0.7, renderSize), 0, Math.PI * 2);
+        context.fill();
+      }
+
+      context.globalAlpha = 1;
+      context.shadowBlur = 0;
+      frame = requestAnimationFrame(draw);
     };
 
     const move = (event: PointerEvent) => {
-      if (motion.matches) return;
       const bounds = canvas.getBoundingClientRect();
-      pointerX = event.clientX - bounds.left;
-      pointerY = event.clientY - bounds.top;
-      pendingPointer = true;
-      schedule();
+      targetX = event.clientX - bounds.left;
+      targetY = event.clientY - bounds.top;
+    };
+
+    const leave = () => {
+      const bounds = canvas.getBoundingClientRect();
+      targetX = bounds.width * 0.65;
+      targetY = bounds.height * 0.48;
     };
 
     resize();
+    frame = requestAnimationFrame(draw);
+
     window.addEventListener("resize", resize);
     window.addEventListener("pointermove", move, { passive: true });
-    window.addEventListener("pointerup", settle, { passive: true });
-    window.addEventListener("pointercancel", settle, { passive: true });
-    motion.addEventListener("change", settle);
+    window.addEventListener("pointerleave", leave, { passive: true });
+
     return () => {
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("resize", resize);
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", settle);
-      window.removeEventListener("pointercancel", settle);
-      motion.removeEventListener("change", settle);
+      window.removeEventListener("pointerleave", leave);
     };
   }, []);
 
