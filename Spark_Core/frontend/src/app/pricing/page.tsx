@@ -251,7 +251,7 @@ export default function PricingPage() {
   ];
 
   return (
-    <main className="pricingPageRoot">
+    <main className="sparkLanding pricingPageRoot">
       {/* Spark Header */}
       <header className="sparkHeader">
         <Link className="sparkBrand" href="/" aria-label="Spark home">
