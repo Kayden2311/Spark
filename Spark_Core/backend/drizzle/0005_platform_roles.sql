@@ -40,4 +40,7 @@ CREATE POLICY communities_spark_app_update ON spark.communities FOR UPDATE TO sp
 CREATE POLICY promotion_campaigns_spark_app_all ON spark.promotion_campaigns FOR ALL TO spark_app USING (true) WITH CHECK (true);--> statement-breakpoint
 CREATE POLICY promotion_reviews_spark_app_all ON spark.promotion_reviews FOR ALL TO spark_app USING (true) WITH CHECK (true);--> statement-breakpoint
 CREATE POLICY platform_role_assignments_spark_app_update ON spark.platform_role_assignments FOR UPDATE TO spark_app USING (true);--> statement-breakpoint
-CREATE POLICY platform_role_assignments_spark_app_insert ON spark.platform_role_assignments FOR INSERT TO spark_app WITH CHECK (true);
+CREATE POLICY platform_role_assignments_spark_app_insert ON spark.platform_role_assignments FOR INSERT TO spark_app WITH CHECK (true);--> statement-breakpoint
+CREATE POLICY users_spark_app_select ON spark.users FOR SELECT TO spark_app USING (true);--> statement-breakpoint
+CREATE POLICY workspaces_spark_app_select ON spark.workspaces FOR SELECT TO spark_app USING (true);--> statement-breakpoint
+CREATE POLICY workspace_memberships_spark_app_select ON spark.workspace_memberships FOR SELECT TO spark_app USING (true);
