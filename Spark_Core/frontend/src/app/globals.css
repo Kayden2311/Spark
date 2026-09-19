@@ -4512,6 +4512,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .circleTwoColLayout {
     grid-template-columns: 1fr;
   }
+}
+
 /* ==========================================================================
    PLATFORM GOVERNANCE & MODERATOR CONSOLE (LIGHT SAAS THEME)
    ========================================================================== */
