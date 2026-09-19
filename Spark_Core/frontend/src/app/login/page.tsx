@@ -68,7 +68,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirectQuery = searchParams.get("redirect");
 
-  const { isAuthenticated, platformRoles, workspaces, login, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, platformRoles, login, isLoading: authLoading } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -84,13 +84,13 @@ function LoginForm() {
       );
       if (redirectQuery) {
         router.replace(redirectQuery);
-      } else if (isPlatformStaff && workspaces.length === 0) {
+      } else if (isPlatformStaff) {
         router.replace("/admin");
       } else {
         router.replace("/workspace");
       }
     }
-  }, [isAuthenticated, authLoading, platformRoles, workspaces, redirectQuery, router]);
+  }, [isAuthenticated, authLoading, platformRoles, redirectQuery, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,10 +108,6 @@ function LoginForm() {
     if (result.success) {
       if (redirectQuery) {
         router.push(redirectQuery);
-      } else if (email.toLowerCase().includes("admin")) {
-        router.push("/admin");
-      } else {
-        router.push("/workspace");
       }
     } else {
       setError(result.error || "Authentication failed.");

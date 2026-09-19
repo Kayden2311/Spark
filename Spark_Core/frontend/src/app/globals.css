@@ -4513,6 +4513,225 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .circleTwoColLayout {
     grid-template-columns: 1fr;
   }
+/* ==========================================================================
+   PLATFORM GOVERNANCE & MODERATOR CONSOLE (UI/UX PRO MAX)
+   ========================================================================== */
+
+.adminConsoleRoot {
+  min-height: 100vh;
+  background-color: #080c14;
+  color: #f8fafc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+.adminTopNav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 2rem;
+  background: #0d1322;
+  border-bottom: 1px solid #1e293b;
+}
+
+.adminBrandBadge {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.adminPill {
+  font-size: 0.72rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+}
+
+.adminMain {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.adminHeroCard {
+  background: linear-gradient(135deg, #0f172a 0%, #111827 100%);
+  border: 1px solid #1e293b;
+  border-radius: 1rem;
+  padding: 2rem 2.25rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.adminHeroCard::after {
+  content: "";
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.adminMetricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.adminMetricCard {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.adminMetricCard:hover {
+  transform: translateY(-2px);
+  border-color: #334155;
+}
+
+.adminMetricCard span {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.adminMetricCard strong {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: -0.02em;
+}
+
+.adminTableCard {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 0.85rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.adminTableCard header {
+  padding: 1.25rem 1.5rem;
+  background: #111b2e;
+  border-bottom: 1px solid #1e293b;
+}
+
+.adminTable {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.adminTable thead th {
+  background: #0d1527;
+  color: #64748b;
+  font-weight: 700;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid #1e293b;
+}
+
+.adminTable tbody tr {
+  border-bottom: 1px solid #1e293b;
+  transition: background 0.1s ease;
+}
+
+.adminTable tbody tr:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.adminTable tbody tr:last-child {
+  border-bottom: 0;
+}
+
+.adminTable td {
+  padding: 1rem 1.25rem;
+  vertical-align: middle;
+  color: #cbd5e1;
+}
+
+.adminTable td strong {
+  color: #f8fafc;
+}
+
+.adminStatusPill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  text-transform: capitalize;
+}
+
+.adminStatusPill.open,
+.adminStatusPill.pending {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fcd34d;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.adminStatusPill.active,
+.adminStatusPill.visible,
+.adminStatusPill.resolved {
+  background: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.adminStatusPill.hidden,
+.adminStatusPill.suspended,
+.adminStatusPill.flagged {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.adminStatusPill.archived,
+.adminStatusPill.dismissed {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+@media (max-width: 768px) {
+  .adminTopNav {
+    padding: 0.85rem 1rem;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+  .adminMain {
+    padding: 1rem;
+  }
+  .adminTableCard {
+    overflow-x: auto;
+  }
 }
 
 
