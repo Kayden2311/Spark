@@ -68,6 +68,12 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthPluginOpti
   app.post(
     "/api/v1/auth/password/sign-up",
     {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: 60 * 1000,
+        },
+      },
       schema: {
         body: {
           type: "object",
@@ -225,6 +231,12 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthPluginOpti
   app.post(
     "/api/v1/auth/password/sign-in",
     {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: 60 * 1000,
+        },
+      },
       schema: {
         body: {
           type: "object",

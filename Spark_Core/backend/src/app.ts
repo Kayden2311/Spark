@@ -32,10 +32,30 @@ function statusCode(error: unknown): number {
   return 500;
 }
 
+function problemTitle(code: number): string {
+  switch (code) {
+    case 400: return "Bad Request";
+    case 401: return "Unauthorized";
+    case 403: return "Forbidden";
+    case 404: return "Not Found";
+    case 409: return "Conflict";
+    case 429: return "Too Many Requests";
+    case 500: return "Internal Server Error";
+    default: return code >= 500 ? "Internal Server Error" : "Request Failed";
+  }
+}
+
 function problemCode(code: number): string {
-  if (code === 404) return "not_found";
-  if (code >= 500) return "internal_error";
-  return "request_failed";
+  switch (code) {
+    case 400: return "bad_request";
+    case 401: return "unauthenticated";
+    case 403: return "forbidden";
+    case 404: return "not_found";
+    case 409: return "conflict";
+    case 429: return "rate_limit_exceeded";
+    case 500: return "internal_error";
+    default: return code >= 500 ? "internal_error" : "request_failed";
+  }
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -66,20 +86,24 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   app.setErrorHandler(async (error, request, reply) => {
     const code = statusCode(error);
-    request.log.error({ err: error }, "Request failed");
+    if (code >= 500) {
+      request.log.error({ err: error }, "Request failed");
+    }
+    const message =
+      typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
+        ? error.message
+        : "The request could not be processed.";
+
     return reply
       .code(code)
       .header("Cache-Control", "private, no-store")
       .type("application/problem+json")
       .send({
         type: "about:blank",
-        title: code === 500 ? "Internal Server Error" : "Request Failed",
+        title: problemTitle(code),
         status: code,
         code: problemCode(code),
-        detail:
-          code === 500
-            ? "An unexpected error occurred."
-            : "The request could not be processed.",
+        detail: code === 500 ? "An unexpected error occurred." : message,
         instance: request.url,
         requestId: request.id,
       });

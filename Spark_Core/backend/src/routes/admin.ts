@@ -222,6 +222,12 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
   }>(
     "/api/v1/admin/reports/:id/actions",
     {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: 60 * 1000,
+        },
+      },
       schema: {
         body: {
           type: "object",
@@ -380,6 +386,12 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
   }>(
     "/api/v1/admin/communities/:id/status",
     {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: 60 * 1000,
+        },
+      },
       schema: {
         body: {
           type: "object",
@@ -484,6 +496,12 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
   }>(
     "/api/v1/admin/users/:id/status",
     {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: 60 * 1000,
+        },
+      },
       schema: {
         body: {
           type: "object",
@@ -536,6 +554,12 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
   }>(
     "/api/v1/admin/users/:id/roles",
     {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: 60 * 1000,
+        },
+      },
       schema: {
         body: {
           type: "object",
@@ -602,27 +626,38 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
   // DELETE /api/v1/admin/users/:id/roles/:role
   app.delete<{
     Params: { id: string; role: string };
-  }>("/api/v1/admin/users/:id/roles/:role", async (request, reply) => {
-    reply.header("Cache-Control", "private, no-store");
-    const mod = await getAuthenticatedModerator(request, reply, ["super_admin"]);
-    if (!mod) return;
+  }>(
+    "/api/v1/admin/users/:id/roles/:role",
+    {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: 60 * 1000,
+        },
+      },
+    },
+    async (request, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      const mod = await getAuthenticatedModerator(request, reply, ["super_admin"]);
+      if (!mod) return;
 
-    const { id: targetUserId, role } = request.params;
+      const { id: targetUserId, role } = request.params;
 
-    await db
-      .update(platformRoleAssignments)
-      .set({ revokedAt: new Date() })
-      .where(
-        and(
-          eq(platformRoleAssignments.userId, targetUserId),
-          eq(
-            platformRoleAssignments.role,
-            role as "super_admin" | "platform_admin" | "community_moderator" | "content_moderator" | "campaign_moderator",
+      await db
+        .update(platformRoleAssignments)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(platformRoleAssignments.userId, targetUserId),
+            eq(
+              platformRoleAssignments.role,
+              role as "super_admin" | "platform_admin" | "community_moderator" | "content_moderator" | "campaign_moderator",
+            ),
+            isNull(platformRoleAssignments.revokedAt),
           ),
-          isNull(platformRoleAssignments.revokedAt),
-        ),
-      );
+        );
 
-    return reply.code(204).send();
-  });
+      return reply.code(204).send();
+    },
+  );
 }
