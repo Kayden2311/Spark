@@ -4,8 +4,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth-context";
+import { SignalParticles } from "../signal-particles";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:4000";
+function SparkMark() {
+  return (
+    <svg aria-hidden="true" className="sparkMark" viewBox="0 0 48 48" style={{ width: "1.5rem", height: "1.5rem" }}>
+      <path className="sparkBolt" d="M27 2 8 27h13l-2 19 21-27H27z" fill="#38bdf8" />
+    </svg>
+  );
+}
+
+const API_BASE = "";
 
 type AdminTab = "reports" | "communities" | "users" | "campaigns";
 
@@ -254,6 +263,7 @@ export default function AdminPage() {
 
   return (
     <div className="adminConsoleRoot">
+      <SignalParticles />
       {/* Toast Alert */}
       {actionMessage && (
         <div
@@ -279,7 +289,7 @@ export default function AdminPage() {
       <header className="adminTopNav">
         <div className="adminBrandBadge">
           <Link href="/" style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "#fff", textDecoration: "none", fontWeight: 800 }}>
-            <span style={{ color: "#38bdf8" }}>?</span>
+            <SparkMark />
             <span>Spark</span>
           </Link>
           <span className="adminPill">Platform Governance</span>
