@@ -4657,13 +4657,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
     grid-template-columns: 1fr;
   }
 /* ==========================================================================
-   PLATFORM GOVERNANCE & MODERATOR CONSOLE (UI/UX PRO MAX)
+   PLATFORM GOVERNANCE & MODERATOR CONSOLE (LIGHT SAAS THEME)
    ========================================================================== */
 
 .adminConsoleRoot {
   min-height: 100vh;
-  background-color: #080c14;
-  color: #f8fafc;
+  background-color: #f8fafc;
+  color: #17233d;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
   display: flex;
   flex-direction: column;
@@ -4677,8 +4677,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
   align-items: center;
   justify-content: space-between;
   padding: 0.85rem 2rem;
-  background: #0d1322;
-  border-bottom: 1px solid #1e293b;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .adminBrandBadge {
@@ -4694,9 +4695,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
   letter-spacing: 0.06em;
   padding: 0.2rem 0.6rem;
   border-radius: 9999px;
-  background: rgba(56, 189, 248, 0.12);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.28);
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+  border: 1px solid rgba(37, 99, 235, 0.2);
 }
 
 .adminMain {
@@ -4710,12 +4711,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 .adminHeroCard {
-  background: linear-gradient(135deg, #0f172a 0%, #111827 100%);
-  border: 1px solid #1e293b;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 1rem;
   padding: 2rem 2.25rem;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04);
 }
 
 .adminHeroCard::after {
@@ -4725,36 +4727,38 @@ button, a { -webkit-tap-highlight-color: transparent; }
   right: -20%;
   width: 320px;
   height: 320px;
-  background: radial-gradient(circle, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.06) 0%, transparent 70%);
   pointer-events: none;
 }
 
 .adminMetricsGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
 }
 
 .adminMetricCard {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 0.75rem;
   padding: 1.25rem 1.5rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .adminMetricCard:hover {
   transform: translateY(-2px);
-  border-color: #334155;
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
 }
 
 .adminMetricCard span {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #94a3b8;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -4762,23 +4766,24 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .adminMetricCard strong {
   font-size: 1.75rem;
   font-weight: 800;
-  color: #f8fafc;
+  color: #17233d;
   letter-spacing: -0.02em;
 }
 
 .adminTableCard {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 0.85rem;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.03);
 }
 
 .adminTableCard header {
   padding: 1.25rem 1.5rem;
-  background: #111b2e;
-  border-bottom: 1px solid #1e293b;
+  background: #fafbfd;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .adminTable {
@@ -4789,23 +4794,23 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 .adminTable thead th {
-  background: #0d1527;
+  background: #f8fafc;
   color: #64748b;
   font-weight: 700;
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 0.85rem 1.25rem;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .adminTable tbody tr {
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid #f1f5f9;
   transition: background 0.1s ease;
 }
 
 .adminTable tbody tr:hover {
-  background: rgba(255, 255, 255, 0.025);
+  background: #f8fafc;
 }
 
 .adminTable tbody tr:last-child {
@@ -4815,11 +4820,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .adminTable td {
   padding: 1rem 1.25rem;
   vertical-align: middle;
-  color: #cbd5e1;
+  color: #334155;
 }
 
 .adminTable td strong {
-  color: #f8fafc;
+  color: #17233d;
 }
 
 .adminStatusPill {
@@ -4833,33 +4838,37 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 .adminStatusPill.open,
-.adminStatusPill.pending {
-  background: rgba(251, 191, 36, 0.15);
-  color: #fcd34d;
-  border: 1px solid rgba(251, 191, 36, 0.3);
+.adminStatusPill.pending,
+.adminStatusPill.draft {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
 }
 
 .adminStatusPill.active,
 .adminStatusPill.visible,
-.adminStatusPill.resolved {
-  background: rgba(16, 185, 129, 0.15);
-  color: #6ee7b7;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+.adminStatusPill.resolved,
+.adminStatusPill.approved {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
 }
 
 .adminStatusPill.hidden,
 .adminStatusPill.suspended,
-.adminStatusPill.flagged {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+.adminStatusPill.flagged,
+.adminStatusPill.rejected {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
 }
 
 .adminStatusPill.archived,
-.adminStatusPill.dismissed {
-  background: rgba(148, 163, 184, 0.15);
-  color: #94a3b8;
-  border: 1px solid rgba(148, 163, 184, 0.25);
+.adminStatusPill.dismissed,
+.adminStatusPill.unscheduled {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
 }
 
 @media (max-width: 768px) {

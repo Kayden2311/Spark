@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Pool } from "pg";
 
 import {
+  auditEvents,
   communities,
   communityMemberships,
   contentReports,
@@ -13,10 +14,13 @@ import {
   postComments,
   posts,
   promotionCampaigns,
+  promotionPlacements,
+  promotionReviews,
   sessions,
   userEmails,
   users,
   workspaceMemberships,
+  workspaces,
 } from "../infrastructure/database/schema.js";
 
 const SESSION_COOKIE = "spark_session";
@@ -135,11 +139,15 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
       [userCount],
       [reportCount],
       [campCount],
+      [wsCount],
+      [auditCount],
     ] = await Promise.all([
       db.select({ value: count() }).from(communities).where(isNull(communities.archivedAt)),
       db.select({ value: count() }).from(users).where(eq(users.status, "active")),
       db.select({ value: count() }).from(contentReports).where(eq(contentReports.status, "open")),
       db.select({ value: count() }).from(promotionCampaigns).where(eq(promotionCampaigns.reviewStatus, "approved")),
+      db.select({ value: count() }).from(workspaces).where(isNull(workspaces.archivedAt)),
+      db.select({ value: count() }).from(moderationActions),
     ]);
 
     return reply.code(200).send({
@@ -147,6 +155,8 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
       registeredUsersCount: userCount?.value ?? 0,
       pendingReportsCount: reportCount?.value ?? 0,
       activeCampaignsCount: campCount?.value ?? 0,
+      workspacesCount: wsCount?.value ?? 0,
+      auditEventsCount: auditCount?.value ?? 0,
     });
   });
 
@@ -660,4 +670,181 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
       return reply.code(204).send();
     },
   );
+
+  // GET /api/v1/admin/campaigns
+  app.get<{
+    Querystring: { status?: "draft" | "pending" | "approved" | "rejected"; limit?: number };
+  }>("/api/v1/admin/campaigns", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store");
+    const mod = await getAuthenticatedModerator(request, reply, ["super_admin", "platform_admin", "campaign_moderator"]);
+    if (!mod) return;
+
+    const statusFilter = request.query.status;
+
+    const campaignRows = await db
+      .select({
+        id: promotionCampaigns.id,
+        tenantId: promotionCampaigns.tenantId,
+        communityId: promotionCampaigns.communityId,
+        name: promotionCampaigns.name,
+        headline: promotionCampaigns.headline,
+        description: promotionCampaigns.description,
+        reviewStatus: promotionCampaigns.reviewStatus,
+        deliveryStatus: promotionCampaigns.deliveryStatus,
+        requestedStartAt: promotionCampaigns.requestedStartAt,
+        startsAt: promotionCampaigns.startsAt,
+        endsAt: promotionCampaigns.endsAt,
+        version: promotionCampaigns.version,
+        createdAt: promotionCampaigns.createdAt,
+        submittedByUserId: promotionCampaigns.submittedByUserId,
+        submitterName: users.displayName,
+        communityName: communities.name,
+        communitySlug: communities.slug,
+        placementName: promotionPlacements.name,
+      })
+      .from(promotionCampaigns)
+      .leftJoin(users, eq(users.id, promotionCampaigns.submittedByUserId))
+      .leftJoin(communities, eq(communities.id, promotionCampaigns.communityId))
+      .leftJoin(promotionPlacements, eq(promotionPlacements.id, promotionCampaigns.placementId))
+      .where(statusFilter ? eq(promotionCampaigns.reviewStatus, statusFilter) : undefined)
+      .orderBy(desc(promotionCampaigns.createdAt))
+      .limit(request.query.limit ? Number(request.query.limit) : 50);
+
+    return reply.code(200).send({ campaigns: campaignRows });
+  });
+
+  // POST /api/v1/admin/campaigns/:id/review
+  app.post<{
+    Params: { id: string };
+    Body: { decision: "approve" | "reject"; reason: string };
+  }>(
+    "/api/v1/admin/campaigns/:id/review",
+    {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: 60 * 1000,
+        },
+      },
+      schema: {
+        body: {
+          type: "object",
+          required: ["decision", "reason"],
+          properties: {
+            decision: { type: "string", enum: ["approve", "reject"] },
+            reason: { type: "string", minLength: 3, maxLength: 500 },
+          },
+          additionalProperties: false,
+        },
+      },
+    },
+    async (request, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      const mod = await getAuthenticatedModerator(request, reply, ["super_admin", "platform_admin", "campaign_moderator"]);
+      if (!mod) return;
+
+      const campaignId = request.params.id;
+      const { decision, reason } = request.body;
+
+      const [campaign] = await db
+        .select()
+        .from(promotionCampaigns)
+        .where(eq(promotionCampaigns.id, campaignId))
+        .limit(1);
+
+      if (!campaign) {
+        return reply.code(404).type("application/problem+json").send({
+          type: "about:blank",
+          title: "Not Found",
+          status: 404,
+          code: "campaign_not_found",
+          detail: "Campaign does not exist.",
+          instance: request.url,
+          requestId: request.id,
+        });
+      }
+
+      await db.transaction(async (tx) => {
+        const nextReviewStatus = decision === "approve" ? "approved" : "rejected";
+        const nextDeliveryStatus = decision === "approve" ? "scheduled" : "unscheduled";
+
+        await tx
+          .update(promotionCampaigns)
+          .set({
+            reviewStatus: nextReviewStatus,
+            deliveryStatus: nextDeliveryStatus,
+            approvedVersion: decision === "approve" ? campaign.version : null,
+            startsAt: decision === "approve" ? campaign.requestedStartAt : null,
+          })
+          .where(eq(promotionCampaigns.id, campaignId));
+
+        await tx.insert(promotionReviews).values({
+          tenantId: campaign.tenantId,
+          campaignId: campaign.id,
+          campaignVersion: campaign.version,
+          reviewerUserId: mod.userId,
+          decision,
+          reason,
+        });
+      });
+
+      return reply.code(200).send({ success: true, decision });
+    },
+  );
+
+  // GET /api/v1/admin/audit-logs
+  app.get<{
+    Querystring: { limit?: number };
+  }>("/api/v1/admin/audit-logs", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store");
+    const mod = await getAuthenticatedModerator(request, reply, ["super_admin", "platform_admin"]);
+    if (!mod) return;
+
+    const limit = request.query.limit ? Number(request.query.limit) : 50;
+
+    const actions = await db
+      .select({
+        id: moderationActions.id,
+        tenantId: moderationActions.tenantId,
+        communityId: moderationActions.communityId,
+        reportId: moderationActions.reportId,
+        postId: moderationActions.postId,
+        commentId: moderationActions.commentId,
+        actorUserId: moderationActions.actorUserId,
+        action: moderationActions.action,
+        reason: moderationActions.reason,
+        createdAt: moderationActions.createdAt,
+        actorName: users.displayName,
+        communityName: communities.name,
+      })
+      .from(moderationActions)
+      .leftJoin(users, eq(users.id, moderationActions.actorUserId))
+      .leftJoin(communities, eq(communities.id, moderationActions.communityId))
+      .orderBy(desc(moderationActions.createdAt))
+      .limit(limit);
+
+    return reply.code(200).send({ auditLogs: actions });
+  });
+
+  // GET /api/v1/admin/system
+  app.get("/api/v1/admin/system", async (request, reply) => {
+    reply.header("Cache-Control", "private, no-store");
+    const mod = await getAuthenticatedModerator(request, reply, ["super_admin", "platform_admin"]);
+    if (!mod) return;
+
+    const [[activeSessions]] = await Promise.all([
+      db
+        .select({ value: count() })
+        .from(sessions)
+        .where(and(sql`${sessions.expiresAt} > NOW()`, isNull(sessions.revokedAt))),
+    ]);
+
+    return reply.code(200).send({
+      status: "operational",
+      nodeVersion: process.version,
+      uptimeSeconds: Math.floor(process.uptime()),
+      activeSessionsCount: activeSessions?.value ?? 0,
+      timestamp: new Date().toISOString(),
+    });
+  });
 }

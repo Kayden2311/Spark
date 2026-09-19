@@ -59,12 +59,36 @@ describe("Admin & Moderator Governance API", () => {
     await app.close();
   });
 
-  it("rejects unauthenticated requests to /api/v1/admin/users with 401", async () => {
+  it("rejects unauthenticated requests to /api/v1/admin/campaigns with 401", async () => {
     const pool = createFakePool();
     const app = await buildApp({ config, pool, rateLimit: false, logger: false });
     const response = await app.inject({
       method: "GET",
-      url: "/api/v1/admin/users",
+      url: "/api/v1/admin/campaigns",
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("rejects unauthenticated requests to /api/v1/admin/audit-logs with 401", async () => {
+    const pool = createFakePool();
+    const app = await buildApp({ config, pool, rateLimit: false, logger: false });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/audit-logs",
+    });
+
+    expect(response.statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("rejects unauthenticated requests to /api/v1/admin/system with 401", async () => {
+    const pool = createFakePool();
+    const app = await buildApp({ config, pool, rateLimit: false, logger: false });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/admin/system",
     });
 
     expect(response.statusCode).toBe(401);
