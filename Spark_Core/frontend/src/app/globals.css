@@ -4871,6 +4871,95 @@ button, a { -webkit-tap-highlight-color: transparent; }
   border: 1px solid #e2e8f0;
 }
 
+.adminDropdownCard {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: 280px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.05);
+  padding: 0.75rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: dropdownFadeIn 0.15s ease-out;
+}
+
+@keyframes dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.adminDropdownHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0.5rem 0.65rem 0.5rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.adminDropdownItem {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #334155;
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.adminDropdownItem:hover {
+  background: #f8fafc;
+  color: #17233d;
+}
+
+.adminDropdownItem.danger {
+  color: #b91c1c;
+}
+
+.adminDropdownItem.danger:hover {
+  background: #fef2f2;
+}
+
+.adminTabPill {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 0.6rem;
+  font-size: 0.875rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  background: transparent;
+  color: #64748b;
+  border: 1px solid transparent;
+}
+
+.adminTabPill:hover {
+  background: #f1f5f9;
+  color: #17233d;
+}
+
+.adminTabPill.active {
+  background: #ffffff;
+  color: #2563eb;
+  border-color: #bfdbfe;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
 @media (max-width: 768px) {
   .adminTopNav {
     padding: 0.85rem 1rem;

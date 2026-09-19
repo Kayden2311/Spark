@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth-context";
 
 function SparkMark() {
@@ -116,6 +116,8 @@ export default function AdminPage() {
   const router = useRouter();
   const { user, platformRoles, logout, isLoading: authLoading } = useAuth();
   const [currentTab, setCurrentTab] = useState<AdminTab>("overview");
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [metrics, setMetrics] = useState<OverviewMetrics>({
     activeCommunitiesCount: 0,
@@ -140,6 +142,17 @@ export default function AdminPage() {
   const [dataLoading, setDataLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setProfileDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Authentication guard
   useEffect(() => {
@@ -373,6 +386,10 @@ export default function AdminPage() {
       c.slug.toLowerCase().includes(communitySearch.toLowerCase()),
   );
 
+  const userInitials = user.displayName
+    ? user.displayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+    : "AD";
+
   return (
     <div className="adminConsoleRoot">
       {/* Toast Alert */}
@@ -406,65 +423,170 @@ export default function AdminPage() {
           <span className="adminPill">Platform Governance</span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            {platformRoles.map((r) => {
-              const meta = roleBadgeMeta[r] || { label: r, bg: "#f1f5f9", color: "#475569", border: "#cbd5e1" };
-              return (
-                <span
-                  key={r}
-                  style={{
-                    fontSize: "0.72rem",
-                    padding: "0.2rem 0.55rem",
-                    borderRadius: "9999px",
-                    background: meta.bg,
-                    color: meta.color,
-                    border: `1px solid ${meta.border}`,
-                    fontWeight: 700,
-                  }}
-                >
-                  {meta.label}
-                </span>
-              );
-            })}
-          </div>
-          <span style={{ fontSize: "0.875rem", color: "#64748b" }}>
-            Signed in as <strong style={{ color: "#17233d" }}>{user.displayName}</strong>
-          </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
           <Link
             href="/workspace"
             style={{
               padding: "0.45rem 0.9rem",
-              borderRadius: "0.5rem",
-              background: "#f1f5f9",
+              borderRadius: "0.55rem",
+              background: "#ffffff",
               color: "#334155",
               border: "1px solid #e2e8f0",
               fontSize: "0.82rem",
               fontWeight: 650,
               textDecoration: "none",
+              boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+              transition: "all 0.15s ease",
             }}
           >
             Workspace
           </Link>
-          <button
-            type="button"
-            onClick={async () => {
-              await logout();
-              router.push("/login");
-            }}
-            style={{
-              padding: "0.45rem 0.9rem",
-              borderRadius: "0.5rem",
-              background: "#fef2f2",
-              color: "#b91c1c",
-              border: "1px solid #fecaca",
-              cursor: "pointer",
-              fontSize: "0.82rem",
-              fontWeight: 650,
-            }}
-          >
-            Sign out
-          </button>
+
+          {/* Profile Avatar Trigger & Dropdown */}
+          <div style={{ position: "relative" }} ref={dropdownRef}>
+            <button
+              type="button"
+              onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.55rem",
+                padding: "0.3rem 0.65rem 0.3rem 0.35rem",
+                borderRadius: "9999px",
+                background: "#f1f5f9",
+                border: "1px solid #e2e8f0",
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+              aria-expanded={profileDropdownOpen}
+              aria-label="User profile menu"
+            >
+              <span
+                style={{
+                  width: "1.85rem",
+                  height: "1.85rem",
+                  borderRadius: "50%",
+                  background: "#dbeafe",
+                  color: "#1e40af",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: 800,
+                }}
+              >
+                {userInitials}
+              </span>
+              <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#17233d" }}>
+                {user.displayName}
+              </span>
+              <svg viewBox="0 0 20 20" fill="currentColor" style={{ width: "1rem", height: "1rem", color: "#64748b" }}>
+                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+              </svg>
+            </button>
+
+            {profileDropdownOpen && (
+              <div className="adminDropdownCard">
+                <div className="adminDropdownHeader">
+                  <span
+                    style={{
+                      width: "2.25rem",
+                      height: "2.25rem",
+                      borderRadius: "50%",
+                      background: "#dbeafe",
+                      color: "#1e40af",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "0.85rem",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {userInitials}
+                  </span>
+                  <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                    <strong style={{ fontSize: "0.9rem", color: "#17233d" }}>{user.displayName}</strong>
+                    <span style={{ fontSize: "0.75rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {user.email || "Spark Governance"}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ padding: "0.25rem 0.5rem" }}>
+                  <div style={{ fontSize: "0.7rem", fontWeight: 750, color: "#64748b", textTransform: "uppercase", marginBottom: "0.35rem" }}>
+                    Platform Roles
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.25rem" }}>
+                    {platformRoles.map((r) => {
+                      const meta = roleBadgeMeta[r] || { label: r, bg: "#f1f5f9", color: "#475569", border: "#cbd5e1" };
+                      return (
+                        <span
+                          key={r}
+                          style={{
+                            fontSize: "0.68rem",
+                            padding: "0.15rem 0.45rem",
+                            borderRadius: "9999px",
+                            background: meta.bg,
+                            color: meta.color,
+                            border: `1px solid ${meta.border}`,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {meta.label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <hr style={{ margin: "0.25rem 0", border: "none", borderTop: "1px solid #f1f5f9" }} />
+
+                <Link
+                  href="/workspace"
+                  className="adminDropdownItem"
+                  onClick={() => setProfileDropdownOpen(false)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: "1rem", height: "1rem", color: "#2563eb" }}>
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                    <polyline points="9 22 9 12 15 12 15 22" />
+                  </svg>
+                  <span>Go to Workspace</span>
+                </Link>
+
+                <Link
+                  href="/"
+                  className="adminDropdownItem"
+                  onClick={() => setProfileDropdownOpen(false)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: "1rem", height: "1rem", color: "#64748b" }}>
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="2" y1="12" x2="22" y2="12" />
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                  </svg>
+                  <span>Public Landing Page</span>
+                </Link>
+
+                <hr style={{ margin: "0.25rem 0", border: "none", borderTop: "1px solid #f1f5f9" }} />
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setProfileDropdownOpen(false);
+                    await logout();
+                    router.push("/login");
+                  }}
+                  className="adminDropdownItem danger"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: "1rem", height: "1rem" }}>
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                  <span>Sign out</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -483,33 +605,23 @@ export default function AdminPage() {
         </section>
 
         {/* Tab Navigation */}
-        <div style={{ display: "flex", gap: "0.5rem", borderBottom: "2px solid #e2e8f0", paddingBottom: "0.25rem", overflowX: "auto" }}>
+        <div style={{ display: "flex", gap: "0.5rem", background: "#f1f5f9", padding: "0.35rem", borderRadius: "0.75rem", overflowX: "auto" }}>
           {[
-            { id: "overview", label: "Overview & Health" },
-            { id: "reports", label: `Moderation (${metrics.pendingReportsCount})` },
-            { id: "communities", label: `Communities (${metrics.activeCommunitiesCount})` },
-            { id: "users", label: `User RBAC (${metrics.registeredUsersCount})` },
-            { id: "campaigns", label: `Campaigns (${metrics.activeCampaignsCount})` },
-            { id: "audit", label: `Audit Trail (${metrics.auditEventsCount})` },
+            { id: "overview", label: "Overview & Health", icon: "📊" },
+            { id: "reports", label: `Moderation (${metrics.pendingReportsCount})`, icon: "🛡️" },
+            { id: "communities", label: `Communities (${metrics.activeCommunitiesCount})`, icon: "🌐" },
+            { id: "users", label: `User RBAC (${metrics.registeredUsersCount})`, icon: "👥" },
+            { id: "campaigns", label: `Campaigns (${metrics.activeCampaignsCount})`, icon: "📢" },
+            { id: "audit", label: `Audit Trail (${metrics.auditEventsCount})`, icon: "📜" },
           ].map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setCurrentTab(tab.id as AdminTab)}
-              style={{
-                padding: "0.65rem 1.1rem",
-                borderRadius: "0.5rem",
-                background: currentTab === tab.id ? "#eff6ff" : "transparent",
-                border: currentTab === tab.id ? "1px solid #bfdbfe" : "1px solid transparent",
-                color: currentTab === tab.id ? "#2563eb" : "#64748b",
-                fontWeight: currentTab === tab.id ? 750 : 600,
-                cursor: "pointer",
-                fontSize: "0.875rem",
-                whiteSpace: "nowrap",
-                transition: "all 0.15s ease",
-              }}
+              className={`adminTabPill ${currentTab === tab.id ? "active" : ""}`}
             >
-              {tab.label}
+              <span>{tab.icon}</span>
+              <span>{tab.label}</span>
             </button>
           ))}
         </div>
