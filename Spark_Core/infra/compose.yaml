@@ -12,7 +12,7 @@ services:
       - "60"
       - "1000"
     ports:
-      - "127.0.0.1:${SPARK_REDIS_PORT:-56379}:6379"
+      - "127.0.0.1:${SPARK_REDIS_PORT:-6379}:6379"
     volumes:
       - spark-redis-data:/data
     healthcheck:

@@ -75,7 +75,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const redisUrl = required(
     env,
     "REDIS_URL",
-    production ? "" : "redis://127.0.0.1:56379",
+    production ? "" : "redis://127.0.0.1:6379",
   );
   const databaseSsl = env.DATABASE_SSL === "true";
   const trustedProxies = parseProxies(env.TRUSTED_PROXIES ?? "");
