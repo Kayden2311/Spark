@@ -68,7 +68,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirectQuery = searchParams.get("redirect");
 
-  const { isAuthenticated, platformRoles, login, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, user, platformRoles, login, isLoading: authLoading } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -79,9 +79,12 @@ function LoginForm() {
   // If already authenticated, redirect to appropriate destination
   useEffect(() => {
     if (isAuthenticated && !authLoading) {
-      const isPlatformStaff = platformRoles.some((r) =>
-        ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"].includes(r)
-      );
+      const userRole = user?.role || "";
+      const isPlatformStaff =
+        ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"].includes(userRole) ||
+        platformRoles.some((r) =>
+          ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"].includes(r)
+        );
       if (redirectQuery) {
         router.replace(redirectQuery);
       } else if (isPlatformStaff) {
@@ -90,7 +93,7 @@ function LoginForm() {
         router.replace("/workspace");
       }
     }
-  }, [isAuthenticated, authLoading, platformRoles, redirectQuery, router]);
+  }, [isAuthenticated, authLoading, platformRoles, user, redirectQuery, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,6 +111,19 @@ function LoginForm() {
     if (result.success) {
       if (redirectQuery) {
         router.push(redirectQuery);
+        return;
+      }
+      const userRole = result.user?.role || "";
+      const roles = result.platformRoles || [];
+      const isPlatformStaff =
+        ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"].includes(userRole) ||
+        roles.some((r: string) =>
+          ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"].includes(r)
+        );
+      if (isPlatformStaff) {
+        router.replace("/admin");
+      } else {
+        router.replace("/workspace");
       }
     } else {
       setError(result.error || "Authentication failed.");

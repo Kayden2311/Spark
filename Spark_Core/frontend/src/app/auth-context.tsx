@@ -16,6 +16,8 @@ export interface AuthUser {
   email: string;
   displayName: string;
   avatarUrl: string | null;
+  role?: string;
+  platformRoles?: string[];
 }
 
 export interface AuthWorkspace {
@@ -31,8 +33,8 @@ export interface AuthContextType {
   platformRoles: string[];
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signup: (displayName: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; user?: AuthUser; platformRoles?: string[] }>;
+  signup: (displayName: string, email: string, password: string) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
 }
@@ -55,9 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (res.ok) {
         const data = await res.json();
+        const roles = data.platformRoles || data.user?.platformRoles || [];
+        const spaces = data.workspaces || (data.workspace ? [data.workspace] : []);
         setUser(data.user);
-        setWorkspaces(data.workspaces || []);
-        setPlatformRoles(data.platformRoles || []);
+        setWorkspaces(spaces);
+        setPlatformRoles(roles);
       } else {
         setUser(null);
         setWorkspaces([]);
@@ -85,9 +89,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!isMounted) return;
         if (res.ok) {
           const data = await res.json();
+          const roles = data.platformRoles || data.user?.platformRoles || [];
+          const spaces = data.workspaces || (data.workspace ? [data.workspace] : []);
           setUser(data.user);
-          setWorkspaces(data.workspaces || []);
-          setPlatformRoles(data.platformRoles || []);
+          setWorkspaces(spaces);
+          setPlatformRoles(roles);
         } else {
           setUser(null);
           setWorkspaces([]);
@@ -114,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (
     email: string,
     password: string,
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; user?: AuthUser; platformRoles?: string[] }> => {
     setIsLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/v1/auth/password/sign-in`, {
@@ -129,10 +135,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (res.ok) {
         const data = await res.json();
+        const roles = data.platformRoles || data.user?.platformRoles || [];
+        const spaces = data.workspaces || (data.workspace ? [data.workspace] : []);
         setUser(data.user);
-        if (data.workspace) setWorkspaces([data.workspace]);
+        setWorkspaces(spaces);
+        setPlatformRoles(roles);
         setIsLoading(false);
-        return { success: true };
+        return { success: true, user: data.user, platformRoles: roles };
       }
 
       const errData = await res.json().catch(() => ({}));
@@ -154,7 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     displayName: string,
     email: string,
     password: string,
-  ): Promise<{ success: boolean; error?: string }> => {
+  ): Promise<{ success: boolean; error?: string; user?: AuthUser }> => {
     setIsLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/v1/auth/password/sign-up`, {
@@ -169,10 +178,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (res.ok) {
         const data = await res.json();
+        const spaces = data.workspaces || (data.workspace ? [data.workspace] : []);
         setUser(data.user);
-        if (data.workspace) setWorkspaces([data.workspace]);
+        setWorkspaces(spaces);
+        setPlatformRoles([]);
         setIsLoading(false);
-        return { success: true };
+        return { success: true, user: data.user };
       }
 
       const errData = await res.json().catch(() => ({}));

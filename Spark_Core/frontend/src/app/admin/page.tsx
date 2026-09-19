@@ -250,7 +250,7 @@ export default function AdminPage() {
     campaign_moderator: { label: "Campaign Moderator", color: "rgba(168, 85, 247, 0.2)" },
   };
 
-  const isSuperAdmin = platformRoles.includes("super_admin");
+  const isSuperAdmin = user?.role === "super_admin" || platformRoles.includes("super_admin");
 
   return (
     <div className="adminConsoleRoot">

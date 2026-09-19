@@ -211,6 +211,8 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthPluginOpti
           email: normalizedEmail,
           displayName: newUser.displayName,
           avatarUrl: newUser.avatarUrl,
+          role: userWorkspace ? "owner" : "member",
+          platformRoles: [],
         },
         workspace: userWorkspace,
         workspaces: userWorkspace ? [userWorkspace] : [],
@@ -375,16 +377,21 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthPluginOpti
       // Set HTTP-only session cookie
       setSessionCookie(reply, rawToken, SESSION_TTL_DAYS * 24 * 60 * 60);
 
+      const rolesList = platformRoles.map((r) => r.role);
+      const primaryRole = rolesList[0] ?? (memberships[0]?.role ?? "member");
+
       return reply.code(200).send({
         user: {
           id: user.id,
           email: normalizedEmail,
           displayName: user.displayName,
           avatarUrl: user.avatarUrl,
+          role: primaryRole,
+          platformRoles: rolesList,
         },
         workspace: memberships[0] ?? null,
         workspaces: memberships,
-        platformRoles: platformRoles.map((r) => r.role),
+        platformRoles: rolesList,
       });
     },
   );
@@ -500,15 +507,20 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthPluginOpti
       .where(eq(sessions.id, session.sessionId));
 
     const user = userRecord[0]!;
+    const rolesList = platformRoles.map((r) => r.role);
+    const primaryRole = rolesList[0] ?? (memberships[0]?.role ?? "member");
+
     return reply.code(200).send({
       user: {
         id: user.id,
         email: emailRecord[0]?.email ?? "",
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
+        role: primaryRole,
+        platformRoles: rolesList,
       },
       workspaces: memberships,
-      platformRoles: platformRoles.map((r) => r.role),
+      platformRoles: rolesList,
     });
   });
 
