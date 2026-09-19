@@ -424,24 +424,6 @@ export default function AdminPage() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
-          <Link
-            href="/workspace"
-            style={{
-              padding: "0.45rem 0.9rem",
-              borderRadius: "0.55rem",
-              background: "#ffffff",
-              color: "#334155",
-              border: "1px solid #e2e8f0",
-              fontSize: "0.82rem",
-              fontWeight: 650,
-              textDecoration: "none",
-              boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-              transition: "all 0.15s ease",
-            }}
-          >
-            Workspace
-          </Link>
-
           {/* Profile Avatar Trigger & Dropdown */}
           <div style={{ position: "relative" }} ref={dropdownRef}>
             <button
@@ -540,18 +522,6 @@ export default function AdminPage() {
                 </div>
 
                 <hr style={{ margin: "0.25rem 0", border: "none", borderTop: "1px solid #f1f5f9" }} />
-
-                <Link
-                  href="/workspace"
-                  className="adminDropdownItem"
-                  onClick={() => setProfileDropdownOpen(false)}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: "1rem", height: "1rem", color: "#2563eb" }}>
-                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                    <polyline points="9 22 9 12 15 12 15 22" />
-                  </svg>
-                  <span>Go to Workspace</span>
-                </Link>
 
                 <Link
                   href="/"

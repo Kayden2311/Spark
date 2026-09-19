@@ -3,7 +3,6 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 
-import { useAuth } from "./auth-context";
 import { HeroParticles } from "./hero-particles";
 import { SignalParticles } from "./signal-particles";
 import { SparkWordmarkReveal } from "./spark-wordmark-reveal";
@@ -89,9 +88,6 @@ function RadarIcons() {
 }
 
 export default function HomePage() {
-  const { isAuthenticated } = useAuth();
-  const workspaceTarget = isAuthenticated ? "/workspace" : "/login?redirect=/workspace";
-
   return <main className="sparkLanding">
     {/* Global Background Signal Particles */}
     <SignalParticles />
@@ -101,14 +97,8 @@ export default function HomePage() {
       <Link className="sparkBrand" href="/" aria-label="Spark home"><SparkMark /><span>Spark</span></Link>
       <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#pathways">Pathways</a><a href="#workflow">Workflow</a><Link href="/pricing">Pricing</Link><Link href="/communities">Community</Link></nav>
       <div className="headerActions">
-        {isAuthenticated ? (
-          <Link className="sparkNavButton" href="/workspace">Workspace</Link>
-        ) : (
-          <>
-            <Link href="/login">Sign in</Link>
-            <Link className="sparkNavButton" href="/signup?redirect=/workspace">Start free</Link>
-          </>
-        )}
+        <Link href="/login">Sign in</Link>
+        <Link className="sparkNavButton" href="/signup">Start free</Link>
       </div>
     </header>
 
@@ -121,7 +111,7 @@ export default function HomePage() {
           <HeroTypingHeadline />
           <p className="sparkLead">Spark brings your startup community, member work, and shared schedule into one focused workspace, so every conversation has a clear next step.</p>
           <div className="sparkActions">
-            <Link className="sparkPrimary" href={workspaceTarget}>Open your workspace</Link>
+            <Link className="sparkPrimary" href="/signup">Start free today</Link>
             <a className="sparkSecondary" href="#product"><PlayVideoIcon /> See how it works</a>
           </div>
           <div className="heroProof" aria-label="Product highlights"><span><b>01</b> One shared view</span><span><b>02</b> Clear ownership</span><span><b>03</b> Less status chasing</span></div>
@@ -197,7 +187,7 @@ export default function HomePage() {
             Join founders and builders using Spark to turn community conversations into owned tasks, scheduled moments, and real delivery momentum.
           </p>
           <div className="ctaActions">
-            <Link className="ctaPrimaryBtn" href={workspaceTarget}>
+            <Link className="ctaPrimaryBtn" href="/signup">
               Start with Spark
             </Link>
             <Link className="ctaSecondaryBtn" href="/communities">
