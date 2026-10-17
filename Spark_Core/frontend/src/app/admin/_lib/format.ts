@@ -117,3 +117,65 @@ export function humanize(code: string): string {
   const text = code.replace(/[_-]+/gu, " ").trim();
   return text ? text[0]!.toUpperCase() + text.slice(1) : code;
 }
+
+const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+const whole = new Intl.NumberFormat("en-US");
+
+/** 1,234 below ten thousand; 12.3K above. */
+export function formatCount(value: number): string {
+  return Math.abs(value) >= 10_000 ? compact.format(value) : whole.format(value);
+}
+
+/** Minor units (cents) to a currency string; whole units once the amount is large. */
+export function formatMoney(minor: number, currency = "USD", options: { compact?: boolean } = {}): string {
+  const major = minor / 100;
+  if (options.compact && Math.abs(major) >= 10_000) {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 }).format(major);
+  }
+  const digits = Math.abs(major) >= 1000 ? 0 : 2;
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(major);
+}
+
+export function formatPercent(ratio: number, digits = 0): string {
+  return `${(ratio * 100).toFixed(digits)}%`;
+}
+
+export type ChangeDirection = "up" | "down" | "flat" | "none";
+
+/** Change against the previous period, as text, so meaning never relies on color alone. */
+export function describeChange(current: number, previous: number | null | undefined): { text: string; direction: ChangeDirection } {
+  if (previous === null || previous === undefined) return { text: "No earlier period", direction: "none" };
+  if (previous === 0) return current === 0 ? { text: "No change", direction: "flat" } : { text: "New this period", direction: "up" };
+  const change = (current - previous) / previous;
+  if (Math.abs(change) < 0.005) return { text: "No change", direction: "flat" };
+  const magnitude = Math.abs(change * 100).toFixed(Math.abs(change) < 0.1 ? 1 : 0);
+  return { text: `${change > 0 ? "+" : "\u2212"}${magnitude}%`, direction: change > 0 ? "up" : "down" };
+}
+
+/** Axis label for an ISO date: "Oct 7". */
+export function shortDate(isoDay: string): string {
+  return new Date(`${isoDay.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/** Axis label for a month: "Oct 26". */
+export function shortMonth(isoDay: string): string {
+  return new Date(`${isoDay.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
+}
+
+export const SUBSCRIPTION_STATUS: Record<string, { label: string; tone: Tone }> = {
+  incomplete: { label: "Incomplete", tone: "neutral" },
+  trialing: { label: "Trialing", tone: "blue" },
+  active: { label: "Active", tone: "green" },
+  past_due: { label: "Past due", tone: "red" },
+  paused: { label: "Paused", tone: "amber" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+  expired: { label: "Expired", tone: "neutral" },
+};
+
+export const INVOICE_STATUS: Record<string, { label: string; tone: Tone }> = {
+  draft: { label: "Draft", tone: "neutral" },
+  open: { label: "Open", tone: "amber" },
+  paid: { label: "Paid", tone: "green" },
+  void: { label: "Void", tone: "neutral" },
+  uncollectible: { label: "Uncollectible", tone: "red" },
+};

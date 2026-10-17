@@ -25,6 +25,9 @@ import AdminLayout from "../src/app/admin/layout";
 import AuditLogPage from "../src/app/admin/audit/page";
 import ReportsPage from "../src/app/admin/reports/page";
 import UsersAdminPage from "../src/app/admin/users/page";
+import BillingPage from "../src/app/admin/billing/page";
+import CampaignsAdminPage from "../src/app/admin/campaigns/page";
+import { ChartCard } from "../src/app/admin/_components/charts";
 
 const overview = {
   communities: { active: 3, featured: 1, frozen: 0, archived: 0, flagged: 1 },
@@ -94,10 +97,16 @@ describe("admin console shell", () => {
     render(<AdminLayout><p>Content</p></AdminLayout>);
     const nav = screen.getByRole("navigation", { name: "Admin sections" });
     expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Overview", expect.stringMatching(/^Reports/)]);
-    expect(await within(nav).findByLabelText("2 need attention")).toBeInTheDocument();
+    expect(await within(nav).findByRole("link", { name: /Reports.*2 need attention/u })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
   });
 });
+
+// Side panels of the triage desk: queue health and the author's history.
+const triage = {
+  "GET /api/v1/admin/reports/stats": json({ days: 30, opened: 4, closed: 2, backlog: 2, medianHoursToClose: 5.5 }),
+  "GET /api/v1/admin/reports/r1/context": json({ author: { id: "u9", displayName: "Sam Spammer", status: "active", joinedAt: "2026-09-01T00:00:00.000Z", reportsAgainst: 4, hiddenContent: 1 }, communityOpenReports: 3, reporterReportsFiled: 1 }),
+};
 
 describe("reports queue", () => {
   function renderQueue() {
@@ -107,17 +116,20 @@ describe("reports queue", () => {
 
   it("resolves a report with a reason, removes it from the open queue and confirms", async () => {
     mockApi({
+      ...triage,
       "GET /api/v1/admin/overview": json(overview),
       "GET /api/v1/admin/reports?status=open": json({ items: [report], nextCursor: null }),
       "POST /api/v1/admin/reports/r1/actions": json({ id: "r1", status: "resolved" }),
     });
     renderQueue();
-    await userEvent.click(await screen.findByRole("button", { name: "Review" }));
-    const drawer = screen.getByRole("dialog", { name: "Reported post" });
-    expect(within(drawer).getByText("50x guaranteed returns")).toBeInTheDocument();
-    expect(within(drawer).getByText("Riley Reporter")).toBeInTheDocument();
+    const pane = await screen.findByRole("region", { name: "Selected report" });
+    expect(await within(pane).findByText("50x guaranteed returns")).toBeInTheDocument();
+    expect(within(pane).getByText("Riley Reporter")).toBeInTheDocument();
+    // The author's history helps spot repeat offenders.
+    expect(await within(pane).findByText("Sam Spammer")).toBeInTheDocument();
+    expect(within(pane).getByText("Repeat reports")).toBeInTheDocument();
 
-    await userEvent.click(within(drawer).getByRole("button", { name: "Hide content" }));
+    await userEvent.click(within(pane).getByRole("button", { name: /^Hide content/u }));
     const dialog = screen.getByRole("dialog", { name: "Hide this content?" });
     await userEvent.type(within(dialog).getByRole("textbox", { name: /reason/i }), "Scam links");
     await userEvent.click(within(dialog).getByRole("button", { name: "Hide content" }));
@@ -130,13 +142,13 @@ describe("reports queue", () => {
 
   it("keeps the report and shows the conflict when someone else already closed it", async () => {
     mockApi({
+      ...triage,
       "GET /api/v1/admin/overview": json(overview),
       "GET /api/v1/admin/reports?status=open": json({ items: [report], nextCursor: null }),
       "POST /api/v1/admin/reports/r1/actions": json({ code: "report_already_closed", detail: "This report has already been resolved or dismissed." }, 409),
     });
     renderQueue();
-    await userEvent.click(await screen.findByRole("button", { name: "Review" }));
-    await userEvent.click(screen.getByRole("button", { name: "Dismiss report" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Dismiss D/u }));
     const dialog = screen.getByRole("dialog", { name: "Dismiss this report?" });
     await userEvent.type(within(dialog).getByRole("textbox", { name: /reason/i }), "Not a violation");
     await userEvent.click(within(dialog).getByRole("button", { name: "Dismiss report" }));
@@ -146,6 +158,7 @@ describe("reports queue", () => {
   it("loads further pages with the cursor and shows an error with retry", async () => {
     let failOnce = true;
     mockApi({
+      ...triage,
       "GET /api/v1/admin/overview": json(overview),
       "GET /api/v1/admin/reports?status=open&cursor=next-1": json({ items: [{ ...report, id: "r2", target: { ...report.target, title: "Second report" } }], nextCursor: null }),
       "GET /api/v1/admin/reports?status=open": () => {
@@ -157,7 +170,7 @@ describe("reports queue", () => {
       },
     });
     renderQueue();
-    expect(await screen.findByRole("alert")).toHaveTextContent(/on our side/);
+    expect((await screen.findAllByRole("alert"))[0]).toHaveTextContent(/on our side/);
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
     expect(await screen.findByText("Second report")).toBeInTheDocument();
@@ -174,12 +187,11 @@ describe("reports queue", () => {
 });
 
 describe("review fixes", () => {
-  it("returns focus to the drawer button after cancelling its dialog", async () => {
+  it("returns focus to the action button after cancelling its dialog", async () => {
     navigation.pathname = "/admin/reports";
-    mockApi({ "GET /api/v1/admin/overview": json(overview), "GET /api/v1/admin/reports?status=open": json({ items: [report], nextCursor: null }) });
+    mockApi({ ...triage, "GET /api/v1/admin/overview": json(overview), "GET /api/v1/admin/reports?status=open": json({ items: [report], nextCursor: null }) });
     render(<AdminLayout><ReportsPage /></AdminLayout>);
-    await userEvent.click(await screen.findByRole("button", { name: "Review" }));
-    const hide = within(screen.getByRole("dialog", { name: "Reported post" })).getByRole("button", { name: "Hide content" });
+    const hide = await screen.findByRole("button", { name: /^Hide content/u });
     await userEvent.click(hide);
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(hide).toHaveFocus();
@@ -189,13 +201,13 @@ describe("review fixes", () => {
     let listCalls = 0;
     navigation.pathname = "/admin/reports";
     mockApi({
+      ...triage,
       "GET /api/v1/admin/overview": json(overview),
       "GET /api/v1/admin/reports?status=open": () => (++listCalls === 1 ? json({ items: [report], nextCursor: null })() : json({ items: [], nextCursor: null })()),
       "POST /api/v1/admin/reports/r1/actions": json({ code: "report_already_closed", detail: "This report has already been resolved or dismissed." }, 409),
     });
     render(<AdminLayout><ReportsPage /></AdminLayout>);
-    await userEvent.click(await screen.findByRole("button", { name: "Review" }));
-    await userEvent.click(screen.getByRole("button", { name: "Dismiss report" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Dismiss D/u }));
     const dialog = screen.getByRole("dialog", { name: "Dismiss this report?" });
     await userEvent.type(within(dialog).getByRole("textbox", { name: /reason/i }), "Not a violation");
     await userEvent.click(within(dialog).getByRole("button", { name: "Dismiss report" }));
@@ -239,5 +251,105 @@ describe("review fixes", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Actions for Another Admin" }));
     expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View details"]);
+  });
+});
+
+describe("console v2", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("collapses the sidebar to an icon rail with the button or the [ key, and remembers it", async () => {
+    mockApi({ "GET /api/v1/admin/overview": json(overview) });
+    const { container, unmount } = render(<AdminLayout><p>Content</p></AdminLayout>);
+    const shell = container.querySelector(".admShell")!;
+    expect(shell).toHaveAttribute("data-rail", "expanded");
+    await userEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(shell).toHaveAttribute("data-rail", "collapsed");
+    expect(window.localStorage.getItem("spark.admin.sidebar")).toBe("collapsed");
+    // Collapsed links keep their names for screen readers and show a tooltip.
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("data-tip", "Overview");
+    await userEvent.keyboard("[[");
+    expect(shell).toHaveAttribute("data-rail", "expanded");
+    await userEvent.keyboard("[[");
+    unmount();
+    const again = render(<AdminLayout><p>Content</p></AdminLayout>);
+    expect(again.container.querySelector(".admShell")).toHaveAttribute("data-rail", "collapsed");
+  });
+
+  it("moves through the triage queue with J and K and opens actions with shortcuts", async () => {
+    navigation.pathname = "/admin/reports";
+    const second = { ...report, id: "r2", target: { ...report.target, title: "Second report", body: "Another body" } };
+    mockApi({
+      ...triage,
+      "GET /api/v1/admin/reports/r2/context": json({ author: null, communityOpenReports: 0, reporterReportsFiled: 2 }),
+      "GET /api/v1/admin/overview": json(overview),
+      "GET /api/v1/admin/reports?status=open": json({ items: [report, second], nextCursor: null }),
+    });
+    render(<AdminLayout><ReportsPage /></AdminLayout>);
+    const pane = await screen.findByRole("region", { name: "Selected report" });
+    expect(await within(pane).findByRole("heading", { name: "Crypto bot offer" })).toBeInTheDocument();
+    await userEvent.keyboard("j");
+    expect(within(pane).getByRole("heading", { name: "Second report" })).toBeInTheDocument();
+    expect(await within(pane).findByText("Deleted account")).toBeInTheDocument();
+    await userEvent.keyboard("k");
+    expect(within(pane).getByRole("heading", { name: "Crypto bot offer" })).toBeInTheDocument();
+    await userEvent.keyboard("h");
+    const dialog = screen.getByRole("dialog", { name: "Hide this content?" });
+    // Reason templates fill the reason in one click.
+    await userEvent.click(within(dialog).getByRole("button", { name: "Spam or unsolicited promotion." }));
+    expect(within(dialog).getByRole("textbox", { name: /reason/i })).toHaveValue("Spam or unsolicited promotion.");
+    // Shortcuts are ignored while a dialog is open.
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("groups campaigns into review columns on the board", async () => {
+    auth.platformRoles = ["campaign_moderator"];
+    navigation.pathname = "/admin/campaigns";
+    const campaign = (id: string, name: string, reviewStatus: string) => ({
+      id, name, reviewStatus, headline: `${name} headline`, description: "d", deliveryStatus: "not_scheduled", requestedStartAt: "2026-11-01T00:00:00.000Z",
+      startsAt: null, endsAt: null, version: 1, createdAt: new Date(Date.now() - 4 * 86_400_000).toISOString(),
+      community: { id: "c1", name: "Hyperdrive", slug: "hyperdrive" }, submitter: { id: "u1", displayName: "Owner" }, placement: null,
+    });
+    mockApi({
+      "GET /api/v1/admin/overview": json(overview),
+      "GET /api/v1/admin/campaigns?limit=100": json({ items: [campaign("a", "Launch week", "pending"), campaign("b", "Demo day", "approved"), campaign("c", "Crypto", "rejected")], nextCursor: null }),
+    });
+    render(<AdminLayout><CampaignsAdminPage /></AdminLayout>);
+    const pending = await screen.findByRole("region", { name: "Pending review" });
+    expect(within(pending).getByText("Launch week")).toBeInTheDocument();
+    expect(within(pending).getByText("Waiting 4 days")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Approved" })).getByText("Demo day")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Rejected" })).getByText("Crypto")).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  it("says plainly that no payment provider is connected on the billing page", async () => {
+    auth.platformRoles = ["platform_admin"];
+    navigation.pathname = "/admin/billing";
+    mockApi({
+      "GET /api/v1/admin/overview": json(overview),
+      "GET /api/v1/admin/billing/overview": json({ counts: { freeWorkspaces: 3, trialing: 1, paying: 2, pastDue: 0, cancelled30d: 0, newPaid30d: 1, failedPayments30d: 0 }, revenue: [{ currency: "USD", mrrMinor: 12900, arrMinor: 154800, collected30dMinor: 2900, openMinor: 0, uncollectibleMinor: 0 }], planMix: [] }),
+      "GET /api/v1/admin/billing/mrr": json({ months: 12, series: [] }),
+      "GET /api/v1/admin/billing/subscriptions?kind=paid": json({ items: [], nextCursor: null }),
+    });
+    render(<AdminLayout><BillingPage /></AdminLayout>);
+    expect(screen.getByText("No payment provider is connected yet.")).toBeInTheDocument();
+    expect(await screen.findByText("$129.00")).toBeInTheDocument();
+    expect(screen.getByText("$1,548 annual run rate")).toBeInTheDocument();
+    expect(await screen.findByText("No subscriptions match")).toBeInTheDocument();
+  });
+
+  it("offers every chart's numbers as a table", async () => {
+    render(
+      <ChartCard table={{ columns: ["Day", "Posts"], rows: [["Oct 1", 4], ["Oct 2", 7]] }} title="Content created">
+        <p>chart</p>
+      </ChartCard>,
+    );
+    expect(screen.getByText("chart")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "View as table" }));
+    const table = screen.getByRole("table", { name: "Content created" });
+    expect(within(table).getByRole("rowheader", { name: "Oct 2" })).toBeInTheDocument();
+    expect(within(table).getByText("7")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show chart" })).toHaveAttribute("aria-pressed", "true");
   });
 });

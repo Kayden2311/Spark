@@ -14,7 +14,9 @@
   "dependencies": {
     "next": "16.3.4",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "react-is": "19.3.0",
+    "recharts": "3.10.1"
   },
   "engines": {
     "node": ">=26.0.0 <27"

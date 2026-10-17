@@ -1,13 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense } from "react";
+import { Fragment, Suspense } from "react";
 
 import { useAdmin } from "../_components/admin-context";
-import { Avatar, Badge, EmptyState, ErrorBanner, LoadMore, NoAccess, PageHeader, Panel, SkeletonRows } from "../_components/ui";
+import { BarList } from "../_components/charts";
+import { DownloadIcon } from "../_components/icons";
+import { Avatar, Badge, Card, EmptyState, ErrorBanner, LoadMore, NoAccess, PageHeader, Panel, SkeletonRows } from "../_components/ui";
 import { query } from "../_lib/api";
 import { canAccess } from "../_lib/access";
+import { downloadCsv, toCsv } from "../_lib/csv";
 import { AUDIT_ACTIONS, describeAction, formatDateTime, humanize } from "../_lib/format";
+import { VIZ } from "../_lib/palette";
 import type { AuditAction, AuditEntry } from "../_lib/types";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useQueryState, useQueryUpdater } from "../_lib/use-query-state";
@@ -35,6 +39,23 @@ function dayBoundary(day: string, endOfDay: boolean): string | undefined {
   return date.toISOString();
 }
 
+/** "Today", "Yesterday" or a full date, for grouping entries by local day. */
+function dayLabel(iso: string): string {
+  const date = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+}
+
+function tally(values: string[]): Array<{ key: string; value: number }> {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()].map(([key, value]) => ({ key, value })).sort((a, b) => b.value - a.value);
+}
+
 function AuditLog() {
   const { roles } = useAdmin();
   const allowed = canAccess(roles, "audit");
@@ -56,9 +77,40 @@ function AuditLog() {
 
   const clear = () => updateQuery({ action: null, target: null, from: null, to: null });
 
+  const exportCsv = () => {
+    const rows = list.items.map((entry) => [entry.createdAt, describeAction(entry), entry.action, entry.target.type, entry.target.label, entry.target.id, entry.actor.displayName, entry.reason]);
+    downloadCsv(`spark-audit-${new Date().toISOString().slice(0, 10)}.csv`, toCsv([["Time (UTC)", "Action", "Action code", "Target type", "Target", "Target ID", "Staff member", "Reason"], ...rows]));
+  };
+
+  const byStaff = tally(list.items.map((entry) => entry.actor.displayName)).slice(0, 6);
+  const byTarget = tally(list.items.map((entry) => entry.target.type));
+
   return (
     <>
-      <PageHeader title="Audit log" description="Every governance action, who took it and why. Entries are permanent and cannot be edited." />
+      <PageHeader
+        actions={
+          <button className="admBtn admBtnSecondary admBtnSm" disabled={list.items.length === 0} onClick={exportCsv} type="button">
+            <DownloadIcon /> Export {list.items.length > 0 ? `${list.items.length} ${list.items.length === 1 ? "entry" : "entries"}` : "CSV"}
+          </button>
+        }
+        description="Every governance action, who took it and why. Entries are permanent and cannot be edited."
+        title="Audit log"
+      />
+
+      {list.items.length > 0 && (
+        <div className="admGrid2">
+          <Card subtitle={`Across the ${list.items.length} entries loaded below`} title="Actions by staff member">
+            <div className="admCardInset">
+              <BarList color={VIZ.blue} items={byStaff.map((item) => ({ key: item.key, label: item.key, value: item.value }))} />
+            </div>
+          </Card>
+          <Card subtitle={`Across the ${list.items.length} entries loaded below`} title="Actions by target">
+            <div className="admCardInset">
+              <BarList color={VIZ.violet} items={byTarget.map((item) => ({ key: item.key, label: item.key === "community" ? "Communities" : `${humanize(item.key)}s`, value: item.value }))} />
+            </div>
+          </Card>
+        </div>
+      )}
 
       {invalidRange && <ErrorBanner message="The start date must be on or before the end date." />}
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
@@ -111,11 +163,19 @@ function AuditLog() {
               </tr>
             </thead>
             <tbody>
-              {list.items.map((entry) => {
+              {list.items.map((entry, index) => {
                 const detail = detailOf(entry);
+                const day = dayLabel(entry.createdAt);
+                const newDay = index === 0 || dayLabel(list.items[index - 1]!.createdAt) !== day;
                 return (
-                  <tr key={entry.id}>
-                    <td className="admNowrap admMutedCell" data-label="Time"><time dateTime={entry.createdAt} title={formatDateTime(entry.createdAt)}>{formatDateTime(entry.createdAt)}</time></td>
+                  <Fragment key={entry.id}>
+                  {newDay && (
+                    <tr className="admGroupRow">
+                      <th colSpan={5} scope="colgroup">{day}</th>
+                    </tr>
+                  )}
+                  <tr>
+                    <td className="admNowrap admMutedCell" data-label="Time"><time dateTime={entry.createdAt} title={formatDateTime(entry.createdAt)}>{new Date(entry.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</time></td>
                     <td data-label="Action">
                       <div className="admCellMain">
                         <Badge tone={AUDIT_ACTIONS[entry.action]?.tone ?? "neutral"}>{describeAction(entry)}</Badge>
@@ -135,6 +195,7 @@ function AuditLog() {
                     </td>
                     <td className="admReasonCell" data-label="Reason">{entry.reason}</td>
                   </tr>
+                  </Fragment>
                 );
               })}
             </tbody>

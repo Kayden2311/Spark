@@ -1,61 +1,127 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import Link from "next/link";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
-import { Drawer } from "../_components/drawer";
+import { KeyboardIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, NoAccess, PageHeader, Panel, SkeletonRows, Tag } from "../_components/ui";
+import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, NoAccess, PageHeader, SkeletonRows, Tag } from "../_components/ui";
 import { adminApi, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
-import { REPORT_STATUS, formatDateTime, formatRelative, humanize } from "../_lib/format";
-import type { Report, ReportStatus } from "../_lib/types";
+import { REPORT_STATUS, formatCount, formatDate, formatDateTime, formatRelative, humanize } from "../_lib/format";
+import type { Report, ReportContext, ReportStats, ReportStatus } from "../_lib/types";
+import { useAdminData } from "../_lib/use-admin-data";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useQueryState } from "../_lib/use-query-state";
 
 const STATUSES: readonly ReportStatus[] = ["open", "reviewing", "resolved", "dismissed"];
 type ReportAction = "hide" | "restore" | "dismiss";
 
-const ACTIONS: Record<ReportAction, { label: string; title: string; description: string; tone: "primary" | "danger"; done: string }> = {
+const ACTIONS: Record<ReportAction, { key: string; label: string; title: string; description: string; tone: "primary" | "danger"; done: string; templates: string[] }> = {
   hide: {
+    key: "h",
     label: "Hide content",
     title: "Hide this content?",
     description: "The content is hidden from members and the report is marked resolved.",
     tone: "danger",
     done: "Content hidden and report resolved.",
+    templates: ["Spam or unsolicited promotion.", "Harassment or a personal attack.", "Misinformation that could cause harm.", "Repeated off-topic posting after warnings."],
   },
   restore: {
+    key: "e",
     label: "Keep content",
     title: "Keep this content visible?",
     description: "The content stays visible (and is restored if it was hidden). The report is marked resolved.",
     tone: "primary",
     done: "Content kept and report resolved.",
+    templates: ["Reviewed: within the community guidelines.", "A disagreement, not a policy violation."],
   },
   dismiss: {
+    key: "d",
     label: "Dismiss report",
     title: "Dismiss this report?",
     description: "Use this when the report is not a policy violation. The content is not changed.",
     tone: "primary",
     done: "Report dismissed.",
+    templates: ["Not a policy violation.", "Duplicate of a report already handled.", "Not enough detail to act on."],
   },
 };
+
+const SHORTCUTS: Array<[string, string]> = [
+  ["J or ↓", "Next report"],
+  ["K or ↑", "Previous report"],
+  ["H", "Hide content"],
+  ["E", "Keep content"],
+  ["D", "Dismiss report"],
+  ["?", "Show or hide shortcuts"],
+];
 
 function excerpt(text: string, length = 140): string {
   return text.length > length ? `${text.slice(0, length).trimEnd()}…` : text;
 }
 
-function ReportsQueue() {
+function isTyping(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
+const actionable = (report: Report) => report.status === "open" || report.status === "reviewing";
+
+function ContextPanel({ report }: { report: Report }) {
+  const { roles } = useAdmin();
+  const context = useAdminData<ReportContext>(`/reports/${report.id}/context`);
+  if (context.error) return <ErrorBanner message={context.error} onRetry={context.reload} />;
+  if (!context.data) return <SkeletonRows rows={2} />;
+  const { author, communityOpenReports, reporterReportsFiled } = context.data;
+  const repeat = author && (author.reportsAgainst > 2 || author.hiddenContent > 0);
+  return (
+    <div className="admTriageContext">
+      <div className="admTriageAuthor">
+        <Avatar name={author?.displayName ?? "?"} />
+        <div className="admCellMain">
+          <span className="admCellTitle">
+            {author ? (canAccess(roles, "users") ? <Link className="admTextLink" href={`/admin/users/${author.id}`}>{author.displayName}</Link> : author.displayName) : "Deleted account"}
+            {author?.status === "suspended" && <Badge tone="red">Suspended</Badge>}
+          </span>
+          <span className="admCellSub">{author ? `Author · joined ${formatDate(author.joinedAt)}` : "The author's account no longer exists"}</span>
+        </div>
+        {repeat && <Badge tone="amber">Repeat reports</Badge>}
+      </div>
+      <dl className="admTriageStats">
+        <div><dt>Reports against author</dt><dd>{formatCount(author?.reportsAgainst ?? 0)}</dd></div>
+        <div><dt>Author content hidden</dt><dd>{formatCount(author?.hiddenContent ?? 0)}</dd></div>
+        <div><dt>Open in this community</dt><dd>{formatCount(communityOpenReports)}</dd></div>
+        <div><dt>Reports by this reporter</dt><dd>{formatCount(reporterReportsFiled)}</dd></div>
+      </dl>
+    </div>
+  );
+}
+
+function TriageDesk() {
   const { roles, overview, refreshOverview, notify } = useAdmin();
   const [status, setStatus] = useQueryState<ReportStatus>("status", "open", STATUSES);
   const allowed = canAccess(roles, "reports");
   const list = usePagedList<Report>(allowed ? `/reports?status=${status}` : null);
-  const [selected, setSelected] = useState<Report | null>(null);
+  const stats = useAdminData<ReportStats>(allowed ? "/reports/stats?days=30" : null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
+  const [help, setHelp] = useState(false);
+  const detail = useRef<HTMLElement>(null);
 
-  if (!allowed) return <NoAccess />;
+  const items = list.items;
+  const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
+  const index = selected ? items.indexOf(selected) : -1;
 
-  const act = (report: Report, action: ReportAction) => {
+  const select = useCallback((report: Report | undefined, reveal = false) => {
+    if (!report) return;
+    setSelectedId(report.id);
+    document.getElementById(`report-${report.id}`)?.scrollIntoView?.({ block: "nearest" });
+    if (reveal && window.matchMedia?.("(max-width: 1100px)").matches) detail.current?.scrollIntoView?.({ block: "start" });
+  }, []);
+
+  const act = useCallback((report: Report, action: ReportAction) => {
     const copy = ACTIONS[action];
+    const next = items[items.indexOf(report) + 1] ?? items[items.indexOf(report) - 1];
     setDialog({
       title: copy.title,
       description: (
@@ -66,125 +132,161 @@ function ReportsQueue() {
       ),
       confirmLabel: copy.label,
       tone: copy.tone,
+      templates: copy.templates,
       onConfirm: async (reason) => {
         await adminApi(`/reports/${report.id}/actions`, { method: "POST", body: { action, reason } }).catch((error: unknown) => reloadIfStale(error, list.reload));
         list.update(report.id, () => null);
-        setSelected(null);
+        setSelectedId(next?.id ?? null);
         refreshOverview();
+        stats.reload();
         notify(copy.done);
       },
     });
-  };
+  }, [items, list, notify, refreshOverview, stats]);
 
-  const actionable = (report: Report) => report.status === "open" || report.status === "reviewing";
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target) || document.querySelector("[aria-modal='true']")) return;
+      const key = event.key.toLowerCase();
+      if (key === "?") {
+        setHelp((value) => !value);
+      } else if (key === "j" || key === "arrowdown") {
+        if (!selected) return;
+        select(items[Math.min(items.length - 1, index + 1)]);
+      } else if (key === "k" || key === "arrowup") {
+        if (!selected) return;
+        select(items[Math.max(0, index - 1)]);
+      } else if (selected && actionable(selected) && (key === "h" || key === "e" || key === "d")) {
+        act(selected, key === "h" ? "hide" : key === "e" ? "restore" : "dismiss");
+      } else {
+        return;
+      }
+      event.preventDefault();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [act, index, items, select, selected]);
+
+  if (!allowed) return <NoAccess />;
 
   return (
     <>
-      <PageHeader title="Reports" description="Content members reported. Decide whether it stays, gets hidden, or the report is dismissed." />
+      <PageHeader
+        actions={
+          <button aria-expanded={help} aria-keyshortcuts="?" className="admBtn admBtnSecondary admBtnSm" onClick={() => setHelp((value) => !value)} type="button">
+            <KeyboardIcon /> Shortcuts
+          </button>
+        }
+        description="Work through reported posts and comments. Check who wrote it and their history, then decide."
+        title="Reports"
+      />
+
+      {help && (
+        <div className="admShortcuts" role="note">
+          <strong>Keyboard shortcuts</strong>
+          <ul>
+            {SHORTCUTS.map(([keys, label]) => <li key={keys}><kbd>{keys}</kbd><span>{label}</span></li>)}
+          </ul>
+        </div>
+      )}
+
+      <ul aria-label="Queue health, last 30 days" className="admMiniStats">
+        <li><span>Open now</span><strong>{stats.data ? formatCount(stats.data.backlog) : "–"}</strong></li>
+        <li><span>Opened (30d)</span><strong>{stats.data ? formatCount(stats.data.opened) : "–"}</strong></li>
+        <li><span>Closed (30d)</span><strong>{stats.data ? formatCount(stats.data.closed) : "–"}</strong></li>
+        <li><span>Median time to decision</span><strong>{stats.data?.medianHoursToClose == null ? "–" : `${stats.data.medianHoursToClose.toFixed(1)} h`}</strong></li>
+      </ul>
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
-      <Panel
-        footer={!list.loading && list.items.length > 0 ? <LoadMore hasMore={list.hasMore} loading={list.loadingMore} noun="report" onClick={() => void list.loadMore()} shown={list.items.length} /> : undefined}
-        label="Reports"
-        tabs={
-          <FilterTabs
-            label="Report status"
-            onChange={setStatus}
-            options={STATUSES.map((value) => ({ value, label: REPORT_STATUS[value].label, count: value === "open" ? overview?.reports.open : undefined }))}
-            value={status}
-          />
-        }
-      >
-        {list.loading ? (
-          <SkeletonRows />
-        ) : list.items.length === 0 && !list.error ? (
-          <EmptyState title={status === "open" ? "The queue is clear" : `No ${REPORT_STATUS[status].label.toLowerCase()} reports`}>
-            {status === "open" ? "New reports from members will appear here." : "Reports move here once they reach this status."}
-          </EmptyState>
-        ) : (
-          <table className="admTable">
-            <thead>
-              <tr>
-                <th scope="col">Reported content</th>
-                <th scope="col">Community</th>
-                <th scope="col">Reason</th>
-                <th scope="col">Reporter</th>
-                <th scope="col">Status</th>
-                <th scope="col">Reported</th>
-                <th scope="col"><span className="admSrOnly">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.items.map((report) => (
-                <tr key={report.id}>
-                  <td data-label="Content">
-                    <div className="admCellMain">
-                      <span className="admCellTitle">
-                        <Tag>{report.target.kind === "post" ? "Post" : "Comment"}</Tag>
-                        {report.target.title ?? "Comment"}
-                      </span>
-                      <span className="admCellSub admClamp">{excerpt(report.target.body, 110)}</span>
-                    </div>
-                  </td>
-                  <td data-label="Community">{report.community.name}</td>
-                  <td data-label="Reason">{humanize(report.reasonCode)}</td>
-                  <td data-label="Reporter">{report.reporter.displayName}</td>
-                  <td data-label="Status">
-                    {report.target.moderationStatus === "hidden"
-                      ? <Badge tone="red">Content hidden</Badge>
-                      : <Badge tone={REPORT_STATUS[report.status].tone}>{REPORT_STATUS[report.status].label}</Badge>}
-                  </td>
-                  <td className="admNowrap admMutedCell" data-label="Reported"><time dateTime={report.createdAt} title={formatDateTime(report.createdAt)}>{formatRelative(report.createdAt)}</time></td>
-                  <td className="admCellActions">
-                    <button className="admBtn admBtnSecondary admBtnSm" onClick={() => setSelected(report)} type="button">
-                      {actionable(report) ? "Review" : "View"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Panel>
-
-      <Drawer
-        footer={selected && actionable(selected) ? (
-          <>
-            <button className="admBtn admBtnSecondary" onClick={() => act(selected, "dismiss")} type="button">Dismiss report</button>
-            <button className="admBtn admBtnSecondary" onClick={() => act(selected, "restore")} type="button">Keep content</button>
-            <button className="admBtn admBtnDanger" onClick={() => act(selected, "hide")} type="button">Hide content</button>
-          </>
-        ) : undefined}
-        onClose={() => setSelected(null)}
-        open={selected !== null}
-        subtitle={selected ? <>Reported {formatRelative(selected.createdAt)} in {selected.community.name}</> : undefined}
-        title={selected?.target.kind === "comment" ? "Reported comment" : "Reported post"}
-      >
-        {selected && (
-          <>
-            <div className="admBadgeRow">
-              <Badge tone={REPORT_STATUS[selected.status].tone}>{REPORT_STATUS[selected.status].label}</Badge>
-              <Badge tone={selected.target.moderationStatus === "hidden" ? "red" : "green"}>{selected.target.moderationStatus === "hidden" ? "Content hidden" : "Content visible"}</Badge>
-              <Tag>{selected.target.kind === "post" ? "Post" : "Comment"}</Tag>
-            </div>
-            <article className="admContentPreview">
-              {selected.target.title && <h3>{selected.target.title}</h3>}
-              <p>{selected.target.body}</p>
-            </article>
-            <KeyValue
-              items={[
-                ["Reason", humanize(selected.reasonCode)],
-                ["Reporter's note", selected.details ?? "No note"],
-                ["Reporter", <span className="admInline" key="reporter"><Avatar name={selected.reporter.displayName} size="sm" />{selected.reporter.displayName}</span>],
-                ["Community", selected.community.slug ? `${selected.community.name} (${selected.community.slug})` : selected.community.name],
-                ["Reported", formatDateTime(selected.createdAt)],
-                ["Closed", selected.resolvedAt ? formatDateTime(selected.resolvedAt) : "Still open"],
-              ]}
+      <div className="admTriage">
+        <section aria-label="Report queue" className="admPanel admTriageList">
+          <div className="admPanelHeader">
+            <FilterTabs
+              label="Report status"
+              onChange={(value) => { setSelectedId(null); setStatus(value); }}
+              options={STATUSES.map((value) => ({ value, label: REPORT_STATUS[value].label, count: value === "open" ? overview?.reports.open : undefined }))}
+              value={status}
             />
-            <p className="admMuted admSmall">The reporter&apos;s identity is visible only to staff who handle reports.</p>
-          </>
-        )}
-      </Drawer>
+          </div>
+          {list.loading ? (
+            <div className="admCardInset"><SkeletonRows /></div>
+          ) : items.length === 0 && !list.error ? (
+            <EmptyState title={status === "open" ? "The queue is clear" : `No ${REPORT_STATUS[status].label.toLowerCase()} reports`}>
+              {status === "open" ? "New reports from members will appear here." : "Reports move here once they reach this status."}
+            </EmptyState>
+          ) : (
+            <ul className="admTriageItems">
+              {items.map((report) => (
+                <li key={report.id}>
+                  <button aria-current={report.id === selected?.id ? "true" : undefined} className="admTriageItem" id={`report-${report.id}`} onClick={() => select(report, true)} type="button">
+                    <span className="admTriageItemTop">
+                      <Tag>{report.target.kind === "post" ? "Post" : "Comment"}</Tag>
+                      <span className="admTriageReason">{humanize(report.reasonCode)}</span>
+                      <time dateTime={report.createdAt}>{formatRelative(report.createdAt)}</time>
+                    </span>
+                    <span className="admTriageItemTitle">{report.target.title ?? excerpt(report.target.body, 70)}</span>
+                    <span className="admTriageItemMeta">
+                      {report.community.name}
+                      {report.target.moderationStatus === "hidden" && <Badge tone="red">Hidden</Badge>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {!list.loading && items.length > 0 && (
+            <div className="admPanelFooter"><LoadMore hasMore={list.hasMore} loading={list.loadingMore} noun="report" onClick={() => void list.loadMore()} shown={items.length} /></div>
+          )}
+        </section>
+
+        <section aria-label="Selected report" className="admCard admTriageDetail" ref={detail}>
+          {!selected ? (
+            <p className="admCardEmpty">Select a report to review it.</p>
+          ) : (
+            <>
+              <div className="admTriageHead">
+                <div>
+                  <p className="admTriageEyebrow">{selected.target.kind === "comment" ? "Reported comment" : "Reported post"} · {selected.community.name}</p>
+                  <h2>{selected.target.title ?? "Comment"}</h2>
+                  <div className="admBadgeRow">
+                    <Badge tone={REPORT_STATUS[selected.status].tone}>{REPORT_STATUS[selected.status].label}</Badge>
+                    <Badge tone={selected.target.moderationStatus === "hidden" ? "red" : "green"}>{selected.target.moderationStatus === "hidden" ? "Content hidden" : "Content visible"}</Badge>
+                    <Tag>{humanize(selected.reasonCode)}</Tag>
+                  </div>
+                </div>
+                <span className="admTriagePosition">{index + 1} of {items.length}{list.hasMore ? "+" : ""}</span>
+              </div>
+              <div className="admTriageBody">
+                <article className="admContentPreview">
+                  <p>{selected.target.body}</p>
+                </article>
+                {selected.details && (
+                  <div className="admTriageNote">
+                    <span>Reporter&apos;s note</span>
+                    <p>{selected.details}</p>
+                  </div>
+                )}
+                <ContextPanel key={selected.id} report={selected} />
+                <KeyValue
+                  items={[
+                    ["Reporter", <span className="admInline" key="reporter"><Avatar name={selected.reporter.displayName} size="sm" />{selected.reporter.displayName}</span>],
+                    ["Reported", formatDateTime(selected.createdAt)],
+                    ["Closed", selected.resolvedAt ? formatDateTime(selected.resolvedAt) : "Still open"],
+                  ]}
+                />
+                <p className="admMuted admSmall">The reporter&apos;s identity is visible only to staff who handle reports.</p>
+              </div>
+              {actionable(selected) && (
+                <div className="admTriageActions">
+                  <button aria-keyshortcuts="D" className="admBtn admBtnSecondary" onClick={() => act(selected, "dismiss")} type="button">Dismiss <kbd>D</kbd></button>
+                  <button aria-keyshortcuts="E" className="admBtn admBtnSecondary" onClick={() => act(selected, "restore")} type="button">Keep <kbd>E</kbd></button>
+                  <button aria-keyshortcuts="H" className="admBtn admBtnDanger" onClick={() => act(selected, "hide")} type="button">Hide content <kbd>H</kbd></button>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </div>
       <ReasonDialog onClose={() => setDialog(null)} request={dialog} />
     </>
   );
@@ -193,7 +295,7 @@ function ReportsQueue() {
 export default function ReportsPage() {
   return (
     <Suspense fallback={<SkeletonRows />}>
-      <ReportsQueue />
+      <TriageDesk />
     </Suspense>
   );
 }

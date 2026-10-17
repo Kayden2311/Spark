@@ -1,12 +1,12 @@
 import type { PlatformRole } from "./types";
 
-export type SectionId = "overview" | "reports" | "communities" | "campaigns" | "users" | "audit";
+export type SectionId = "overview" | "analytics" | "reports" | "communities" | "campaigns" | "users" | "billing" | "audit";
 
 export interface Section {
   id: SectionId;
   label: string;
   href: string;
-  group: "Workspace" | "Moderation" | "Administration";
+  group: "Insights" | "Moderation" | "Administration";
   /** Mirrors the API's role checks; the API stays the authority and answers 403 regardless. */
   roles: readonly PlatformRole[];
 }
@@ -14,11 +14,13 @@ export interface Section {
 const ADMINS: readonly PlatformRole[] = ["super_admin", "platform_admin"];
 
 export const SECTIONS: readonly Section[] = [
-  { id: "overview", label: "Overview", href: "/admin", group: "Workspace", roles: ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"] },
+  { id: "overview", label: "Overview", href: "/admin", group: "Insights", roles: ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"] },
+  { id: "analytics", label: "Analytics", href: "/admin/analytics", group: "Insights", roles: ADMINS },
   { id: "reports", label: "Reports", href: "/admin/reports", group: "Moderation", roles: [...ADMINS, "content_moderator"] },
   { id: "communities", label: "Communities", href: "/admin/communities", group: "Moderation", roles: [...ADMINS, "community_moderator"] },
   { id: "campaigns", label: "Campaigns", href: "/admin/campaigns", group: "Moderation", roles: [...ADMINS, "campaign_moderator"] },
   { id: "users", label: "Users", href: "/admin/users", group: "Administration", roles: ADMINS },
+  { id: "billing", label: "Billing", href: "/admin/billing", group: "Administration", roles: ADMINS },
   { id: "audit", label: "Audit log", href: "/admin/audit", group: "Administration", roles: ADMINS },
 ];
 

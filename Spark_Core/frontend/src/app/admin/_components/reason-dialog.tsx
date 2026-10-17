@@ -13,6 +13,8 @@ export interface ReasonRequest {
   description: ReactNode;
   confirmLabel: string;
   tone?: "primary" | "danger";
+  /** Common reasons offered as one-click starting points; staff can still edit the text. */
+  templates?: string[];
   /** Resolves when the action succeeded; a rejection keeps the dialog open and shows the error. */
   onConfirm: (reason: string) => Promise<void>;
 }
@@ -115,6 +117,25 @@ function ReasonDialogPanel({ request, onClose }: { request: ReasonRequest; onClo
                 value={reason}
               />
             </label>
+            {request.templates && request.templates.length > 0 && (
+              <div aria-label="Common reasons" className="admTemplates" role="group">
+                {request.templates.map((template) => (
+                  <button
+                    aria-pressed={trimmed === template}
+                    className="admTemplate"
+                    key={template}
+                    onClick={() => {
+                      setReason(template);
+                      setTouched(true);
+                      field.current?.focus();
+                    }}
+                    type="button"
+                  >
+                    {template}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="admFieldHint" id={hintId}>
               {touched && invalid ? <span className="admFieldError">Enter at least {REASON_MIN} characters.</span> : <span>Required, {REASON_MIN} to {REASON_MAX} characters.</span>}
               <span>{reason.length}/{REASON_MAX}</span>

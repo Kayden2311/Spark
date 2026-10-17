@@ -1,46 +1,24 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
-import { SearchIcon } from "../_components/icons";
+import { AVAILABLE, COPY, RESULT, healthOf } from "../_components/community-actions";
+import { AlertIcon, CommunityIcon, SearchIcon, TrendIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Badge, EmptyState, ErrorBanner, FilterTabs, LoadMore, NoAccess, PageHeader, Panel, RowMenu, SkeletonRows } from "../_components/ui";
+import { Sparkline } from "../_components/sparkline";
+import { Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RowMenu, SkeletonRows } from "../_components/ui";
 import { adminApi, query, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
-import { COMMUNITY_STATE, formatDate, humanize } from "../_lib/format";
+import { COMMUNITY_STATE, formatCount, humanize } from "../_lib/format";
+import { VIZ } from "../_lib/palette";
 import type { Community, CommunityAction, CommunityState } from "../_lib/types";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useDebounced, useQueryState } from "../_lib/use-query-state";
 
 type Filter = "all" | CommunityState | "flagged";
 const FILTERS: readonly Filter[] = ["all", "active", "featured", "frozen", "archived", "flagged"];
-
-// Mirrors the transitions staff_moderate_community accepts; the database is the authority.
-const AVAILABLE: Record<CommunityState, CommunityAction[]> = {
-  active: ["feature", "freeze", "archive"],
-  featured: ["unfeature", "freeze", "archive"],
-  frozen: ["unfreeze", "archive"],
-  archived: ["restore"],
-};
-
-const RESULT: Record<CommunityAction, CommunityState> = {
-  feature: "featured",
-  unfeature: "active",
-  freeze: "frozen",
-  unfreeze: "active",
-  archive: "archived",
-  restore: "active",
-};
-
-const COPY: Record<CommunityAction, { label: string; title: string; description: string; tone: "primary" | "danger"; done: string }> = {
-  feature: { label: "Feature", title: "Feature this community?", description: "Marks the community as featured so it can be promoted to members.", tone: "primary", done: "Community featured." },
-  unfeature: { label: "Unfeature", title: "Remove from featured?", description: "The community stays live but is no longer highlighted.", tone: "primary", done: "Community removed from featured." },
-  freeze: { label: "Freeze", title: "Freeze this community?", description: "Members can still read it, but nobody can publish new posts or comments until it is unfrozen. Freezing also removes it from featured.", tone: "danger", done: "Community frozen." },
-  unfreeze: { label: "Unfreeze", title: "Unfreeze this community?", description: "Members can publish posts and comments again.", tone: "primary", done: "Community unfrozen." },
-  archive: { label: "Archive", title: "Archive this community?", description: "The community becomes read-only and leaves the directory. You can restore it later.", tone: "danger", done: "Community archived." },
-  restore: { label: "Restore", title: "Restore this community?", description: "The community becomes active again. It is not re-featured automatically.", tone: "primary", done: "Community restored." },
-};
 
 function CommunitiesList() {
   const { roles, overview, refreshOverview, notify } = useAdmin();
@@ -64,6 +42,7 @@ function CommunitiesList() {
       description: <p><strong>{community.name}</strong>. {copy.description}</p>,
       confirmLabel: copy.label,
       tone: copy.tone,
+      templates: copy.templates,
       onConfirm: async (reason) => {
         await adminApi(`/communities/${community.id}/actions`, { method: "POST", body: { action, reason } }).catch((error: unknown) => reloadIfStale(error, list.reload));
         const state = RESULT[action];
@@ -77,7 +56,16 @@ function CommunitiesList() {
 
   return (
     <>
-      <PageHeader title="Communities" description="Feature standout communities, freeze ones that need a pause, and archive those that are no longer active." />
+      <PageHeader title="Communities" description="Spot communities that are growing, slowing down or drawing reports, and act on them." />
+
+      <KpiCards
+        items={[
+          { label: "Live communities", value: overview ? formatCount(overview.communities.active) : undefined, hint: overview ? `${overview.communities.featured} featured` : undefined, icon: <CommunityIcon />, tone: "blue" },
+          { label: "Need review", value: overview ? formatCount(overview.communities.flagged) : undefined, hint: "Have open reports", icon: <AlertIcon />, tone: "red", href: "/admin/communities?status=flagged" },
+          { label: "Frozen", value: overview ? formatCount(overview.communities.frozen) : undefined, hint: "Read-only until unfrozen", icon: <TrendIcon />, tone: "amber", href: "/admin/communities?status=frozen" },
+        ]}
+        label="Community summary"
+      />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       <Panel
@@ -101,42 +89,65 @@ function CommunitiesList() {
             <thead>
               <tr>
                 <th scope="col">Community</th>
-                <th scope="col">State</th>
-                <th scope="col" className="admNum">Members</th>
-                <th scope="col" className="admNum">Open reports</th>
-                <th scope="col">Created</th>
+                <th scope="col">Health</th>
+                <th className="admNum" scope="col">Members</th>
+                <th scope="col">Activity, 8 weeks</th>
+                <th className="admNum" scope="col">Posts · comments (30d)</th>
+                <th className="admNum" scope="col">Open reports</th>
                 <th scope="col"><span className="admSrOnly">Actions</span></th>
               </tr>
             </thead>
             <tbody>
-              {list.items.map((community) => (
-                <tr key={community.id}>
-                  <td data-label="Community">
-                    <div className="admEntity">
-                      <span aria-hidden="true" className="admEntityMark">{community.name.slice(0, 1).toUpperCase()}</span>
-                      <div className="admCellMain">
-                        <span className="admCellTitle">{community.name}</span>
-                        <span className="admCellSub">/{community.slug} · {humanize(community.visibility)}{community.stage ? ` · ${community.stage}` : ""}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td data-label="State"><Badge tone={COMMUNITY_STATE[community.state].tone}>{COMMUNITY_STATE[community.state].label}</Badge></td>
-                  <td className="admNum" data-label="Members">{community.memberCount.toLocaleString("en-US")}</td>
-                  <td className="admNum" data-label="Open reports">{community.openReports > 0 ? <Badge tone="red">{community.openReports}</Badge> : <span className="admMutedCell">0</span>}</td>
-                  <td className="admNowrap admMutedCell" data-label="Created">{formatDate(community.createdAt)}</td>
-                  <td className="admCellActions">
-                    <RowMenu
-                      actions={AVAILABLE[community.state].map((action) => ({
-                        label: COPY[action].label,
-                        tone: COPY[action].tone === "danger" ? ("danger" as const) : undefined,
-                        separated: action === "archive" && community.state !== "frozen",
-                        onSelect: () => act(community, action),
-                      }))}
-                      label={`Actions for ${community.name}`}
-                    />
-                  </td>
-                </tr>
-              ))}
+              {list.items.map((community) => {
+                const health = healthOf(community);
+                const weekly = community.weeklyActivity ?? [];
+                return (
+                  <tr key={community.id}>
+                    <td data-label="Community">
+                      <Link className="admEntity admEntityLink" href={`/admin/communities/${community.id}`}>
+                        <span aria-hidden="true" className="admEntityMark">{community.name.slice(0, 1).toUpperCase()}</span>
+                        <span className="admCellMain">
+                          <span className="admCellTitle">{community.name}</span>
+                          <span className="admCellSub">/{community.slug} · {humanize(community.visibility)}{community.stage ? ` · ${community.stage}` : ""}</span>
+                        </span>
+                      </Link>
+                    </td>
+                    <td data-label="Health">
+                      <span className="admCellMain">
+                        <Badge tone={health.tone}>{health.label}</Badge>
+                        {community.state !== "active" && community.state !== "archived" && <span className="admCellSub">{COMMUNITY_STATE[community.state].label}</span>}
+                      </span>
+                    </td>
+                    <td className="admNum" data-label="Members">
+                      <span className="admCellMain admCellNum">
+                        <span>{formatCount(community.memberCount)}</span>
+                        {community.newMembers30d > 0 && <span className="admCellSub">+{formatCount(community.newMembers30d)} this month</span>}
+                      </span>
+                    </td>
+                    <td data-label="Activity">
+                      <span className="admInline">
+                        <Sparkline color={VIZ.aqua} height={28} values={weekly} />
+                        <span className="admSrOnly">Weekly posts and comments: {weekly.join(", ")}</span>
+                      </span>
+                    </td>
+                    <td className="admNum" data-label="Posts · comments">{formatCount(community.posts30d)} · {formatCount(community.comments30d)}</td>
+                    <td className="admNum" data-label="Open reports">{community.openReports > 0 ? <Badge tone="red">{community.openReports}</Badge> : <span className="admMutedCell">0</span>}</td>
+                    <td className="admCellActions">
+                      <RowMenu
+                        actions={[
+                          ...AVAILABLE[community.state].map((action) => ({
+                            label: COPY[action].label,
+                            tone: COPY[action].tone === "danger" ? ("danger" as const) : undefined,
+                            separated: action === "archive" && community.state !== "frozen",
+                            onSelect: () => act(community, action),
+                          })),
+                        ]}
+                        label={`Actions for ${community.name}`}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

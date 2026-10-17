@@ -6,13 +6,15 @@ import { Suspense, useState } from "react";
 
 import { useAuth } from "../../auth-context";
 import { useAdmin } from "../_components/admin-context";
-import { SearchIcon } from "../_components/icons";
+import { AlertIcon, SearchIcon, SignupIcon, UserIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, LoadMore, NoAccess, PageHeader, Panel, RowMenu, SkeletonRows, Tag } from "../_components/ui";
+import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RowMenu, SkeletonRows, Tag } from "../_components/ui";
 import { query } from "../_lib/api";
 import { PLATFORM_ROLES, canAccess } from "../_lib/access";
-import { ROLE_LABELS, USER_STATUS, formatDate, formatRelative } from "../_lib/format";
-import type { PlatformRole, UserStatus, UserSummary } from "../_lib/types";
+import { ROLE_LABELS, USER_STATUS, formatCount, formatDate, formatRelative } from "../_lib/format";
+import { SERIES } from "../_lib/palette";
+import type { ActivityResponse, PlatformRole, UserStatus, UserSummary } from "../_lib/types";
+import { useAdminData } from "../_lib/use-admin-data";
 import { usePagedList } from "../_lib/use-paged-list";
 import { canChangeStatus, statusRequest } from "../_components/user-actions";
 import { useDebounced, useQueryState } from "../_lib/use-query-state";
@@ -34,8 +36,10 @@ function UsersList() {
     allowed ? `/users${query({ status: status === "all" ? undefined : status, role: role === "any" ? undefined : role, search: settledSearch })}` : null,
   );
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
+  const growth = useAdminData<ActivityResponse>(allowed ? "/analytics/activity?days=30" : null);
 
   if (!allowed) return <NoAccess />;
+  const audience = growth.data?.audience;
 
   const changeStatus = (user: UserSummary) =>
     setDialog(statusRequest(user, (next) => {
@@ -46,7 +50,23 @@ function UsersList() {
 
   return (
     <>
-      <PageHeader title="Users" description="Find any account, review its platform roles, and suspend or reactivate it." />
+      <PageHeader title="Users" description="See how membership is growing, find any account, and act on risky ones." />
+
+      <KpiCards
+        items={[
+          {
+            label: "New members (30d)",
+            value: growth.data ? formatCount(growth.data.current.signups) : undefined,
+            change: growth.data ? { current: growth.data.current.signups, previous: growth.data.previous?.signups } : undefined,
+            icon: <SignupIcon />,
+            tone: "amber",
+            trend: { values: growth.data?.series.map((point) => point.signups) ?? [], color: SERIES.signups.color },
+          },
+          { label: "Active accounts", value: overview ? formatCount(overview.users.active) : undefined, hint: audience ? `${formatCount(audience.mau)} active in the last 30 days` : undefined, icon: <UserIcon />, tone: "blue" },
+          { label: "Suspended", value: overview ? formatCount(overview.users.suspended) : undefined, hint: "Signed out and blocked", icon: <AlertIcon />, tone: "red", href: "/admin/users?status=suspended" },
+        ]}
+        label="Membership"
+      />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       <Panel
@@ -92,6 +112,7 @@ function UsersList() {
                 <th scope="col">User</th>
                 <th scope="col">Platform roles</th>
                 <th scope="col">Status</th>
+                <th scope="col">Signals</th>
                 <th scope="col">Last sign-in</th>
                 <th scope="col">Joined</th>
                 <th scope="col"><span className="admSrOnly">Actions</span></th>
@@ -117,6 +138,14 @@ function UsersList() {
                       )}
                     </td>
                     <td data-label="Status"><Badge tone={USER_STATUS[user.status].tone}>{USER_STATUS[user.status].label}</Badge></td>
+                    <td data-label="Signals">
+                      {user.risk && (user.risk.reportsAgainst > 0 || user.risk.hiddenPosts + user.risk.hiddenComments > 0) ? (
+                        <div className="admTagRow">
+                          {user.risk.reportsAgainst > 0 && <Badge tone={user.risk.reportsAgainst > 2 ? "red" : "amber"}>{user.risk.reportsAgainst} {user.risk.reportsAgainst === 1 ? "report" : "reports"}</Badge>}
+                          {user.risk.hiddenPosts + user.risk.hiddenComments > 0 && <Badge tone="red">{user.risk.hiddenPosts + user.risk.hiddenComments} hidden</Badge>}
+                        </div>
+                      ) : <span className="admMutedCell">None</span>}
+                    </td>
                     <td className="admNowrap admMutedCell" data-label="Last sign-in">{formatRelative(user.lastLoginAt)}</td>
                     <td className="admNowrap admMutedCell" data-label="Joined">{formatDate(user.createdAt)}</td>
                     <td className="admCellActions">

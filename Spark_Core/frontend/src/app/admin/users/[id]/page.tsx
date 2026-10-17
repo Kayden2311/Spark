@@ -6,14 +6,17 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "../../../auth-context";
 import { useAdmin } from "../../_components/admin-context";
+import { ChartCard, ChartLegend, TrendChart } from "../../_components/charts";
 import { ArrowLeftIcon } from "../../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../../_components/reason-dialog";
 import { canChangeStatus, statusRequest } from "../../_components/user-actions";
 import { Avatar, Badge, EmptyState, ErrorBanner, KeyValue, NoAccess, SkeletonRows, Tag } from "../../_components/ui";
 import { ApiError, adminApi, messageOf, reloadIfStale } from "../../_lib/api";
 import { PLATFORM_ROLES, canAccess, canManageRoles } from "../../_lib/access";
-import { AUDIT_ACTIONS, ROLE_DESCRIPTIONS, ROLE_LABELS, USER_STATUS, describeAction, formatDate, formatDateTime, formatRelative } from "../../_lib/format";
-import type { PlatformRole, UserDetail } from "../../_lib/types";
+import { AUDIT_ACTIONS, ROLE_DESCRIPTIONS, ROLE_LABELS, USER_STATUS, describeAction, formatDate, formatDateTime, formatRelative, shortDate } from "../../_lib/format";
+import { SERIES } from "../../_lib/palette";
+import type { PlatformRole, UserActivityResponse, UserDetail, UserSession } from "../../_lib/types";
+import { useAdminData } from "../../_lib/use-admin-data";
 
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,6 +29,8 @@ export default function UserDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
   const [version, setVersion] = useState(0);
+  const activity = useAdminData<UserActivityResponse>(allowed ? `/users/${encodeURIComponent(id)}/activity?days=90` : null);
+  const sessions = useAdminData<{ items: UserSession[] }>(allowed ? `/users/${encodeURIComponent(id)}/sessions` : null);
 
   useEffect(() => {
     if (!allowed) return;
@@ -106,6 +111,47 @@ export default function UserDetailPage() {
         )}
       </header>
       {error && <ErrorBanner message={error} onRetry={reload} />}
+
+      <div className="admGrid3">
+        <ChartCard
+          empty={activity.data?.series.every((point) => point.signIns + point.posts + point.comments === 0)}
+          emptyText="No sign-ins, posts or comments in the last 90 days."
+          error={activity.error}
+          height={220}
+          legend={<ChartLegend series={[SERIES.signIns, SERIES.posts, SERIES.comments]} />}
+          loading={activity.loading && !activity.data}
+          onRetry={activity.reload}
+          subtitle={activity.data ? `${activity.data.series.reduce((sum, point) => sum + point.signIns, 0)} sign-ins · ${activity.data.series.reduce((sum, point) => sum + point.posts, 0)} posts · ${activity.data.series.reduce((sum, point) => sum + point.comments, 0)} comments in 90 days` : "Last 90 days"}
+          table={{ columns: ["Day", "Sign-ins", "Posts", "Comments"], rows: (activity.data?.series ?? []).filter((point) => point.signIns + point.posts + point.comments > 0).map((point) => [shortDate(point.day), point.signIns, point.posts, point.comments]) }}
+          title="Activity"
+        >
+          <TrendChart data={(activity.data?.series ?? []) as unknown as Array<Record<string, unknown>>} height={220} kind="bar" series={[{ key: "signIns", ...SERIES.signIns }, { key: "posts", ...SERIES.posts }, { key: "comments", ...SERIES.comments }]} stacked />
+        </ChartCard>
+        <section aria-labelledby="sessions-title" className="admCard admCardFlush">
+          <div className="admCardHead">
+            <div>
+              <h2 id="sessions-title">Recent sign-ins</h2>
+              <p>The latest sessions and whether they still work.</p>
+            </div>
+          </div>
+          {sessions.error && <div className="admCardInset"><ErrorBanner message={sessions.error} onRetry={sessions.reload} /></div>}
+          {!sessions.data && !sessions.error && <div className="admCardInset"><SkeletonRows rows={4} /></div>}
+          {sessions.data && sessions.data.items.length === 0 && <p className="admCardEmpty">This account has never signed in.</p>}
+          {sessions.data && sessions.data.items.length > 0 && (
+            <ul className="admSessionList">
+              {sessions.data.items.slice(0, 8).map((session) => (
+                <li key={session.id}>
+                  <div className="admCellMain">
+                    <span className="admCellTitle">{formatDateTime(session.createdAt)}</span>
+                    <span className="admCellSub">{session.method === "oauth" ? "Social sign-in" : "Password"} · last seen {formatRelative(session.lastSeenAt)}</span>
+                  </div>
+                  <Badge tone={session.state === "active" ? "green" : session.state === "revoked" ? "red" : "neutral"}>{session.state === "active" ? "Active" : session.state === "revoked" ? "Signed out" : "Expired"}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
 
       <div className="admGrid">
         <section aria-labelledby="profile-title" className="admCard">

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { Tone } from "../_lib/format";
-import { initials } from "../_lib/format";
-import { AlertIcon, InboxIcon, MoreIcon, RefreshIcon } from "./icons";
+import { describeChange, initials } from "../_lib/format";
+import { Sparkline } from "./sparkline";
+import { AlertIcon, ArrowDownIcon, ArrowUpIcon, InboxIcon, MoreIcon, RefreshIcon } from "./icons";
 
 export function PageHeader({ title, description, actions, meta }: { title: string; description?: ReactNode; actions?: ReactNode; meta?: ReactNode }) {
   return (
@@ -275,5 +276,96 @@ export function RowMenu({ label, actions }: { label: string; actions: MenuAction
         </div>
       )}
     </div>
+  );
+}
+
+export interface KpiCardItem {
+  label: string;
+  value: string | undefined;
+  /** Current and previous period values; the card states the change in words. */
+  change?: { current: number; previous: number | null | undefined; higherIsBetter?: boolean };
+  hint?: ReactNode;
+  icon?: ReactNode;
+  tone?: Tone;
+  trend?: { values: number[]; color: string };
+  href?: string;
+}
+
+/** KPI cards: a tinted icon chip, the value, the change against the previous period and a sparkline. */
+export function KpiCards({ items, label }: { items: KpiCardItem[]; label: string }) {
+  return (
+    <ul aria-label={label} className="admKpiCards">
+      {items.map((item) => {
+        const change = item.change ? describeChange(item.change.current, item.change.previous) : null;
+        const good = change && item.change && change.direction !== "flat" && change.direction !== "none"
+          ? (change.direction === "up") === (item.change.higherIsBetter ?? true)
+          : null;
+        const body = (
+          <>
+            <div className="admKpiCardTop">
+              {item.icon && <span aria-hidden="true" className={`admKpiChip admTone-${item.tone ?? "blue"}`}>{item.icon}</span>}
+              <span className="admKpiCardLabel">{item.label}</span>
+            </div>
+            <div className="admKpiCardRow">
+              <div className="admKpiCardMain">
+                <span className="admKpiCardValue">{item.value ?? "–"}</span>
+                {change && (
+                  <span className="admDelta" data-direction={change.direction} data-good={good === null ? undefined : String(good)}>
+                    {change.direction === "up" ? <ArrowUpIcon /> : change.direction === "down" ? <ArrowDownIcon /> : null}
+                    {change.text}
+                    {change.direction !== "none" && <span className="admDeltaNote"> vs previous period</span>}
+                  </span>
+                )}
+                {item.hint && <span className="admKpiCardHint">{item.hint}</span>}
+              </div>
+              {item.trend && <Sparkline color={item.trend.color} values={item.trend.values} />}
+            </div>
+          </>
+        );
+        return (
+          <li key={item.label}>
+            {item.href ? <Link className="admKpiCard admKpiCardLink" href={item.href}>{body}</Link> : <div className="admKpiCard">{body}</div>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Segmented control for a small set of mutually exclusive views or ranges. */
+export function Segmented<T extends string | number>({ label, options, value, onChange }: { label: string; options: Array<{ value: T; label: string; icon?: ReactNode }>; value: T; onChange: (value: T) => void }) {
+  return (
+    <div aria-label={label} className="admSegmented" role="group">
+      {options.map((option) => (
+        <button aria-pressed={option.value === value} key={String(option.value)} onClick={() => onChange(option.value)} type="button">
+          {option.icon}
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export const RANGES = [7, 30, 90, 180] as const;
+export type RangeDays = (typeof RANGES)[number];
+
+export function RangePicker({ value, onChange }: { value: RangeDays; onChange: (value: RangeDays) => void }) {
+  return <Segmented label="Date range" onChange={onChange} options={RANGES.map((days) => ({ value: days, label: `${days}d` }))} value={value} />;
+}
+
+/** A card with a heading row; the building block for non-chart sections. */
+export function Card({ title, subtitle, actions, children, className, flush }: { title: string; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; flush?: boolean }) {
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className={`admCard${flush ? " admCardFlush" : ""}${className ? ` ${className}` : ""}`}>
+      <div className="admCardHead">
+        <div>
+          <h2 id={headingId}>{title}</h2>
+          {subtitle && <p>{subtitle}</p>}
+        </div>
+        {actions && <div className="admCardActions">{actions}</div>}
+      </div>
+      {children}
+    </section>
   );
 }

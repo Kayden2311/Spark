@@ -4,11 +4,11 @@ import "./admin.css";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useAuth } from "../auth-context";
 import { AdminProvider, useAdmin } from "./_components/admin-context";
-import { AuditIcon, ChevronIcon, CloseIcon, CommunityIcon, ExternalIcon, FlagIcon, LogoutIcon, MegaphoneIcon, MenuIcon, OverviewIcon, UserIcon } from "./_components/icons";
+import { AuditIcon, BillingIcon, ChartIcon, ChevronIcon, CloseIcon, CommunityIcon, ExternalIcon, FlagIcon, LogoutIcon, MegaphoneIcon, MenuIcon, OverviewIcon, SidebarIcon, UserIcon } from "./_components/icons";
 import { Avatar } from "./_components/ui";
 import { SESSION_EXPIRED_EVENT } from "./_lib/api";
 import { isStaff, sectionForPath, visibleSections, type SectionId } from "./_lib/access";
@@ -18,10 +18,12 @@ import type { Overview, PlatformRole } from "./_lib/types";
 
 const SECTION_ICONS: Record<SectionId, ReactNode> = {
   overview: <OverviewIcon />,
+  analytics: <ChartIcon />,
   reports: <FlagIcon />,
   communities: <CommunityIcon />,
   campaigns: <MegaphoneIcon />,
   users: <UserIcon />,
+  billing: <BillingIcon />,
   audit: <AuditIcon />,
 };
 
@@ -43,7 +45,46 @@ function SparkMark() {
   );
 }
 
-function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
+const RAIL_KEY = "spark.admin.sidebar";
+
+function readRail(): boolean {
+  try {
+    const stored = window.localStorage.getItem(RAIL_KEY);
+    return stored === null ? railMemory : stored === "collapsed";
+  } catch {
+    return railMemory;
+  }
+}
+
+// Fallback when storage is blocked: the choice then lasts for this visit only.
+let railMemory = false;
+const RAIL_EVENT = "spark:admin-rail";
+
+function saveRail(collapsed: boolean) {
+  railMemory = collapsed;
+  try {
+    window.localStorage.setItem(RAIL_KEY, collapsed ? "collapsed" : "expanded");
+  } catch {
+    // Blocked storage: keep the in-memory value.
+  }
+  window.dispatchEvent(new Event(RAIL_EVENT));
+}
+
+function subscribeRail(onChange: () => void): () => void {
+  window.addEventListener(RAIL_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(RAIL_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function isTyping(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+}
+
+function Sidebar({ open, collapsed, onNavigate, onToggle }: { open: boolean; collapsed: boolean; onNavigate: () => void; onToggle: () => void }) {
   const pathname = usePathname();
   const { roles, overview } = useAdmin();
   const sections = visibleSections(roles);
@@ -52,13 +93,27 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
 
   return (
     <aside className="admSidebar" data-open={open} id="admin-navigation">
-      <Link className="admBrand" href="/admin" onClick={onNavigate}>
-        <span className="admBrandMark"><SparkMark /></span>
-        <span className="admBrandText">
-          <strong>Spark</strong>
-          <span>Admin console</span>
-        </span>
-      </Link>
+      <div className="admBrandRow">
+        <Link aria-label="Spark admin console, overview" className="admBrand" href="/admin" onClick={onNavigate}>
+          <span className="admBrandMark"><SparkMark /></span>
+          <span className="admBrandText">
+            <strong>Spark</strong>
+            <span>Admin console</span>
+          </span>
+        </Link>
+        <button
+          aria-controls="admin-navigation"
+          aria-expanded={!collapsed}
+          aria-keyshortcuts="["
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="admRailToggle"
+          data-tip={collapsed ? "Expand  [" : "Collapse  ["}
+          onClick={onToggle}
+          type="button"
+        >
+          <SidebarIcon />
+        </button>
+      </div>
       <nav aria-label="Admin sections" className="admNav">
         {groups.map((group) => (
           <div className="admNavGroup" key={group}>
@@ -68,10 +123,16 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
                 const count = badgeFor(section.id, overview);
                 return (
                   <li key={section.id}>
-                    <Link aria-current={active === section.id ? "page" : undefined} className="admNavLink" href={section.href} onClick={onNavigate}>
+                    <Link
+                      aria-current={active === section.id ? "page" : undefined}
+                      className="admNavLink"
+                      data-tip={count ? `${section.label} · ${count}` : section.label}
+                      href={section.href}
+                      onClick={onNavigate}
+                    >
                       {SECTION_ICONS[section.id]}
-                      <span>{section.label}</span>
-                      {count ? <span className="admNavCount" aria-label={`${count} need attention`}>{count}</span> : null}
+                      <span className="admNavLabel">{section.label}</span>
+                      {count ? <span className="admNavCount"><span aria-hidden="true">{count > 99 ? "99+" : count}</span><span className="admSrOnly">, {count} need attention</span></span> : null}
                     </Link>
                   </li>
                 );
@@ -130,6 +191,20 @@ function AccountMenu() {
 
 function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // The server render has no stored choice, so it always starts expanded.
+  const collapsed = useSyncExternalStore(subscribeRail, readRail, () => false);
+  const toggleRail = useCallback(() => saveRail(!readRail()), []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "[" || event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target)) return;
+      if (document.querySelector("[aria-modal='true']")) return;
+      event.preventDefault();
+      toggleRail();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [toggleRail]);
   const pathname = usePathname();
   const current = sectionForPath(pathname);
   const isDetail = Boolean(current && pathname !== current.href);
@@ -142,9 +217,9 @@ function Shell({ children }: { children: ReactNode }) {
   }, [menuOpen]);
 
   return (
-    <div className={`admShell ${adminFont.variable}`}>
+    <div className={`admShell ${adminFont.variable}`} data-rail={collapsed ? "collapsed" : "expanded"}>
       <a className="admSkip" href="#admin-main">Skip to content</a>
-      <Sidebar onNavigate={() => setMenuOpen(false)} open={menuOpen} />
+      <Sidebar collapsed={collapsed} onNavigate={() => setMenuOpen(false)} onToggle={toggleRail} open={menuOpen} />
       {menuOpen && <button aria-label="Close navigation" className="admScrim" onClick={() => setMenuOpen(false)} type="button" />}
       <div className="admBody">
         <header className="admTopbar">

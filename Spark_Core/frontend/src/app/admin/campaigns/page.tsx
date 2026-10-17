@@ -5,22 +5,31 @@ import { Suspense, useState } from "react";
 import { useAdmin } from "../_components/admin-context";
 import { Drawer } from "../_components/drawer";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, NoAccess, PageHeader, Panel, SkeletonRows } from "../_components/ui";
+import { BoardIcon, ClockIcon, ListIcon, MegaphoneIcon, ShieldIcon } from "../_components/icons";
+import { Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, KpiCards, LoadMore, NoAccess, PageHeader, Panel, Segmented, SkeletonRows } from "../_components/ui";
 import { adminApi, query, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
-import { REVIEW_STATUS, formatDate, formatDateTime, humanize } from "../_lib/format";
+import { REVIEW_STATUS, formatCount, formatDate, formatDateTime, formatPercent, formatRelative, humanize } from "../_lib/format";
 import type { Campaign, ReviewStatus } from "../_lib/types";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useQueryState } from "../_lib/use-query-state";
 
 type Filter = "pending" | "approved" | "rejected" | "all";
 const FILTERS: readonly Filter[] = ["pending", "approved", "rejected", "all"];
+type View = "board" | "list";
+const COLUMNS: ReviewStatus[] = ["pending", "approved", "rejected", "draft"];
+
+function waitingDays(campaign: Campaign): number {
+  return Math.max(0, Math.floor((Date.now() - Date.parse(campaign.createdAt)) / 86_400_000));
+}
 
 function CampaignReview() {
   const { roles, overview, refreshOverview, notify } = useAdmin();
   const allowed = canAccess(roles, "campaigns");
   const [filter, setFilter] = useQueryState<Filter>("status", "pending", FILTERS);
-  const list = usePagedList<Campaign>(allowed ? `/campaigns${query({ status: filter === "all" ? undefined : filter })}` : null);
+  const [view, setView] = useQueryState<View>("view", "board", ["board", "list"]);
+  // The board shows every column at once, so it loads all campaigns (newest 100) instead of one status.
+  const list = usePagedList<Campaign>(allowed ? (view === "board" ? "/campaigns?limit=100" : `/campaigns${query({ status: filter === "all" ? undefined : filter })}`) : null);
   const [selected, setSelected] = useState<Campaign | null>(null);
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
 
@@ -34,10 +43,13 @@ function CampaignReview() {
         : <p><strong>{campaign.name}</strong> will not run. Your reason is recorded with the decision, so keep it clear and specific. The decision is final.</p>,
       confirmLabel: decision === "approve" ? "Approve" : "Reject",
       tone: decision === "approve" ? "primary" : "danger",
+      templates: decision === "approve"
+        ? ["Clear value for members and fits the placement policy.", "Accurate claims and an appropriate audience."]
+        : ["Makes financial or health claims we cannot verify.", "Overlaps with an approved campaign this month.", "Headline is misleading about the offer."],
       onConfirm: async (reason) => {
         await adminApi(`/campaigns/${campaign.id}/review`, { method: "POST", body: { decision, reason } }).catch((error: unknown) => reloadIfStale(error, list.reload));
         const reviewStatus: ReviewStatus = decision === "approve" ? "approved" : "rejected";
-        list.update(campaign.id, (item) => (filter === "all" || filter === reviewStatus ? { ...item, reviewStatus } : null));
+        list.update(campaign.id, (item) => (view === "board" || filter === "all" || filter === reviewStatus ? { ...item, reviewStatus } : null));
         setSelected(null);
         refreshOverview();
         notify(decision === "approve" ? "Campaign approved." : "Campaign rejected.");
@@ -46,9 +58,55 @@ function CampaignReview() {
 
   return (
     <>
-      <PageHeader title="Sponsored campaigns" description="Community promotions wait here for review. Only approved campaigns can be scheduled." />
+      <PageHeader
+        actions={<Segmented label="View" onChange={setView} options={[{ value: "board", label: "Board", icon: <BoardIcon /> }, { value: "list", label: "List", icon: <ListIcon /> }]} value={view} />}
+        description="Community promotions move through review here. Only approved campaigns can be scheduled."
+        title="Sponsored campaigns"
+      />
+
+      {view === "board" && <PipelineSummary items={list.items} loading={list.loading} />}
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
+      {view === "board" ? (
+        list.loading ? <SkeletonRows /> : (
+          <div className="admBoard">
+            {COLUMNS.filter((column) => column !== "draft" || list.items.some((item) => item.reviewStatus === "draft")).map((column) => {
+              const cards = list.items.filter((item) => item.reviewStatus === column);
+              return (
+                <section aria-label={REVIEW_STATUS[column].label} className="admBoardColumn" key={column}>
+                  <header className={`admBoardHead admTone-${REVIEW_STATUS[column].tone}`}>
+                    <span aria-hidden="true" className="admBadgeDot" />
+                    <h2>{REVIEW_STATUS[column].label}</h2>
+                    <span className="admTabCount">{cards.length}</span>
+                  </header>
+                  {cards.length === 0 ? <p className="admBoardEmpty">Nothing here.</p> : (
+                    <ul className="admBoardCards">
+                      {cards.map((campaign) => {
+                        const waiting = waitingDays(campaign);
+                        return (
+                          <li key={campaign.id}>
+                            <button className="admBoardCard" onClick={() => setSelected(campaign)} type="button">
+                              <span className="admBoardCardTitle">{campaign.name}</span>
+                              <span className="admBoardCardText">{campaign.headline}</span>
+                              <span className="admBoardCardMeta">
+                                <span>{campaign.community.name}</span>
+                                <span>Starts {formatDate(campaign.requestedStartAt)}</span>
+                              </span>
+                              {column === "pending" && (
+                                <Badge tone={waiting >= 3 ? "red" : waiting >= 1 ? "amber" : "neutral"}>{waiting === 0 ? "Submitted today" : `Waiting ${waiting} ${waiting === 1 ? "day" : "days"}`}</Badge>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )
+      ) : (
       <Panel
         footer={!list.loading && list.items.length > 0 ? <LoadMore hasMore={list.hasMore} loading={list.loadingMore} noun="campaign" onClick={() => void list.loadMore()} shown={list.items.length} /> : undefined}
         label="Campaigns"
@@ -108,6 +166,7 @@ function CampaignReview() {
           </table>
         )}
       </Panel>
+      )}
 
       <Drawer
         footer={selected?.reviewStatus === "pending" ? (
@@ -143,6 +202,23 @@ function CampaignReview() {
       </Drawer>
       <ReasonDialog onClose={() => setDialog(null)} request={dialog} />
     </>
+  );
+}
+
+function PipelineSummary({ items, loading }: { items: Campaign[]; loading: boolean }) {
+  const pending = items.filter((item) => item.reviewStatus === "pending");
+  const approved = items.filter((item) => item.reviewStatus === "approved").length;
+  const rejected = items.filter((item) => item.reviewStatus === "rejected").length;
+  const oldest = pending.reduce<Campaign | null>((first, item) => (!first || item.createdAt < first.createdAt ? item : first), null);
+  return (
+    <KpiCards
+      items={[
+        { label: "Awaiting review", value: loading ? undefined : formatCount(pending.length), hint: oldest ? `Oldest submitted ${formatRelative(oldest.createdAt)}` : "Nothing waiting", icon: <ClockIcon />, tone: pending.length > 0 ? "amber" : "green" },
+        { label: "Approval rate", value: loading ? undefined : approved + rejected > 0 ? formatPercent(approved / (approved + rejected)) : "–", hint: `${approved} approved · ${rejected} rejected`, icon: <ShieldIcon />, tone: "blue" },
+        { label: "Campaigns", value: loading ? undefined : formatCount(items.length), hint: "Newest 100 across every status", icon: <MegaphoneIcon />, tone: "violet" },
+      ]}
+      label="Review pipeline"
+    />
   );
 }
 
