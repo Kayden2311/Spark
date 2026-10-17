@@ -6,9 +6,17 @@ const connectionString =
   process.env.DATABASE_URL ||
   "postgresql://spark_migrator:spark_migrate_local_only@127.0.0.1:5432/spark";
 
-
-
-
+// Seeded accounts have published passwords and their role grants bypass the audited staff functions,
+// so seeding is for local development only.
+const seedHost = new URL(connectionString).hostname;
+const loopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(seedHost);
+if (process.env.NODE_ENV === "production" || (!loopback && process.env.SPARK_ALLOW_SEED !== "1")) {
+  console.error(
+    `Refusing to seed ${seedHost}: seeding creates accounts with published passwords. ` +
+      "It runs only against a local database (set SPARK_ALLOW_SEED=1 to seed another non-production host).",
+  );
+  process.exit(1);
+}
 const client = new pg.Client({ connectionString, connectionTimeoutMillis: 5000 });
 
 try {
@@ -65,15 +73,6 @@ try {
     }
     return userId;
   }
-
-  // Update platform_role_assignments constraint to support multiple moderator roles
-  await client.query(
-    "ALTER TABLE spark.platform_role_assignments DROP CONSTRAINT IF EXISTS platform_role_assignments_role_allowed",
-  );
-  await client.query(
-    `ALTER TABLE spark.platform_role_assignments ADD CONSTRAINT platform_role_assignments_role_allowed
-     CHECK (role IN ('super_admin', 'platform_admin', 'community_moderator', 'content_moderator', 'campaign_moderator'))`,
-  );
 
   // 1. Ensure Admin User (Super Admin & Multi-role Platform Moderator)
   const adminId = await ensureUser({
@@ -213,10 +212,57 @@ try {
     }
   }
 
+  // 6. A moderator without admin roles, to exercise role-gated sections of the console.
+  const moderatorId = await ensureUser({
+    email: "moderator@spark.app",
+    displayName: "Spark Moderator",
+    password: "ModeratorPassword123!",
+  });
+  for (const role of ["content_moderator", "community_moderator"]) {
+    await client.query(
+      `INSERT INTO spark.platform_role_assignments (id, user_id, role, granted_by_user_id)
+       VALUES (gen_random_uuid(), $1, $2, $3)
+       ON CONFLICT DO NOTHING`,
+      [moderatorId, role, adminId],
+    );
+  }
+
+  // 7. Sponsored campaigns awaiting review.
+  const existingCampaigns = await client.query("SELECT count(*)::integer AS total FROM spark.promotion_campaigns");
+  if (existingCampaigns.rows[0].total === 0) {
+    await client.query("BEGIN");
+    try {
+      const placement = await client.query(
+        `INSERT INTO spark.promotion_placements (id, code, name, description)
+         VALUES (gen_random_uuid(), 'directory-spotlight', 'Directory spotlight', 'Featured slot at the top of the community directory.')
+         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+      );
+      const campaigns = [
+        [comm1.id, "Hyperdrive demo night", "Watch six hardtech founders demo live", "A monthly demo night for technical founders, open to Spark members."],
+        [comm2.id, "Zero-to-One pricing clinic", "Fix your SaaS pricing in one evening", "Hands-on pricing teardown with operators who scaled B2B revenue."],
+      ];
+      for (const [communityId, name, headline, description] of campaigns) {
+        await client.query(
+          `INSERT INTO spark.promotion_campaigns (id, tenant_id, community_id, name, headline, description, placement_id, submitted_by_user_id, review_status, requested_start_at)
+           VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'pending', NOW() + interval '7 days')`,
+          [workspaceId, communityId, name, headline, description, placement.rows[0].id, user1Id],
+        );
+      }
+      await client.query("COMMIT");
+      console.log("Created two pending sponsored campaigns.");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    }
+  }
+
   console.log("\n==============================================");
   console.log("SEEDED USERS & GOVERNANCE DEMO DATA SUCCESSFULLY:");
-  console.log("1. Admin:  admin@spark.app / AdminPassword123! (Super Admin & Platform Governance)");
-  console.log("2. User 1: user1@spark.app / UserPassword123! (Owner of 'Spark Lab' and 'Hyperdrive')");
+  console.log("1. Admin:     admin@spark.app / AdminPassword123! (Super Admin & Platform Governance)");
+  console.log("2. Moderator: moderator@spark.app / ModeratorPassword123! (Content and community moderator)");
+  console.log("3. User 1:    user1@spark.app / UserPassword123! (Owner of 'Spark Lab' and 'Hyperdrive')");
+  console.log("Note: seeded role grants are written directly and do not appear in the platform audit log.");
   console.log("==============================================\n");
 } catch (error) {
   console.error("Seeding failed:", error);

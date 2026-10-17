@@ -77,7 +77,7 @@ export const startupConnections = spark.table("startup_connections", {
 export const communities = spark.table("communities", {
   ...tenant(), slug: text("slug").notNull(), name: text("name").notNull(), description: text("description").notNull(),
   visibility: state("visibility", ["public", "private", "hidden"]).notNull().default("private"), countryCode: text("country_code"), city: text("city"), stage: text("stage"),
-  createdByUserId: ref("created_by_user_id").notNull(), archivedAt: instant("archived_at"),
+  createdByUserId: ref("created_by_user_id").notNull(), archivedAt: instant("archived_at"), featuredAt: instant("featured_at"), frozenAt: instant("frozen_at"),
 }).enableRLS();
 export const topics = spark.table("topics", { ...mutable(), slug: text("slug").notNull(), name: text("name").notNull() }).enableRLS();
 export const communityTopics = spark.table("community_topics", { ...community(), topicId: ref("topic_id").notNull() }).enableRLS();
@@ -175,4 +175,8 @@ export const promotionOrderInvoices = spark.table("promotion_order_invoices", { 
 export const promotionReviews = spark.table("promotion_reviews", { ...base(), tenantId: ref("tenant_id").notNull(), campaignId: ref("campaign_id").notNull(), campaignVersion: integer("campaign_version").notNull(), reviewerUserId: ref("reviewer_user_id").notNull(), decision: state("decision", ["approve", "reject"]).notNull(), reason: text("reason").notNull() }).enableRLS();
 export const promotionMetricsDaily = spark.table("promotion_metrics_daily", { ...tenant(), campaignId: ref("campaign_id").notNull(), metricDate: date("metric_date").notNull(), impressions: amount("impressions").notNull().default(sql`0`), clicks: amount("clicks").notNull().default(sql`0`) }).enableRLS();
 export const platformRoleAssignments = spark.table("platform_role_assignments", { ...mutable(), userId: ref("user_id").notNull(), role: state("role", ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"]).notNull(), grantedByUserId: ref("granted_by_user_id").notNull(), revokedAt: instant("revoked_at") }).enableRLS();
+export const platformAuditActions = ["report.hide", "report.restore", "report.dismiss", "community.feature", "community.unfeature", "community.freeze", "community.unfreeze", "community.archive", "community.restore", "user.suspend", "user.reactivate", "role.grant", "role.revoke", "campaign.approve", "campaign.reject"] as const;
+export const platformAuditTargets = ["report", "community", "user", "campaign"] as const;
+// Append-only; written only by the governance definer functions (0009_platform_governance).
+export const platformAuditEvents = spark.table("platform_audit_events", { ...base(), actorUserId: ref("actor_user_id").notNull(), action: state("action", platformAuditActions).notNull(), targetType: state("target_type", platformAuditTargets).notNull(), targetId: ref("target_id").notNull(), targetLabel: text("target_label").notNull(), reason: text("reason").notNull(), metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`) }).enableRLS();
 

@@ -64,6 +64,27 @@
       "when": 1792220000000,
       "tag": "0008_login_role",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792230000000,
+      "tag": "0009_platform_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792240000000,
+      "tag": "0010_governance_review_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792250000000,
+      "tag": "0011_campaign_review_lock",
+      "breakpoints": true
     }
   ]
 }

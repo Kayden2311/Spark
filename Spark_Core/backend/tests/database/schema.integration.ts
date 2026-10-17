@@ -104,9 +104,9 @@ afterAll(async () => {
 });
 
 describe("Local PostgreSQL schema", () => {
-  it("migrates 60 tables with FORCE RLS and a non-login owner", async () => {
+  it("migrates 61 tables with FORCE RLS and a non-login owner", async () => {
     const result = await owner.query("SELECT count(*)::integer AS count,bool_and(c.relrowsecurity AND c.relforcerowsecurity AND pg_get_userbyid(c.relowner)='spark_owner') AS secured FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relkind='r'", [namespace]);
-    expect(result.rows[0]).toEqual({ count:60, secured:true });
+    expect(result.rows[0]).toEqual({ count:61, secured:true });
     const roles = await owner.query("SELECT rolname,rolsuper,rolbypassrls,rolcanlogin FROM pg_roles WHERE rolname IN ('spark_owner','spark_app') ORDER BY rolname");
     expect(roles.rows).toEqual([{rolname:"spark_app",rolsuper:false,rolbypassrls:false,rolcanlogin:true},{rolname:"spark_owner",rolsuper:false,rolbypassrls:false,rolcanlogin:false}]);
   });
@@ -118,7 +118,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(9);
+    expect(result.rows[0].count).toBe(12);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -331,11 +331,11 @@ describe("Local PostgreSQL schema", () => {
     await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'content_moderator',$1)`, [userA]);
     const overview = `SELECT * FROM ${fn("staff_overview")}()`;
     expect((await asSession(moderatorToken, overview)).rows).toHaveLength(1);
-    expect((await asSession(moderatorToken, `SELECT * FROM ${fn("staff_list_reports")}('open',10)`)).rows).toEqual([]);
+    expect((await asSession(moderatorToken, `SELECT * FROM ${fn("staff_list_reports")}('open',NULL,NULL,NULL,10)`)).rows).toEqual([]);
     expect((await asSession(moderatorToken, `SELECT id FROM ${table("users")}`)).rows.length).toBeGreaterThanOrEqual(3);
     expect((await asSession(moderatorToken, `SELECT id FROM ${table("user_emails")}`)).rows).toEqual([]);
     await expect(asSession(moderatorToken, `SELECT * FROM ${fn("staff_user_roles")}($1::uuid[])`, [[userA]])).rejects.toMatchObject({ code: "42501" });
-    await expect(asSession(moderatorToken, `SELECT ${fn("staff_grant_role")}($1,'super_admin')`, [userA])).rejects.toMatchObject({ code: "42501" });
+    await expect(asSession(moderatorToken, `SELECT ${fn("staff_grant_role")}($1,'super_admin','Needs access')`, [userA])).rejects.toMatchObject({ code: "42501" });
     await expect(asSession(memberToken, overview)).rejects.toMatchObject({ code: "42501" });
     for (const token of [newTokenHash(), null]) {
       await expect(asSession(token, overview)).rejects.toMatchObject({ code: "28000" });
@@ -345,13 +345,13 @@ describe("Local PostgreSQL schema", () => {
     await expect(asSession(moderatorToken, overview)).rejects.toMatchObject({ code: "28000" });
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$3)`, [visitor, superToken, future()]);
     await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'super_admin',$1)`, [visitor]);
-    expect((await asSession(superToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended') AS outcome`, [visitor])).rows[0].outcome).toBe("self");
-    expect((await asSession(superToken, `SELECT ${fn("staff_revoke_role")}($1,'super_admin') AS outcome`, [visitor])).rows[0].outcome).toBe("last_super_admin");
-    expect((await asSession(superToken, `SELECT ${fn("staff_grant_role")}($1,'platform_admin') AS outcome`, [userB])).rows[0].outcome).toBe("granted");
-    expect((await asSession(superToken, `SELECT ${fn("staff_grant_role")}($1,'platform_admin') AS outcome`, [userB])).rows[0].outcome).toBe("exists");
+    expect((await asSession(superToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended','Self test') AS outcome`, [visitor])).rows[0].outcome).toBe("self");
+    expect((await asSession(superToken, `SELECT ${fn("staff_revoke_role")}($1,'super_admin','Step down') AS outcome`, [visitor])).rows[0].outcome).toBe("last_super_admin");
+    expect((await asSession(superToken, `SELECT ${fn("staff_grant_role")}($1,'platform_admin','Runs operations') AS outcome`, [userB])).rows[0].outcome).toBe("granted");
+    expect((await asSession(superToken, `SELECT ${fn("staff_grant_role")}($1,'platform_admin','Runs operations') AS outcome`, [userB])).rows[0].outcome).toBe("exists");
     expect((await asSession(memberToken, overview)).rows).toHaveLength(1);
-    expect((await asSession(memberToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended') AS outcome`, [visitor])).rows[0].outcome).toBe("forbidden");
-    expect((await asSession(superToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended') AS outcome`, [userB])).rows[0].outcome).toBe("ok");
+    expect((await asSession(memberToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended','Abuse report') AS outcome`, [visitor])).rows[0].outcome).toBe("forbidden");
+    expect((await asSession(superToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended','Abuse report') AS outcome`, [userB])).rows[0].outcome).toBe("ok");
     await expect(asSession(memberToken, overview)).rejects.toMatchObject({ code: "28000" });
   });
   it("applies governance writes with version bumps, state guards and audit records", async () => {
@@ -403,12 +403,12 @@ describe("Local PostgreSQL schema", () => {
     ]));
     expect((await owner.query(`SELECT campaign_version,decision,reviewer_user_id FROM ${table("promotion_reviews")} WHERE campaign_id=$1`, [approveCampaign])).rows).toEqual([{ campaign_version: 2, decision: "approve", reviewer_user_id: adminUser }]);
 
-    const archive = `SELECT ${fn("staff_set_community_archived")}($1,$2) AS updated`;
-    expect((await asSession(adminToken, archive, [publicCommunity, true])).rows[0].updated).toBe(true);
+    const moderate = `SELECT ${fn("staff_moderate_community")}($1,$2,'Community guidelines') AS outcome`;
+    expect((await asSession(adminToken, moderate, [publicCommunity, "archive"])).rows[0].outcome).toBe("ok");
     expect((await owner.query(`SELECT archived_at IS NOT NULL AS archived FROM ${table("communities")} WHERE id=$1`, [publicCommunity])).rows[0].archived).toBe(true);
-    expect((await asSession(adminToken, archive, [publicCommunity, false])).rows[0].updated).toBe(true);
-    expect((await asSession(adminToken, archive, [randomUUID(), true])).rows[0].updated).toBe(false);
-    await expect(asSession(contentToken, archive, [publicCommunity, true])).rejects.toMatchObject({ code: "42501" });
+    expect((await asSession(adminToken, moderate, [publicCommunity, "restore"])).rows[0].outcome).toBe("ok");
+    expect((await asSession(adminToken, moderate, [randomUUID(), "archive"])).rows[0].outcome).toBe("not_found");
+    await expect(asSession(contentToken, moderate, [publicCommunity, "archive"])).rejects.toMatchObject({ code: "42501" });
     await expect(owner.query(`INSERT INTO ${table("moderation_actions")} (tenant_id,community_id,actor_user_id,action,reason) VALUES ($1,$2,$3,'hide','Not a moderator')`, [tenantA, communityA, visitor])).rejects.toMatchObject({ code: "23514" });
   });
   it("keeps the runtime role read-only and every definer function pinned", async () => {
@@ -457,11 +457,11 @@ describe("Local PostgreSQL schema", () => {
       // A revokes B's super_admin role and holds its locks while B tries to suspend A.
       await first.query("BEGIN");
       await first.query("SELECT set_config('spark.session_token_hash',$1,true)", [tokenA.toString("hex")]);
-      expect((await first.query(`SELECT ${fn("staff_revoke_role")}($1,'super_admin') AS outcome`, [superB])).rows[0].outcome).toBe("revoked");
+      expect((await first.query(`SELECT ${fn("staff_revoke_role")}($1,'super_admin','Rotation') AS outcome`, [superB])).rows[0].outcome).toBe("revoked");
       await second.query("BEGIN");
       await second.query("SELECT set_config('spark.session_token_hash',$1,true)", [tokenB.toString("hex")]);
       const secondPid = (await second.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
-      const suspension = second.query(`SELECT ${fn("staff_set_user_status")}($1,'suspended') AS outcome`, [superA]);
+      const suspension = second.query(`SELECT ${fn("staff_set_user_status")}($1,'suspended','Rotation') AS outcome`, [superA]);
       // Commit only once the suspension is provably blocked on the super-admin row locks.
       for (let attempt = 0; ; attempt++) {
         // pg_locks is readable by any role, unlike other sessions' wait state in pg_stat_activity.
@@ -471,7 +471,9 @@ describe("Local PostgreSQL schema", () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       await first.query("COMMIT");
-      expect((await suspension).rows[0].outcome).toBe("last_super_admin");
+      // B first locks A's user row (0010). A's audit insert already key-share locked that row, so B
+      // waits until A commits, and its admin-tier check then sees that B is no longer a super admin.
+      expect((await suspension).rows[0].outcome).toBe("forbidden");
       await second.query("COMMIT");
     } finally {
       await Promise.allSettled([first.query("ROLLBACK"), second.query("ROLLBACK")]);
@@ -479,5 +481,232 @@ describe("Local PostgreSQL schema", () => {
     }
     const remaining = await owner.query(`SELECT u.id FROM ${table("platform_role_assignments")} r JOIN ${table("users")} u ON u.id=r.user_id WHERE r.role='super_admin' AND r.revoked_at IS NULL AND u.status='active'`);
     expect(remaining.rows).toEqual([{ id: superA }]);
+  });
+  it("records every governance action in an append-only audit log in the same transaction", async () => {
+    const superUser = randomUUID(), adminUser = randomUUID(), communityStaff = randomUUID(), contentStaff = randomUUID(), member = randomUUID();
+    const superToken = newTokenHash(), adminToken = newTokenHash(), communityToken = newTokenHash(), contentToken = newTokenHash();
+    const community = randomUUID(), report = randomUUID(), placement = randomUUID(), campaign = randomUUID(), reportedPost = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Audit super'),($2,'Audit admin'),($3,'Community staff'),($4,'Content staff'),($5,'Audit member')`, [superUser, adminUser, communityStaff, contentStaff, member]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'super_admin',$1),($2,'platform_admin',$1),($3,'community_moderator',$1),($4,'content_moderator',$1)`, [superUser, adminUser, communityStaff, contentStaff]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$9),($3,$4,'password',$9),($5,$6,'password',$9),($7,$8,'password',$9)`, [superUser, superToken, adminUser, adminToken, communityStaff, communityToken, contentStaff, contentToken, future()]);
+    await owner.query("BEGIN");
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Audit Circle','Description','public',$3)`, [community, tenantA, userA]);
+    await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, community, userA]);
+    await owner.query("COMMIT");
+    await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,$4,'Reported','Body')`, [reportedPost, tenantA, community, userA]);
+    await owner.query(`INSERT INTO ${table("content_reports")} (id,tenant_id,community_id,reporter_user_id,post_id,reason_code) VALUES ($1,$2,$3,$4,$5,'spam')`, [report, tenantA, community, visitor, reportedPost]);
+    await owner.query(`INSERT INTO ${table("promotion_placements")} (id,code,name,description) VALUES ($1,$2,'Placement','Audit placement')`, [placement, `placement-${placement}`]);
+    await owner.query(`INSERT INTO ${table("promotion_campaigns")} (id,tenant_id,community_id,name,headline,description,placement_id,submitted_by_user_id,review_status,requested_start_at) VALUES ($1,$2,$3,'Audit campaign','Headline','Body',$4,$5,'pending',$6)`, [campaign, tenantA, community, placement, userA, future()]);
+    const audit = async (target: string) => (await owner.query(`SELECT action,actor_user_id,target_type,target_label,reason,metadata FROM ${table("platform_audit_events")} WHERE target_id=$1 ORDER BY created_at,id`, [target])).rows;
+    const state = async () => (await owner.query(`SELECT featured_at IS NOT NULL AS featured, frozen_at IS NOT NULL AS frozen, archived_at IS NOT NULL AS archived FROM ${table("communities")} WHERE id=$1`, [community])).rows[0];
+    const moderate = (action: string, reason = "  Community guidelines  ") =>
+      asSession(communityToken, `SELECT ${fn("staff_moderate_community")}($1,$2,$3) AS outcome`, [community, action, reason]).then((r) => r.rows[0].outcome);
+
+    // Transition matrix starting from an active community.
+    for (const invalid of ["unfeature", "unfreeze", "restore"]) expect(await moderate(invalid)).toBe("invalid_transition");
+    expect(await audit(community)).toEqual([]);
+    expect(await moderate("feature")).toBe("ok");
+    expect(await state()).toEqual({ featured: true, frozen: false, archived: false });
+    expect(await moderate("feature")).toBe("invalid_transition");
+    expect(await moderate("freeze")).toBe("ok");
+    expect(await state()).toEqual({ featured: false, frozen: true, archived: false });
+    expect(await moderate("feature")).toBe("invalid_transition");
+    // Frozen communities reject new posts, whoever inserts them.
+    await reject(`INSERT INTO ${table("posts")} (tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,'Blocked','Body')`, [tenantA, community, userA], "23514");
+    expect(await moderate("unfreeze")).toBe("ok");
+    expect(await moderate("archive")).toBe("ok");
+    expect(await state()).toEqual({ featured: false, frozen: false, archived: true });
+    for (const invalid of ["feature", "freeze", "archive", "unfreeze"]) expect(await moderate(invalid)).toBe("invalid_transition");
+    await reject(`INSERT INTO ${table("posts")} (tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,'Blocked','Body')`, [tenantA, community, userA], "23514");
+    expect(await moderate("restore")).toBe("ok");
+    const post = randomUUID();
+    await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,$4,'Open again','Body')`, [post, tenantA, community, userA]);
+    await expect(moderate("freeze")).resolves.toBe("ok");
+    await reject(`INSERT INTO ${table("post_comments")} (tenant_id,community_id,post_id,author_user_id,body) VALUES ($1,$2,$3,$4,'Blocked')`, [tenantA, community, post, userA], "23514");
+    expect(await moderate("unfreeze")).toBe("ok");
+    const communityAudit = await audit(community);
+    expect(communityAudit.map((row) => row.action)).toEqual([
+      "community.feature", "community.freeze", "community.unfreeze", "community.archive", "community.restore", "community.freeze", "community.unfreeze",
+    ]);
+    expect(communityAudit[0]).toEqual({ action: "community.feature", actor_user_id: communityStaff, target_type: "community", target_label: "Audit Circle", reason: "Community guidelines", metadata: { previousState: "active" } });
+    expect(communityAudit[1].metadata).toEqual({ previousState: "featured" });
+
+    // A reason is mandatory, and a rolled-back action leaves neither the change nor its audit row.
+    for (const reason of ["ab", "   ", null]) {
+      await expect(asSession(communityToken, `SELECT ${fn("staff_moderate_community")}($1,'feature',$2)`, [community, reason])).rejects.toMatchObject({ code: "22023" });
+    }
+    const client = await runtime.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('spark.session_token_hash',$1,true)", [communityToken.toString("hex")]);
+      expect((await client.query(`SELECT ${fn("staff_moderate_community")}($1,'feature','Rolled back') AS outcome`, [community])).rows[0].outcome).toBe("ok");
+      await client.query("ROLLBACK");
+    } finally { client.release(); }
+    expect((await audit(community)).length).toBe(7);
+    expect(await state()).toEqual({ featured: false, frozen: false, archived: false });
+
+    // Users, roles, reports and campaigns.
+    const status = (token: Buffer, target: string, value: string) =>
+      asSession(token, `SELECT ${fn("staff_set_user_status")}($1,$2,'Repeated spam') AS outcome`, [target, value]).then((r) => r.rows[0].outcome);
+    expect(await status(adminToken, member, "suspended")).toBe("ok");
+    expect(await status(adminToken, member, "suspended")).toBe("unchanged");
+    expect(await status(adminToken, member, "active")).toBe("ok");
+    await expect(asSession(communityToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended','Repeated spam')`, [member])).rejects.toMatchObject({ code: "42501" });
+    const grant = `SELECT ${fn("staff_grant_role")}($1,'campaign_moderator','Reviews promotions') AS outcome`;
+    const revoke = `SELECT ${fn("staff_revoke_role")}($1,'campaign_moderator','Rotation ended') AS outcome`;
+    await expect(asSession(adminToken, grant, [member])).rejects.toMatchObject({ code: "42501" });
+    expect((await asSession(superToken, grant, [member])).rows[0].outcome).toBe("granted");
+    expect((await asSession(superToken, grant, [member])).rows[0].outcome).toBe("exists");
+    expect((await asSession(superToken, revoke, [member])).rows[0].outcome).toBe("revoked");
+    expect((await asSession(superToken, revoke, [member])).rows[0].outcome).toBe("not_found");
+    const memberAudit = await audit(member);
+    expect(memberAudit.map((row) => [row.action, row.metadata])).toEqual([
+      ["user.suspend", { previousStatus: "active" }], ["user.reactivate", { previousStatus: "suspended" }],
+      ["role.grant", { role: "campaign_moderator" }], ["role.revoke", { role: "campaign_moderator" }],
+    ]);
+    expect(memberAudit.every((row) => row.target_type === "user" && row.target_label === "Audit member")).toBe(true);
+    expect((await asSession(contentToken, `SELECT ${fn("staff_resolve_report")}($1,'dismiss_report','Not a violation') AS outcome`, [report])).rows[0].outcome).toBe("ok");
+    expect(await audit(report)).toEqual([{ action: "report.dismiss", actor_user_id: contentStaff, target_type: "report", target_label: "Report in Audit Circle", reason: "Not a violation", metadata: { reasonCode: "spam", targetKind: "post" } }]);
+    expect((await asSession(adminToken, `SELECT ${fn("staff_review_campaign")}($1,'approve','Meets policy') AS outcome`, [campaign])).rows[0].outcome).toBe("ok");
+    expect((await audit(campaign)).map((row) => [row.action, row.target_label, row.metadata])).toEqual([["campaign.approve", "Audit campaign", { version: 2 }]]);
+
+    // Append-only, never writable by the runtime role, and readable only by platform admins.
+    await reject(`UPDATE ${table("platform_audit_events")} SET reason='Edited' WHERE target_id=$1`, [member], "23514");
+    await reject(`DELETE FROM ${table("platform_audit_events")} WHERE target_id=$1`, [member], "23514");
+    await expect(runtime.query(`INSERT INTO ${table("platform_audit_events")} (actor_user_id,action,target_type,target_id,target_label,reason) VALUES ($1,'user.suspend','user',$1,'Forged','Forged entry')`, [member])).rejects.toMatchObject({ code: "42501" });
+    await expect(runtime.query(`SELECT ${fn("record_platform_audit")}($1,'user.suspend','user',$1,'Forged','Forged entry','{}')`, [member])).rejects.toMatchObject({ code: "42501" });
+    const readAudit = `SELECT count(*)::integer AS total FROM ${table("platform_audit_events")} WHERE target_id=$1`;
+    expect((await asSession(adminToken, readAudit, [member])).rows[0].total).toBe(4);
+    expect((await asSession(superToken, readAudit, [member])).rows[0].total).toBe(4);
+    for (const token of [communityToken, contentToken, null]) expect((await asSession(token, readAudit, [member])).rows[0].total).toBe(0);
+    const overview = (await asSession(contentToken, `SELECT * FROM ${fn("staff_overview")}()`)).rows[0];
+    expect(Number(overview.audit_events)).toBeGreaterThanOrEqual(13);
+    expect((await asSession(adminToken, `SELECT ${fn("staff_user_session_count")}($1) AS total`, [adminUser])).rows[0].total).toBe("1");
+    await expect(asSession(contentToken, `SELECT ${fn("staff_user_session_count")}($1)`, [adminUser])).rejects.toMatchObject({ code: "42501" });
+    const holders = await asSession(adminToken, `SELECT user_id FROM ${fn("staff_user_roles")}(NULL) WHERE role='community_moderator'`);
+    expect(holders.rows.map((row) => row.user_id)).toContain(communityStaff);
+  });
+  it("pages the report queue by keyset without gaps or duplicates", async () => {
+    const staff = randomUUID(), token = newTokenHash(), community = randomUUID(), queuePost = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Queue staff')`, [staff]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'content_moderator',$1)`, [staff]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$3)`, [staff, token, future()]);
+    await owner.query("BEGIN");
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Queue Circle','Description','public',$3)`, [community, tenantA, userA]);
+    await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, community, userA]);
+    await owner.query("COMMIT");
+    await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,$4,'Queued','Body')`, [queuePost, tenantA, community, userA]);
+    const reporters = [userB, visitor, staff, randomUUID(), randomUUID()];
+    for (const reporter of reporters.slice(3)) await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Reporter')`, [reporter]);
+    // Two reports share a timestamp, so the id tie-breaker is exercised.
+    const stamp = new Date(Date.now() - 60_000);
+    for (const [index, reporter] of reporters.entries()) {
+      await owner.query(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,reason_code,status,created_at) VALUES ($1,$2,$3,$5,'spam','reviewing',$4)`,
+        [tenantA, community, reporter, index < 2 ? stamp : new Date(stamp.getTime() + index * 1000), queuePost]);
+    }
+    const seen: string[] = [];
+    let cursor: { created_at: Date; id: string } | null = null;
+    for (let page = 0; page < 10; page++) {
+      const rows: Array<{ created_at: Date; id: string }> = (await asSession(token, `SELECT id,created_at FROM ${fn("staff_list_reports")}('reviewing',NULL,$1,$2,2)`, [cursor?.created_at ?? null, cursor?.id ?? null])).rows;
+      seen.push(...rows.map((row) => row.id));
+      if (rows.length < 2) break;
+      cursor = rows[rows.length - 1]!;
+    }
+    const expected = (await owner.query(`SELECT id FROM ${table("content_reports")} WHERE status='reviewing' ORDER BY created_at DESC, id DESC`)).rows.map((row) => row.id);
+    expect(seen).toEqual(expected);
+    expect(new Set(seen).size).toBe(seen.length);
+    const single = await asSession(token, `SELECT id,status FROM ${fn("staff_list_reports")}(NULL,$1,NULL,NULL,1)`, [expected[0]]);
+    expect(single.rows).toEqual([{ id: expected[0], status: "reviewing" }]);
+    await expect(asSession(token, `SELECT * FROM ${fn("staff_list_reports")}('reviewing',NULL,now(),NULL,2)`)).rejects.toMatchObject({ code: "22023" });
+    await expect(asSession(token, `SELECT * FROM ${fn("staff_list_reports")}('closed',NULL,NULL,NULL,2)`)).rejects.toMatchObject({ code: "22023" });
+  });
+  it("exposes exactly the intended functions to the runtime role", async () => {
+    const runtimeFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
+    expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
+      "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "is_community_member", "is_workspace_member",
+      "staff_active_session_count", "staff_grant_role", "staff_list_reports", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
+      "staff_resolve_report", "staff_review_campaign", "staff_revoke_role", "staff_set_user_status", "staff_user_roles", "staff_user_session_count",
+    ]);
+  });
+  it("protects admin-tier accounts, drops revoked roles at once and guards promotions of closed communities", async () => {
+    const adminA = randomUUID(), adminB = randomUUID(), superUser = randomUUID(), moderator = randomUUID();
+    const tokenA = newTokenHash(), superToken = newTokenHash(), moderatorToken = newTokenHash();
+    const community = randomUUID(), placement = randomUUID(), approveMe = randomUUID(), rejectMe = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Admin A'),($2,'Admin B'),($3,'Super'),($4,'Moderator')`, [adminA, adminB, superUser, moderator]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'platform_admin',$3),($2,'platform_admin',$3),($3,'super_admin',$3),($4,'community_moderator',$3)`, [adminA, adminB, superUser, moderator]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$7),($3,$4,'password',$7),($5,$6,'password',$7)`, [adminA, tokenA, superUser, superToken, moderator, moderatorToken, future()]);
+    const status = (token: Buffer, target: string) => asSession(token, `SELECT ${fn("staff_set_user_status")}($1,'suspended','Tier check') AS outcome`, [target]).then((r) => r.rows[0].outcome);
+
+    // A platform admin cannot change another admin-tier account; a super admin can.
+    expect(await status(tokenA, adminB)).toBe("forbidden");
+    expect(await status(tokenA, superUser)).toBe("forbidden");
+    expect((await owner.query(`SELECT status FROM ${table("users")} WHERE id=$1`, [adminB])).rows[0].status).toBe("active");
+    expect(await status(superToken, adminB)).toBe("ok");
+    expect(await status(superToken, randomUUID())).toBe("not_found");
+
+    // A revoked role stops working on the very next call of an already-open session.
+    const overview = `SELECT * FROM ${fn("staff_moderate_community")}($1,'feature','Revocation check')`;
+    await expect(asSession(moderatorToken, overview, [randomUUID()])).resolves.toBeDefined();
+    expect((await asSession(superToken, `SELECT ${fn("staff_revoke_role")}($1,'community_moderator','Left the team') AS outcome`, [moderator])).rows[0].outcome).toBe("revoked");
+    await expect(asSession(moderatorToken, overview, [randomUUID()])).rejects.toMatchObject({ code: "42501" });
+
+    // Frozen or archived communities cannot be promoted, but pending campaigns can still be rejected.
+    await owner.query("BEGIN");
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id,frozen_at) VALUES ($1::uuid,$2,$1::text,'Frozen Circle','Description','public',$3,now())`, [community, tenantA, userA]);
+    await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, community, userA]);
+    await owner.query("COMMIT");
+    await owner.query(`INSERT INTO ${table("promotion_placements")} (id,code,name,description) VALUES ($1,$2,'Placement','Guard placement')`, [placement, `placement-${placement}`]);
+    await owner.query(`INSERT INTO ${table("promotion_campaigns")} (id,tenant_id,community_id,name,headline,description,placement_id,submitted_by_user_id,review_status,requested_start_at) VALUES ($1,$3,$4,'Blocked','Headline','Body',$5,$6,'pending',$7),($2,$3,$4,'Rejectable','Headline','Body',$5,$6,'pending',$7)`, [approveMe, rejectMe, tenantA, community, placement, userA, future()]);
+    const review = (campaign: string, decision: string) => asSession(superToken, `SELECT ${fn("staff_review_campaign")}($1,$2,'Placement policy') AS outcome`, [campaign, decision]).then((r) => r.rows[0].outcome);
+    expect(await review(approveMe, "approve")).toBe("community_unavailable");
+    expect((await owner.query(`SELECT review_status FROM ${table("promotion_campaigns")} WHERE id=$1`, [approveMe])).rows[0].review_status).toBe("pending");
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("platform_audit_events")} WHERE target_id=$1`, [approveMe])).rows[0].total).toBe(0);
+    expect(await review(rejectMe, "reject")).toBe("ok");
+
+    // The audit log cannot be truncated either.
+    await reject(`TRUNCATE ${table("platform_audit_events")}`, [], "23514");
+  });
+  it("serializes campaign approval with a concurrent community freeze", async () => {
+    const staff = randomUUID(), token = newTokenHash(), community = randomUUID(), placement = randomUUID(), campaign = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Race staff')`, [staff]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'platform_admin',$1)`, [staff]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$3)`, [staff, token, future()]);
+    await owner.query("BEGIN");
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Race Circle','Description','public',$3)`, [community, tenantA, userA]);
+    await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, community, userA]);
+    await owner.query("COMMIT");
+    await owner.query(`INSERT INTO ${table("promotion_placements")} (id,code,name,description) VALUES ($1,$2,'Placement','Race placement')`, [placement, `placement-${placement}`]);
+    await owner.query(`INSERT INTO ${table("promotion_campaigns")} (id,tenant_id,community_id,name,headline,description,placement_id,submitted_by_user_id,review_status,requested_start_at) VALUES ($1,$2,$3,'Race campaign','Headline','Body',$4,$5,'pending',$6)`, [campaign, tenantA, community, placement, userA, future()]);
+    const first = new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 });
+    const second = new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 });
+    await Promise.all([first.connect(), second.connect()]);
+    await second.query("SET lock_timeout = '15s'");
+    try {
+      // The freeze holds the community row while the approval tries to read it.
+      await first.query("BEGIN");
+      await first.query("SELECT set_config('spark.session_token_hash',$1,true)", [token.toString("hex")]);
+      expect((await first.query(`SELECT ${fn("staff_moderate_community")}($1,'freeze','Race check') AS outcome`, [community])).rows[0].outcome).toBe("ok");
+      await second.query("BEGIN");
+      await second.query("SELECT set_config('spark.session_token_hash',$1,true)", [token.toString("hex")]);
+      const secondPid = (await second.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const approval = second.query(`SELECT ${fn("staff_review_campaign")}($1,'approve','Race check') AS outcome`, [campaign]);
+      for (let attempt = 0; ; attempt++) {
+        if ((await owner.query("SELECT 1 FROM pg_locks WHERE pid=$1 AND NOT granted", [secondPid])).rowCount) break;
+        if (attempt > 200) throw new Error("Approval never waited on the community lock");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await first.query("COMMIT");
+      expect((await approval).rows[0].outcome).toBe("community_unavailable");
+      await second.query("COMMIT");
+    } finally {
+      await Promise.allSettled([first.query("ROLLBACK"), second.query("ROLLBACK")]);
+      await Promise.allSettled([first.end(), second.end()]);
+    }
+    expect((await owner.query(`SELECT review_status FROM ${table("promotion_campaigns")} WHERE id=$1`, [campaign])).rows[0].review_status).toBe("pending");
   });
 });
