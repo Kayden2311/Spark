@@ -76,4 +76,25 @@ describe("ProductShowcase", () => {
     await userEvent.click(screen.getByRole("button", { name: "Join session" }));
     expect(screen.getByRole("button", { name: /you're in/i })).toBeInTheDocument();
   });
+
+  it("switches agenda days and tracks milestone progress", async () => {
+    render(<ProductShowcase />);
+    await userEvent.click(screen.getByRole("tab", { name: /the next move/i }));
+    const panel = screen.getByRole("tabpanel");
+
+    const wednesday = within(panel).getByRole("button", { name: /wed 22, 3 sessions/i });
+    expect(wednesday).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(panel).getByRole("button", { name: /tue 21, 0 sessions/i }));
+    expect(within(panel).getByText("No sessions")).toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "Join session" })).not.toBeInTheDocument();
+    await userEvent.click(within(panel).getByRole("button", { name: /thu 23, 1 session$/i }));
+    expect(within(panel).getByText("Mentor sync")).toBeInTheDocument();
+
+    expect(within(panel).getByText("50%")).toBeInTheDocument();
+    const step = within(panel).getByRole("button", { name: "Launch community page" });
+    expect(step).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(step);
+    expect(step).toHaveAttribute("aria-pressed", "true");
+    expect(within(panel).getByText("75%")).toBeInTheDocument();
+  });
 });

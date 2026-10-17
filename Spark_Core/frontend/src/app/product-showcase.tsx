@@ -152,58 +152,133 @@ function PlanScene({ onInteract }: { onInteract: () => void }) {
   );
 }
 
+type AgendaItem = {
+  time: string;
+  title: string;
+  meta: string;
+  tone: "blue" | "violet" | "green" | "amber" | "live";
+  people: string[];
+};
+
+const WEEK: Array<{ day: string; date: number; items: AgendaItem[] }> = [
+  { day: "Mon", date: 20, items: [{ time: "09:30", title: "Team standup", meta: "15 min · Sprint Alpha", tone: "blue", people: ["ML", "DK", "HN"] }] },
+  { day: "Tue", date: 21, items: [] },
+  {
+    day: "Wed",
+    date: 22,
+    items: [
+      { time: "09:30", title: "Team standup", meta: "15 min · Sprint Alpha", tone: "blue", people: ["ML", "DK"] },
+      { time: "14:00", title: "Founder demo & architecture review", meta: "45 min · Northstar Founders", tone: "live", people: ["ML", "DK", "HN"] },
+      { time: "16:30", title: "Investor update draft", meta: "Focus block · 1 h", tone: "green", people: ["TL"] },
+    ],
+  },
+  { day: "Thu", date: 23, items: [{ time: "11:00", title: "Mentor sync", meta: "30 min · Product Practice", tone: "violet", people: ["TL", "HN"] }] },
+  { day: "Fri", date: 24, items: [{ time: "17:00", title: "Public beta go / no-go", meta: "Milestone review", tone: "amber", people: ["ML", "DK", "HN", "TL"] }] },
+];
+const TODAY = 2;
+const PERSON_TONE: Record<string, string> = { ML: "tone-blue", DK: "tone-violet", HN: "tone-green", TL: "tone-amber" };
+const MILESTONE_STEPS = ["Session security", "Onboarding flow", "Launch community page", "Invite first 50 founders"];
+const RING = 2 * Math.PI * 18;
+
 function NextScene({ onInteract }: { onInteract: () => void }) {
   const [joined, setJoined] = useState(false);
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  const [day, setDay] = useState(TODAY);
+  const [steps, setSteps] = useState([true, true, false, false]);
+  const sessions = WEEK.reduce((total, entry) => total + entry.items.length, 0);
+  const done = steps.filter(Boolean).length;
+  const items = WEEK[day]!.items;
+
+  const toggleStep = (index: number) => {
+    setSteps((current) => current.map((value, i) => (i === index ? !value : value)));
+    onInteract();
+  };
+
   return (
     <div className="stageScene">
       <Image alt="" className="stagePhoto stagePhotoBanner" fill sizes="(max-width: 900px) 100vw, 46rem" src="/spark-product-banner.png" />
       <div className="stagePhotoShade stagePhotoShadeSide" />
-      <div className="stageCalendar">
-        <div className="stageCalendarHeader">
-          <strong>This week</strong>
-          <span>3 sessions · 1 milestone</span>
+
+      <div className="stageAgenda">
+        <div className="stageAgendaHeader">
+          <strong>Week of Oct 20</strong>
+          <span>{sessions} sessions · 1 milestone</span>
         </div>
-        <div className="stageWeek">
-          {days.map((day, index) => (
-            <div className={`stageDay${index === 2 ? " stageDayToday" : ""}`} key={day}>
-              <span>{day}</span>
-              {index === 0 && <i className="stageSlot tone-blue">Standup</i>}
-              {index === 2 && <i className="stageSlot stageSlotLive">Founder demo</i>}
-              {index === 3 && <i className="stageSlot tone-violet">Mentor sync</i>}
-            </div>
+        <div className="stageDays" role="group" aria-label="Pick a day">
+          {WEEK.map((entry, index) => (
+            <button
+              aria-label={`${entry.day} ${entry.date}, ${entry.items.length} ${entry.items.length === 1 ? "session" : "sessions"}`}
+              aria-pressed={index === day}
+              className={`stageDayChip${index === TODAY ? " stageDayChipToday" : ""}`}
+              key={entry.day}
+              onClick={() => { setDay(index); onInteract(); }}
+              type="button"
+            >
+              <span>{entry.day}</span>
+              <b>{entry.date}</b>
+              <i aria-hidden="true">{entry.items.map((item) => <em className={`stageDot stageDot-${item.tone}`} key={item.time} />)}</i>
+            </button>
           ))}
         </div>
+        <ol className="stageAgendaList" key={day}>
+          {items.length === 0 && (
+            <li className="stageAgendaEmpty">
+              <strong>No sessions</strong>
+              <span>A quiet day for deep work.</span>
+            </li>
+          )}
+          {items.map((item) => {
+            const live = item.tone === "live";
+            return (
+              <li className={`stageAgendaItem stageAgendaItem-${item.tone}`} key={item.time}>
+                <time>{item.time}</time>
+                <div className="stageAgendaCard">
+                  {live && <span className="stageLive"><span /> Starting in 15 min</span>}
+                  <strong>{item.title}</strong>
+                  <span className="stageAgendaMeta">{item.meta}</span>
+                  <div className={live ? "stageAgendaFooter" : "stageAgendaPeople"}>
+                    <div className="stageAvatarStack">
+                      {item.people.map((person) => <i className={PERSON_TONE[person]} key={person}>{person}</i>)}
+                      {live && joined && <i className="tone-you">You</i>}
+                    </div>
+                    {live && (
+                      <button
+                        className={`stageAction stageActionSmall${joined ? " stageActionDone" : ""}`}
+                        onClick={() => { setJoined((value) => !value); onInteract(); }}
+                        type="button"
+                      >
+                        {joined ? "✓ You're in" : "Join session"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
       </div>
-      <div className="stageGlass stageEventCard">
-        <span className="stageLive"><span /> Starting in 15 min</span>
-        <strong>Founder demo &amp; architecture review</strong>
-        <div className="stageEventFooter">
-          <div className="stageAvatarStack">
-            <i className="tone-blue">ML</i>
-            <i className="tone-violet">DK</i>
-            <i className="tone-green">HN</i>
-            {joined && <i className="tone-amber">You</i>}
-            <b>+5</b>
+
+      <div className="stageGlass stageMilestoneCard">
+        <div className="stageMilestoneTop">
+          <svg aria-hidden="true" viewBox="0 0 44 44">
+            <circle className="stageRingTrack" cx="22" cy="22" r="18" />
+            <circle className="stageRingValue" cx="22" cy="22" r="18" style={{ strokeDasharray: RING, strokeDashoffset: RING * (1 - done / steps.length) }} />
+          </svg>
+          <b className="stageMilestonePercent">{Math.round((done / steps.length) * 100)}%</b>
+          <div>
+            <span>Next milestone · Fri</span>
+            <strong>Public beta</strong>
           </div>
-          <button
-            className={`stageAction stageActionSmall${joined ? " stageActionDone" : ""}`}
-            onClick={() => { setJoined((value) => !value); onInteract(); }}
-            type="button"
-          >
-            {joined ? "✓ You're in" : "Join session"}
-          </button>
         </div>
-      </div>
-      <div className="stageGlass stageMilestone">
-        <svg aria-hidden="true" viewBox="0 0 44 44">
-          <circle className="stageRingTrack" cx="22" cy="22" r="18" />
-          <circle className="stageRingValue" cx="22" cy="22" r="18" />
-        </svg>
-        <div>
-          <span>Next milestone</span>
-          <strong>Public beta · 3 days</strong>
-        </div>
+        <ul className="stageChecklist">
+          {MILESTONE_STEPS.map((step, index) => (
+            <li key={step}>
+              <button aria-pressed={steps[index]} className="stageCheck" onClick={() => toggleStep(index)} type="button">
+                <span aria-hidden="true" className="stageCheckBox">{steps[index] ? "✓" : ""}</span>
+                {step}
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
