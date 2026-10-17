@@ -1,6 +1,6 @@
 # Skills and code graphs
 
-Installed project skills are recorded in `installed-skills.json`. Use only the skill relevant to the current task:
+Backend and workflow skills live in `.agents/skills` and are recorded with file hashes in `installed-skills.json`. UI and design skills (`ui-ux-pro-max`, `design`, `brand`, `design-system`, `ui-styling`, `banner-design`, `slides`, `ponytail*`) are also in `.agents/skills`, and `.claude/skills` holds frontend taste skills; these are tracked in the root `skills-lock.json`, not in `installed-skills.json`. Use only the skill relevant to the current task:
 
 - PostgreSQL guidance for schemas, migrations, RLS, queries, and database performance.
 - Node.js patterns for Fastify backend work.
@@ -11,6 +11,6 @@ Installed project skills are recorded in `installed-skills.json`. Use only the s
 
 Skills are development aids, not runtime dependencies. Third-party examples must not replace the selected Spark architecture.
 
-Dependency Cruiser is the normal lightweight import and cycle gate. Use Trailmark only when a concrete call-flow, data-flow, or blast-radius question justifies it. Record the tool version, source snapshot, command, scope, parse failures, and unresolved dynamic edges. A graph cannot prove authorization, exploitability, ACID behavior, or test success.
+No import or cycle gate is configured yet (Dependency Cruiser is a candidate; add it only with a real architecture test). Use Trailmark only when a concrete call-flow, data-flow, or blast-radius question justifies it. Record the tool version, source snapshot, command, scope, parse failures, and unresolved dynamic edges. A graph cannot prove authorization, exploitability, ACID behavior, or test success.
 
 Do not add another graph database, indexer, or MCP service without a measured need.
