@@ -8,7 +8,7 @@ import { useAuth } from "../../auth-context";
 import { useAdmin } from "../_components/admin-context";
 import { AlertIcon, SearchIcon, SignupIcon, UserIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RowMenu, SkeletonRows, Tag } from "../_components/ui";
+import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RoleSummary, RowMenu, Segmented, SkeletonRows } from "../_components/ui";
 import { query } from "../_lib/api";
 import { PLATFORM_ROLES, canAccess } from "../_lib/access";
 import { ROLE_LABELS, USER_STATUS, formatCount, formatDate, formatRelative } from "../_lib/format";
@@ -18,6 +18,7 @@ import { useAdminData } from "../_lib/use-admin-data";
 import { usePagedList } from "../_lib/use-paged-list";
 import { canChangeStatus, statusRequest } from "../_components/user-actions";
 import { useDebounced, useQueryState } from "../_lib/use-query-state";
+import { RolesMatrix } from "./roles-matrix";
 
 type StatusFilter = "all" | UserStatus;
 const STATUS_FILTERS: readonly StatusFilter[] = ["all", "active", "suspended"];
@@ -30,15 +31,25 @@ function UsersList() {
   const allowed = canAccess(roles, "users");
   const [status, setStatus] = useQueryState<StatusFilter>("status", "all", STATUS_FILTERS);
   const [role, setRole] = useQueryState<"any" | PlatformRole>("role", "any", ROLE_FILTERS);
+  const [view, setView] = useQueryState<"directory" | "roles">("view", "directory", ["directory", "roles"]);
   const [search, setSearch] = useState("");
   const settledSearch = useDebounced(search.trim());
   const list = usePagedList<UserSummary>(
-    allowed ? `/users${query({ status: status === "all" ? undefined : status, role: role === "any" ? undefined : role, search: settledSearch })}` : null,
+    allowed && view === "directory" ? `/users${query({ status: status === "all" ? undefined : status, role: role === "any" ? undefined : role, search: settledSearch })}` : null,
   );
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
   const growth = useAdminData<ActivityResponse>(allowed ? "/analytics/activity?days=30" : null);
 
   if (!allowed) return <NoAccess />;
+  const viewSwitch = <Segmented label="Users view" onChange={setView} options={[{ value: "directory", label: "Directory" }, { value: "roles", label: "Roles & access" }]} value={view} />;
+  if (view === "roles") {
+    return (
+      <>
+        <PageHeader actions={viewSwitch} description="What each platform role can do and who holds it." title="Users" />
+        <RolesMatrix />
+      </>
+    );
+  }
   const audience = growth.data?.audience;
 
   const changeStatus = (user: UserSummary) =>
@@ -50,7 +61,7 @@ function UsersList() {
 
   return (
     <>
-      <PageHeader title="Users" description="See how membership is growing, find any account, and act on risky ones." />
+      <PageHeader actions={viewSwitch} description="See how membership is growing, find any account, and act on risky ones." title="Users" />
 
       <KpiCards
         items={[
@@ -133,9 +144,7 @@ function UsersList() {
                       </Link>
                     </td>
                     <td data-label="Roles">
-                      {user.platformRoles.length === 0 ? <span className="admMutedCell">Member</span> : (
-                        <div className="admTagRow">{user.platformRoles.map((value) => <Tag key={value}>{ROLE_LABELS[value]}</Tag>)}</div>
-                      )}
+                      <RoleSummary roles={user.platformRoles} />
                     </td>
                     <td data-label="Status"><Badge tone={USER_STATUS[user.status].tone}>{USER_STATUS[user.status].label}</Badge></td>
                     <td data-label="Signals">

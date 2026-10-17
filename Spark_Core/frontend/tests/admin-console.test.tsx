@@ -27,6 +27,7 @@ import ReportsPage from "../src/app/admin/reports/page";
 import UsersAdminPage from "../src/app/admin/users/page";
 import BillingPage from "../src/app/admin/billing/page";
 import CampaignsAdminPage from "../src/app/admin/campaigns/page";
+import AnalyticsPage from "../src/app/admin/analytics/page";
 import { ChartCard } from "../src/app/admin/_components/charts";
 
 const overview = {
@@ -103,7 +104,14 @@ describe("admin console shell", () => {
 });
 
 // Side panels of the triage desk: queue health and the author's history.
+const preview = (body: string, comment?: string) => json({
+  post: { id: "p1", title: "Crypto bot offer", body, moderationStatus: "visible", deleted: false, createdAt: "2026-10-17T09:00:00.000Z", author: { id: "u9", displayName: "Sam Spammer", avatarUrl: null }, commentCount: 2 },
+  comment: comment ? { id: "c1", title: null, body: comment, moderationStatus: "visible", deleted: false, createdAt: "2026-10-17T09:30:00.000Z", author: { id: "u8", displayName: "Rude Replier", avatarUrl: null } } : null,
+});
+
 const triage = {
+  "GET /api/v1/admin/reports/r1/preview": preview("50x guaranteed returns"),
+  "GET /api/v1/admin/reports/r2/preview": preview("Another body"),
   "GET /api/v1/admin/reports/stats": json({ days: 30, opened: 4, closed: 2, backlog: 2, medianHoursToClose: 5.5 }),
   "GET /api/v1/admin/reports/r1/context": json({ author: { id: "u9", displayName: "Sam Spammer", status: "active", joinedAt: "2026-09-01T00:00:00.000Z", reportsAgainst: 4, hiddenContent: 1 }, communityOpenReports: 3, reporterReportsFiled: 1 }),
 };
@@ -126,7 +134,8 @@ describe("reports queue", () => {
     expect(await within(pane).findByText("50x guaranteed returns")).toBeInTheDocument();
     expect(within(pane).getByText("Riley Reporter")).toBeInTheDocument();
     // The author's history helps spot repeat offenders.
-    expect(await within(pane).findByText("Sam Spammer")).toBeInTheDocument();
+    // Shown on the post card and in the author's history.
+    expect(await within(pane).findAllByText("Sam Spammer")).toHaveLength(2);
     expect(within(pane).getByText("Repeat reports")).toBeInTheDocument();
 
     await userEvent.click(within(pane).getByRole("button", { name: /^Hide content/u }));
@@ -265,8 +274,10 @@ describe("console v2", () => {
     await userEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     expect(shell).toHaveAttribute("data-rail", "collapsed");
     expect(window.localStorage.getItem("spark.admin.sidebar")).toBe("collapsed");
-    // Collapsed links keep their names for screen readers and show a tooltip.
-    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("data-tip", "Overview");
+    // Collapsed links keep their names for screen readers and show a floating tooltip on hover.
+    await userEvent.hover(screen.getByRole("link", { name: "Overview" }));
+    expect(container.querySelector(".admRailTip")).toHaveTextContent("Overview");
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
     await userEvent.keyboard("[[");
     expect(shell).toHaveAttribute("data-rail", "expanded");
     await userEvent.keyboard("[[");
@@ -288,10 +299,11 @@ describe("console v2", () => {
     const pane = await screen.findByRole("region", { name: "Selected report" });
     expect(await within(pane).findByRole("heading", { name: "Crypto bot offer" })).toBeInTheDocument();
     await userEvent.keyboard("j");
-    expect(within(pane).getByRole("heading", { name: "Second report" })).toBeInTheDocument();
+    expect(await within(pane).findByText("Another body")).toBeInTheDocument();
     expect(await within(pane).findByText("Deleted account")).toBeInTheDocument();
     await userEvent.keyboard("k");
-    expect(within(pane).getByRole("heading", { name: "Crypto bot offer" })).toBeInTheDocument();
+    expect(await within(pane).findByText("50x guaranteed returns")).toBeInTheDocument();
+    expect(within(pane).queryByText("Another body")).not.toBeInTheDocument();
     await userEvent.keyboard("h");
     const dialog = screen.getByRole("dialog", { name: "Hide this content?" });
     // Reason templates fill the reason in one click.
@@ -351,5 +363,90 @@ describe("console v2", () => {
     expect(within(table).getByRole("rowheader", { name: "Oct 2" })).toBeInTheDocument();
     expect(within(table).getByText("7")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show chart" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("shows a reported comment under the post it replied to", async () => {
+    navigation.pathname = "/admin/reports";
+    const commentReport = { ...report, id: "r3", target: { kind: "comment", id: "c1", title: null, body: "You are an idiot", moderationStatus: "visible" } };
+    mockApi({
+      ...triage,
+      "GET /api/v1/admin/reports/r3/preview": preview("Our launch checklist", "You are an idiot"),
+      "GET /api/v1/admin/reports/r3/context": json({ author: null, communityOpenReports: 0, reporterReportsFiled: 1 }),
+      "GET /api/v1/admin/overview": json(overview),
+      "GET /api/v1/admin/reports?status=open": json({ items: [commentReport], nextCursor: null }),
+    });
+    render(<AdminLayout><ReportsPage /></AdminLayout>);
+    const parent = await screen.findByRole("article", { name: "Post the comment replied to" });
+    expect(within(parent).getByText("Our launch checklist")).toBeInTheDocument();
+    expect(within(parent).getByText("Sam Spammer")).toBeInTheDocument();
+    const reported = screen.getByRole("article", { name: "Reported comment" });
+    expect(within(reported).getByText("You are an idiot")).toBeInTheDocument();
+    expect(within(reported).getByText("Rude Replier")).toBeInTheDocument();
+  });
+
+  it("opens analytics on system health with each service check and its status in words", async () => {
+    auth.platformRoles = ["platform_admin"];
+    navigation.pathname = "/admin/analytics";
+    const check = (status: string, detail: string, latencyMs: number | null) => ({ status, detail, latencyMs });
+    mockApi({
+      "GET /api/v1/admin/overview": json(overview),
+      "GET /api/v1/admin/system/health": json({
+        status: "degraded", checkedAt: new Date().toISOString(), collectingSince: new Date().toISOString(),
+        checks: { api: check("ok", "Serving requests", 50), database: check("ok", "Responding", 1.2), redis: check("down", "Not reachable; rate limiting is unavailable", null) },
+        process: { nodeVersion: "v26.1.0", uptimeSeconds: 600, rssMb: 100, heapUsedMb: 30, heapTotalMb: 40, eventLoopP99Ms: 12, eventLoopMaxMs: 20 },
+        database: { poolTotal: 4, poolIdle: 3, poolWaiting: 0, sizeMb: 30, connections: 5, cacheHitRatio: 0.999, activeSessions: 9 },
+        redis: { usedMemoryMb: null, connectedClients: null, version: null },
+        traffic: { windowMinutes: 60, stepMinutes: 1, requests: 200, clientErrors: 4, serverErrors: 2, p50Ms: 10, p95Ms: 100, series: [], slowest: [], failing: [{ route: "GET /api/v1/admin/users", requests: 10, serverErrors: 2, clientErrors: 0, avgMs: 20, p95Ms: 50 }] },
+      }),
+    });
+    render(<AdminLayout><AnalyticsPage /></AdminLayout>);
+    expect(await screen.findByRole("heading", { name: "Degraded performance" })).toBeInTheDocument();
+    const checks = screen.getByRole("list", { name: "Service checks" });
+    expect(within(checks).getByText("Down")).toBeInTheDocument();
+    expect(within(checks).getByText("Not reachable; rate limiting is unavailable")).toBeInTheDocument();
+    expect(screen.getByText("1.00%")).toBeInTheDocument();
+    expect(screen.getByText("/api/v1/admin/users")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Engagement" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("shows a major outage when the health check says the database is unreachable", async () => {
+    auth.platformRoles = ["platform_admin"];
+    navigation.pathname = "/admin/analytics";
+    mockApi({
+      "GET /api/v1/admin/overview": json(overview),
+      "GET /api/v1/admin/system/health": json({ code: "database_unavailable", detail: "Spark's database is not reachable, so most of Spark is down." }, 503),
+    });
+    render(<AdminLayout><AnalyticsPage /></AdminLayout>);
+    expect(await screen.findByRole("heading", { name: "Major outage" })).toBeInTheDocument();
+    expect(screen.getByText(/most of Spark is down/u)).toBeInTheDocument();
+    expect(screen.queryByText("All systems operational")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+  });
+
+  it("turns the banner red when a refresh fails, even after a green check", async () => {
+    auth.platformRoles = ["platform_admin"];
+    navigation.pathname = "/admin/analytics";
+    const check = (status: string) => ({ status, detail: "Responding", latencyMs: 1 });
+    let healthy = true;
+    mockApi({
+      "GET /api/v1/admin/overview": json(overview),
+      "GET /api/v1/admin/system/health": () => (healthy
+        ? json({
+            status: "operational", checkedAt: new Date().toISOString(), collectingSince: new Date().toISOString(),
+            checks: { api: check("ok"), database: check("ok"), redis: check("ok") },
+            process: { nodeVersion: "v26.1.0", uptimeSeconds: 60, rssMb: 1, heapUsedMb: 1, heapTotalMb: 1, eventLoopP99Ms: 1, eventLoopMaxMs: 1 },
+            database: { poolTotal: 1, poolIdle: 1, poolWaiting: 0, sizeMb: 1, connections: 1, cacheHitRatio: 1, activeSessions: 1 },
+            redis: { usedMemoryMb: 1, connectedClients: 1, version: "8" },
+            traffic: { windowMinutes: 60, stepMinutes: 1, requests: 0, clientErrors: 0, serverErrors: 0, p50Ms: null, p95Ms: null, series: [], slowest: [], failing: [] },
+          })()
+        : json({ code: "database_unavailable", detail: "Spark's database is not reachable, so most of Spark is down." }, 503)()),
+    });
+    render(<AdminLayout><AnalyticsPage /></AdminLayout>);
+    expect(await screen.findByRole("heading", { name: "All systems operational" })).toBeInTheDocument();
+    healthy = false;
+    await userEvent.click(screen.getByRole("button", { name: "Check now" }));
+    expect(await screen.findByRole("heading", { name: "Major outage" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "All systems operational" })).not.toBeInTheDocument();
+    expect(screen.getByText(/may be out of date/u)).toBeInTheDocument();
   });
 });

@@ -192,7 +192,7 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
   );
   return (
     <div className="admChartCanvas" style={{ height }}>
-      <ResponsiveContainer height="100%" initialDimension={{ width: 640, height }} width="100%">
+      <ResponsiveContainer debounce={180} height="100%" initialDimension={{ width: 640, height }} width="100%">
         {kind === "bar" ? (
           <BarChart barCategoryGap="18%" data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
             {shared}

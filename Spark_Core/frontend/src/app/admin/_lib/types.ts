@@ -259,3 +259,56 @@ export interface Invoice {
   dueAt: string | null;
   paidAt: string | null;
 }
+
+export interface PreviewContent {
+  id: string;
+  title: string | null;
+  body: string;
+  moderationStatus: "visible" | "hidden";
+  deleted: boolean;
+  createdAt?: string;
+  author: { id: string; displayName: string } | null;
+  commentCount?: number;
+}
+
+export interface ReportPreview {
+  post: PreviewContent | null;
+  comment: PreviewContent | null;
+}
+
+export interface HealthCheck {
+  status: "ok" | "degraded" | "down" | "unknown";
+  latencyMs: number | null;
+  detail: string;
+}
+
+export interface RouteSummary {
+  route: string;
+  requests: number;
+  serverErrors: number;
+  clientErrors: number;
+  avgMs: number;
+  p95Ms: number | null;
+}
+
+export interface SystemHealth {
+  status: "operational" | "degraded" | "down";
+  checkedAt: string;
+  collectingSince: string;
+  checks: { api: HealthCheck; database: HealthCheck; redis: HealthCheck };
+  process: { nodeVersion: string; uptimeSeconds: number; rssMb: number; heapUsedMb: number; heapTotalMb: number; eventLoopP99Ms: number; eventLoopMaxMs: number };
+  database: { poolTotal: number; poolIdle: number; poolWaiting: number; sizeMb: number | null; connections: number | null; cacheHitRatio: number | null; activeSessions: number | null };
+  redis: { usedMemoryMb: number | null; connectedClients: number | null; version: string | null };
+  traffic: {
+    windowMinutes: number;
+    stepMinutes: number;
+    requests: number;
+    clientErrors: number;
+    serverErrors: number;
+    p50Ms: number | null;
+    p95Ms: number | null;
+    series: Array<{ minute: string; requests: number; clientErrors: number; serverErrors: number; p95Ms: number | null }>;
+    slowest: RouteSummary[];
+    failing: RouteSummary[];
+  };
+}

@@ -60,66 +60,45 @@
 .admSkip { position: absolute; z-index: 100; top: 12px; left: 12px; padding: 8px 14px; border-radius: var(--adm-radius-sm); color: #fff; background: var(--adm-blue); transform: translateY(-200%); }
 .admSkip:focus { transform: none; }
 
-/* ---------- Sidebar: navy, collapsible to a 64px icon rail ---------- */
-.admShell { transition: grid-template-columns .2s cubic-bezier(.16, 1, .3, 1); }
+/* ---------- Sidebar: light, collapsible to a 64px icon rail ----------
+   Icons, the logo and group spacing keep the same position in both states; only the width animates and the
+   text fades, so nothing jumps. Geometry: 10px nav padding + 13px link padding puts every 18px icon on the
+   64px rail's centre line (x = 32). */
+.admShell { transition: grid-template-columns .22s cubic-bezier(.2, .8, .2, 1); }
 .admShell[data-rail="collapsed"] { --adm-sidebar: 64px; }
-.admSidebar { position: sticky; top: 0; z-index: 40; display: flex; height: 100dvh; flex-direction: column; color: var(--adm-rail-text); background: var(--adm-rail); }
+.admSidebar { position: sticky; top: 0; z-index: 40; display: flex; height: 100dvh; flex-direction: column; overflow: hidden; border-right: 1px solid var(--adm-line); color: var(--adm-text); background: var(--adm-surface); }
 .admSidebar svg { width: 18px; height: 18px; }
-.admBrandRow { display: flex; align-items: center; gap: 8px; height: 60px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--adm-rail-line); }
-.admBrand { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; color: #fff; text-decoration: none; }
+.admFade { transition: opacity .16s ease; white-space: nowrap; }
+.admBrandRow { display: flex; flex: none; align-items: center; height: 60px; padding: 0 16px; border-bottom: 1px solid var(--adm-line); }
+.admBrand { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--adm-ink); text-decoration: none; }
 .admBrandMark { display: grid; width: 32px; height: 32px; flex: none; place-items: center; }
 .admBrandMark .sparkMark { width: 32px; height: 32px; }
-.admBrandText { display: grid; min-width: 0; line-height: 1.2; white-space: nowrap; }
+.admBrandText { display: grid; min-width: 0; line-height: 1.2; }
 .admBrandText strong { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
-.admBrandText span { color: var(--adm-rail-muted); font-size: 12px; font-weight: 500; }
-.admRailToggle { position: relative; display: grid; width: 30px; height: 30px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--adm-rail-muted); background: transparent; cursor: pointer; transition: background .15s ease, color .15s ease; }
-.admRailToggle:hover { color: #fff; background: var(--adm-rail-hover); }
-.admRailToggle svg { width: 17px; height: 17px; }
-.admNav { display: flex; flex: 1; flex-direction: column; gap: 20px; overflow-x: hidden; overflow-y: auto; padding: 16px 10px; scrollbar-width: thin; scrollbar-color: #24365a transparent; }
+.admBrandText span { color: var(--adm-subtle); font-size: 12px; font-weight: 500; }
+.admNav { display: flex; flex: 1; flex-direction: column; gap: 14px; overflow-x: hidden; overflow-y: auto; padding: 14px 10px; scrollbar-width: thin; scrollbar-color: var(--adm-line-strong) transparent; }
 .admNavGroup ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.admNavGroupLabel { margin: 0 0 6px; padding: 0 12px; overflow: hidden; color: var(--adm-rail-faint); font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
-.admNavLink { position: relative; display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border-radius: 8px; color: var(--adm-rail-text); font-size: 13.5px; font-weight: 500; text-decoration: none; white-space: nowrap; transition: background .15s ease, color .15s ease; }
-.admNavLink svg { color: var(--adm-rail-muted); transition: color .15s ease; }
-.admNavLink:hover { color: #fff; background: var(--adm-rail-hover); }
-.admNavLink:hover svg { color: #dbe6ff; }
-.admNavLink[aria-current="page"] { color: #fff; font-weight: 600; background: var(--adm-rail-active); }
-.admNavLink[aria-current="page"]::before { content: ""; position: absolute; top: 9px; bottom: 9px; left: -10px; width: 3px; border-radius: 0 3px 3px 0; background: #60a5fa; }
-.admNavLink[aria-current="page"] svg { color: #93c5fd; }
+/* The label row keeps its height when collapsed (a divider takes its place), so items never move vertically. */
+.admNavGroupLabel { position: relative; height: 26px; margin: 0; padding: 0 13px; overflow: hidden; color: var(--adm-faint); font-size: 11px; font-weight: 700; letter-spacing: .07em; line-height: 22px; text-transform: uppercase; }
+.admNavGroupLabel::after { content: ""; position: absolute; top: 11px; right: 12px; left: 12px; height: 1px; background: var(--adm-line); opacity: 0; transition: opacity .16s ease; }
+.admNavLink { position: relative; display: flex; width: 100%; align-items: center; gap: 12px; height: 38px; padding: 0 13px; border: 0; border-radius: 8px; color: var(--adm-muted); font: inherit; font-size: 13.5px; font-weight: 500; text-align: left; text-decoration: none; white-space: nowrap; background: transparent; cursor: pointer; transition: background .15s ease, color .15s ease; }
+.admNavIcon { position: relative; display: grid; width: 18px; height: 18px; flex: none; place-items: center; }
+.admNavIcon svg { color: var(--adm-subtle); transition: color .15s ease; }
+.admNavLink:hover { color: var(--adm-ink); background: var(--adm-hover); }
+.admNavLink:hover .admNavIcon svg { color: var(--adm-ink); }
+.admNavLink[aria-current="page"] { color: var(--adm-blue-dark); font-weight: 600; background: var(--adm-blue-soft); }
+.admNavLink[aria-current="page"] .admNavIcon svg { color: var(--adm-blue); }
 .admNavLabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.admNavCount { min-width: 22px; height: 20px; padding: 0 6px; border-radius: 999px; color: #fff; font-size: 11px; font-weight: 700; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; background: #2563eb; }
-.admSidebarNote { margin: 0; padding: 14px 18px 18px; overflow: hidden; border-top: 1px solid var(--adm-rail-line); color: var(--adm-rail-faint); font-size: 12px; line-height: 1.5; }
+.admNavCount { min-width: 22px; height: 20px; padding: 0 6px; border-radius: 999px; color: var(--adm-blue-dark); font-size: 11px; font-weight: 700; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; background: #dfe9ff; }
+.admNavDot { position: absolute; top: -3px; right: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--adm-blue); box-shadow: 0 0 0 2px var(--adm-surface); opacity: 0; transition: opacity .16s ease; }
+.admSidebarFoot { flex: none; padding: 10px; border-top: 1px solid var(--adm-line); }
+.admRailToggle kbd { margin-left: auto; }
+.admRailTip { position: fixed; z-index: 70; left: 72px; padding: 6px 10px; border-radius: 6px; color: #fff; font-size: 12.5px; font-weight: 600; white-space: pre; background: #0f172a; box-shadow: var(--adm-shadow-lg); transform: translateY(-50%); pointer-events: none; animation: adm-fade .12s ease; }
 
-/* Collapsed rail (desktop only): icons, tooltips and dot counts. */
 @media (min-width: 901px) {
-  .admShell[data-rail="collapsed"] .admBrandRow { flex-direction: column; justify-content: center; gap: 6px; height: auto; padding: 12px 0; }
-  .admShell[data-rail="collapsed"] .admBrand { flex: none; }
-  .admShell[data-rail="collapsed"] .admBrandText,
-  .admShell[data-rail="collapsed"] .admNavGroupLabel,
-  .admShell[data-rail="collapsed"] .admSidebarNote { display: none; }
-  .admShell[data-rail="collapsed"] .admNav { gap: 8px; padding: 12px 10px; }
-  .admShell[data-rail="collapsed"] .admNavGroup + .admNavGroup { padding-top: 8px; border-top: 1px solid var(--adm-rail-line); }
-  .admShell[data-rail="collapsed"] .admNavLink { justify-content: center; width: 44px; height: 44px; padding: 0; }
-  .admShell[data-rail="collapsed"] .admNavLabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-  .admShell[data-rail="collapsed"] .admNavCount { position: absolute; top: 4px; right: 2px; min-width: 18px; height: 16px; padding: 0 4px; font-size: 10px; line-height: 16px; box-shadow: 0 0 0 2px var(--adm-rail); }
-  .admShell[data-rail="collapsed"] .admNavLink[aria-current="page"]::before { left: -10px; }
-  .admShell[data-rail="collapsed"] [data-tip]:hover::after,
-  .admShell[data-rail="collapsed"] [data-tip]:focus-visible::after {
-    content: attr(data-tip);
-    position: absolute;
-    z-index: 70;
-    top: 50%;
-    left: calc(100% + 12px);
-    padding: 6px 10px;
-    border-radius: 6px;
-    color: #fff;
-    font-size: 12.5px;
-    font-weight: 600;
-    white-space: pre;
-    background: #0f172a;
-    box-shadow: var(--adm-shadow-lg);
-    transform: translateY(-50%);
-    pointer-events: none;
-  }
+  .admShell[data-rail="collapsed"] .admFade { opacity: 0; pointer-events: none; }
+  .admShell[data-rail="collapsed"] .admNavGroupLabel::after { opacity: 1; }
+  .admShell[data-rail="collapsed"] .admNavDot { opacity: 1; }
 }
 
 /* ---------- Top bar ---------- */
@@ -185,8 +164,11 @@
 .admTone-red { --tone-fg: #b42318; --tone-bg: #fef3f2; --tone-dot: #ef4444; }
 .admTone-violet { --tone-fg: #5b3fc4; --tone-bg: #f4f1ff; --tone-dot: #8b5cf6; }
 .admTone-navy { --tone-fg: #0f2a4f; --tone-bg: #e8eef7; --tone-dot: #0f2a4f; }
-.admBadge { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; color: var(--tone-fg); font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; background: var(--tone-bg); }
-.admBadgeDot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--tone-dot); }
+/* Status chips stay quiet in dense tables: an outlined chip with a coloured dot. Only states that need
+   attention (red, amber) also tint the text, so they stand out without a wall of coloured pills. */
+.admBadge { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 7px; border: 1px solid var(--adm-line); border-radius: 6px; color: var(--adm-text); font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap; background: var(--adm-surface); }
+.admBadge.admTone-red, .admBadge.admTone-amber { border-color: color-mix(in srgb, var(--tone-dot) 35%, var(--adm-line)); color: var(--tone-fg); background: var(--tone-bg); }
+.admBadgeDot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--tone-dot); }
 .admBadgeRow, .admTagRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .admBadgeRow { margin-top: 8px; }
 .admTag { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border: 1px solid var(--adm-line); border-radius: 6px; color: var(--adm-muted); font-size: 12px; font-weight: 500; white-space: nowrap; background: var(--adm-surface-alt); }
@@ -422,7 +404,7 @@
   .admSidebar[data-open="true"] { transform: none; }
   .admScrim { position: fixed; z-index: 35; inset: 0; display: block; border: 0; background: rgba(15, 23, 42, .35); }
   .admMenuToggle { display: inline-grid !important; }
-  .admRailToggle { display: none; }
+  .admSidebarFoot { display: none; }
   .admTopbar { padding: 0 16px; }
   .admViewSite { display: none !important; }
   .admAccountName { display: none; }
@@ -438,7 +420,7 @@
   .admPanelTools, .admSearch, .admSelect, .admDate { width: 100%; }
   .admFilters { width: 100%; }
   .admFilters > * { flex: 1 1 140px; }
-  .admNavLink { height: 40px; }
+  .admNavLink { height: 42px; }
   .admKpis { grid-template-columns: minmax(0, 1fr); }
   .admKpi + .admKpi { border-top: 1px solid var(--adm-line); border-left: 0; }
   /* Rows become stacked cards; each cell shows its column name. */
@@ -710,3 +692,75 @@
   .admTable .admGroupRow { padding: 8px 16px; background: #f3f6fb; }
   .admTable .admGroupRow th { position: static; display: block; height: auto; padding: 0; border: 0; background: transparent; }
 }
+
+/* ---------- Reported content shown as a feed post ---------- */
+.admPostPreview { display: grid; gap: 0; }
+.admPost { display: grid; gap: 10px; padding: 16px 18px; border: 1px solid var(--adm-line); border-radius: 12px; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); }
+.admPostHead { display: flex; align-items: center; gap: 10px; }
+.admPostWho { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+.admPostWho strong { color: var(--adm-ink); font-size: 13.5px; font-weight: 600; }
+.admPostWho span { color: var(--adm-subtle); font-size: 12.5px; }
+.admPostFlags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.admPostTitle { margin: 2px 0 0; color: var(--adm-ink); font-size: 16px; font-weight: 700; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.admPostBody { margin: 0; color: var(--adm-text); font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.admPostFoot { display: flex; gap: 16px; padding-top: 10px; border-top: 1px solid var(--adm-line-soft); color: var(--adm-subtle); font-size: 12.5px; font-weight: 500; }
+.admPostFoot span { display: inline-flex; align-items: center; gap: 6px; }
+.admPostFoot svg { width: 15px; height: 15px; }
+.admPostContext, .admPostReported { margin: 0; color: var(--adm-subtle); font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+/* For a comment report the parent post is context: quieter, clamped; the comment is the focus. */
+.admPostPreview[data-kind="comment"] > .admPost:first-child { border-bottom-right-radius: 12px; background: var(--adm-surface-alt); box-shadow: none; }
+.admPostPreview[data-kind="comment"] > .admPost:first-child .admPostBody { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.admPostComment { position: relative; margin: 12px 0 0 28px; border-color: #f6c77a; box-shadow: 0 0 0 3px #fff4de; }
+.admPostComment::before { content: ""; position: absolute; top: -13px; left: -16px; width: 14px; height: 34px; border-bottom: 2px solid var(--adm-line-strong); border-left: 2px solid var(--adm-line-strong); border-bottom-left-radius: 10px; }
+.admPostReported { color: #a15c07; }
+
+/* ---------- System health ---------- */
+.admToolbar { display: flex; justify-content: flex-end; margin: -4px 0 14px; }
+.admStatusBanner { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px; margin-bottom: 16px; padding: 16px 20px; border: 1px solid var(--adm-line); border-left: 4px solid var(--tone-dot); border-radius: 12px; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); }
+.admStatusPulse { position: relative; width: 12px; height: 12px; flex: none; border-radius: 50%; background: var(--tone-dot); }
+.admStatusPulse::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; background: var(--tone-dot); opacity: .25; animation: adm-pulse 2s ease-out infinite; }
+@keyframes adm-pulse { from { transform: scale(.6); opacity: .45; } to { transform: scale(1.6); opacity: 0; } }
+.admStatusText { flex: 1; min-width: 220px; }
+.admStatusText h2 { margin: 0; color: var(--adm-ink); font-size: 16px; font-weight: 700; }
+.admStatusText p { margin: 2px 0 0; color: var(--adm-muted); font-size: 13.5px; }
+.admStatusMeta { display: grid; justify-items: end; gap: 8px; color: var(--adm-subtle); font-size: 12.5px; }
+.admStatusTools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.admChecks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0 0 16px; padding: 0; list-style: none; }
+.admCheck { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--adm-line); border-radius: 12px; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); }
+.admCheckTop { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.admCheckName { color: var(--adm-ink); font-size: 14px; font-weight: 700; }
+.admCheckDetail { margin: 0; color: var(--adm-muted); font-size: 13px; }
+.admCheckStats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 4px 0 0; }
+.admCheckStats div { display: grid; }
+.admCheckStats dt { color: var(--adm-subtle); font-size: 11.5px; font-weight: 600; }
+.admCheckStats dd { margin: 0; color: var(--adm-ink); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.admRoute { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.admRoute code { overflow: hidden; color: var(--adm-ink); font: 500 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.admMethod { flex: none; padding: 1px 6px; border-radius: 4px; color: var(--adm-muted); font-size: 10.5px; font-weight: 700; letter-spacing: .03em; background: #eef1f5; }
+.admRouteTable td, .admRouteTable th { padding-top: 9px; padding-bottom: 9px; }
+@media (max-width: 1100px) { .admChecks { grid-template-columns: minmax(0, 1fr); } .admStatusMeta { justify-items: start; } }
+@media (prefers-reduced-motion: reduce) { .admStatusPulse::after { animation: none; } }
+
+/* ---------- Role summary ---------- */
+.admRoleSummary { display: inline-flex; align-items: center; gap: 6px; }
+.admRoleChip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 6px; border: 1px solid var(--adm-line); border-radius: 6px; color: var(--adm-ink); font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--adm-surface); }
+.admRoleChip svg { width: 13px; height: 13px; color: var(--tone-dot); }
+.admRoleMore { color: var(--adm-subtle); font-size: 12px; font-weight: 600; cursor: help; }
+
+/* ---------- Roles and access matrix ---------- */
+.admMatrixWrap { overflow-x: auto; }
+.admMatrix { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; }
+.admMatrix thead th { padding: 12px 14px; border-bottom: 1px solid var(--adm-line); color: var(--adm-subtle); font-size: 12px; font-weight: 600; text-align: center; vertical-align: bottom; background: var(--adm-surface-alt); }
+.admMatrix thead th:first-child { text-align: left; }
+.admMatrixRole { display: block; margin-bottom: 4px; color: var(--adm-ink); font-size: 12.5px; font-weight: 700; }
+.admMatrix thead .admTextLink { font-size: 12px; font-weight: 500; }
+.admMatrix tbody th[scope="row"] { display: grid; gap: 2px; padding: 12px 14px; border-bottom: 1px solid var(--adm-line-soft); text-align: left; font-weight: 400; }
+.admMatrix tbody td { padding: 12px 14px; border-bottom: 1px solid var(--adm-line-soft); text-align: center; }
+.admMatrix tbody tr:last-child > * { border-bottom: 0; }
+.admMatrix .admGroupRow th { padding: 8px 14px; border-bottom: 1px solid var(--adm-line); color: var(--adm-ink); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-align: left; text-transform: uppercase; background: #f3f6fb; }
+.admAllowed { display: inline-grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: var(--adm-green); background: var(--adm-green-soft); }
+.admAllowed svg { width: 14px; height: 14px; }
+.admDenied { color: var(--adm-faint); }
+
+.admChecks[data-stale="true"] .admCheck { opacity: .55; }
+.admStatusBanner > .admBtn { margin-left: auto; }

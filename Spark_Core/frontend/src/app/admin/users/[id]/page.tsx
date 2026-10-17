@@ -10,7 +10,7 @@ import { ChartCard, ChartLegend, TrendChart } from "../../_components/charts";
 import { ArrowLeftIcon } from "../../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../../_components/reason-dialog";
 import { canChangeStatus, statusRequest } from "../../_components/user-actions";
-import { Avatar, Badge, EmptyState, ErrorBanner, KeyValue, NoAccess, SkeletonRows, Tag } from "../../_components/ui";
+import { Avatar, Badge, EmptyState, ErrorBanner, KeyValue, NoAccess, RoleSummary, SkeletonRows } from "../../_components/ui";
 import { ApiError, adminApi, messageOf, reloadIfStale } from "../../_lib/api";
 import { PLATFORM_ROLES, canAccess, canManageRoles } from "../../_lib/access";
 import { AUDIT_ACTIONS, ROLE_DESCRIPTIONS, ROLE_LABELS, USER_STATUS, describeAction, formatDate, formatDateTime, formatRelative, shortDate } from "../../_lib/format";
@@ -101,7 +101,7 @@ export default function UserDetailPage() {
           <p>{detail.email ?? "No email on file"} · Joined {formatDate(detail.createdAt)}</p>
           <div className="admBadgeRow">
             <Badge tone={USER_STATUS[detail.status].tone}>{USER_STATUS[detail.status].label}</Badge>
-            {detail.platformRoles.map((role) => <Tag key={role}>{ROLE_LABELS[role]}</Tag>)}
+            <RoleSummary empty="No platform role" roles={detail.platformRoles} />
           </div>
         </div>
         {!isMe && canChangeStatus(roles, detail) && (

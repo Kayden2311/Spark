@@ -73,6 +73,10 @@ function subscribeRail(onChange: () => void): () => void {
   };
 }
 
+function isDesktop(): boolean {
+  return typeof window.matchMedia !== "function" || window.matchMedia("(min-width: 901px)").matches;
+}
+
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
@@ -84,34 +88,31 @@ function Sidebar({ open, collapsed, onNavigate, onToggle }: { open: boolean; col
   const sections = visibleSections(roles);
   const active = sectionForPath(pathname)?.id;
   const groups = [...new Set(sections.map((section) => section.group))];
+  // One floating tooltip for the collapsed rail. It lives outside the scrolling nav, so it is never clipped.
+  const [tip, setTip] = useState<{ text: string; top: number } | null>(null);
+  const showTip = (text: string) => (event: { currentTarget: HTMLElement }) => {
+    // The rail (and its tooltips) exists on desktop only; the phone drawer always shows labels.
+    if (!collapsed || !isDesktop()) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    setTip({ text, top: box.top + box.height / 2 });
+  };
+  const tipProps = (text: string) => ({ onBlur: () => setTip(null), onFocus: showTip(text), onMouseEnter: showTip(text), onMouseLeave: () => setTip(null) });
 
   return (
     <aside className="admSidebar" data-open={open} id="admin-navigation">
       <div className="admBrandRow">
-        <Link aria-label="Spark admin console, overview" className="admBrand" href="/admin" onClick={onNavigate}>
-          <span className="admBrandMark"><SparkMark tone="dark" /></span>
-          <span className="admBrandText">
+        <Link aria-label="Spark admin console, overview" className="admBrand" href="/admin" onClick={onNavigate} {...tipProps("Spark admin console")}>
+          <span className="admBrandMark"><SparkMark /></span>
+          <span className="admBrandText admFade">
             <strong>Spark</strong>
             <span>Admin console</span>
           </span>
         </Link>
-        <button
-          aria-controls="admin-navigation"
-          aria-expanded={!collapsed}
-          aria-keyshortcuts="["
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="admRailToggle"
-          data-tip={collapsed ? "Expand  [" : "Collapse  ["}
-          onClick={onToggle}
-          type="button"
-        >
-          <SidebarIcon />
-        </button>
       </div>
       <nav aria-label="Admin sections" className="admNav">
         {groups.map((group) => (
           <div className="admNavGroup" key={group}>
-            <p className="admNavGroupLabel">{group}</p>
+            <p className="admNavGroupLabel"><span className="admFade">{group}</span></p>
             <ul>
               {sections.filter((section) => section.group === group).map((section) => {
                 const count = badgeFor(section.id, overview);
@@ -120,13 +121,16 @@ function Sidebar({ open, collapsed, onNavigate, onToggle }: { open: boolean; col
                     <Link
                       aria-current={active === section.id ? "page" : undefined}
                       className="admNavLink"
-                      data-tip={count ? `${section.label} · ${count}` : section.label}
                       href={section.href}
                       onClick={onNavigate}
+                      {...tipProps(count ? `${section.label} · ${count}` : section.label)}
                     >
-                      {SECTION_ICONS[section.id]}
-                      <span className="admNavLabel">{section.label}</span>
-                      {count ? <span className="admNavCount"><span aria-hidden="true">{count > 99 ? "99+" : count}</span><span className="admSrOnly">, {count} need attention</span></span> : null}
+                      <span className="admNavIcon">
+                        {SECTION_ICONS[section.id]}
+                        {count ? <span aria-hidden="true" className="admNavDot" /> : null}
+                      </span>
+                      <span className="admNavLabel admFade">{section.label}</span>
+                      {count ? <span className="admNavCount admFade"><span aria-hidden="true">{count > 99 ? "99+" : count}</span><span className="admSrOnly">, {count} need attention</span></span> : null}
                     </Link>
                   </li>
                 );
@@ -135,7 +139,22 @@ function Sidebar({ open, collapsed, onNavigate, onToggle }: { open: boolean; col
           </div>
         ))}
       </nav>
-      <p className="admSidebarNote">Every action you take here is recorded in the audit log.</p>
+      <div className="admSidebarFoot">
+        <button
+          aria-controls="admin-navigation"
+          aria-expanded={!collapsed}
+          aria-keyshortcuts="["
+          className="admNavLink admRailToggle"
+          onClick={() => { setTip(null); onToggle(); }}
+          type="button"
+          {...tipProps("Expand sidebar  [")}
+        >
+          <span className="admNavIcon"><SidebarIcon /></span>
+          <span className="admNavLabel admFade">{collapsed ? "Expand sidebar" : "Collapse sidebar"}</span>
+          <kbd aria-hidden="true" className="admFade">[</kbd>
+        </button>
+      </div>
+      {collapsed && tip && <div aria-hidden="true" className="admRailTip" style={{ top: tip.top }}>{tip.text}</div>}
     </aside>
   );
 }
@@ -191,7 +210,7 @@ function Shell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "[" || event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target)) return;
+      if (event.key !== "[" || event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target) || !isDesktop()) return;
       if (document.querySelector("[aria-modal='true']")) return;
       event.preventDefault();
       toggleRail();

@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { Tone } from "../_lib/format";
-import { describeChange, initials } from "../_lib/format";
+import { ROLE_LABELS, ROLE_TONES, describeChange, initials } from "../_lib/format";
+import type { PlatformRole } from "../_lib/types";
 import { Sparkline } from "./sparkline";
-import { AlertIcon, ArrowDownIcon, ArrowUpIcon, InboxIcon, MoreIcon, RefreshIcon } from "./icons";
+import { AlertIcon, ArrowDownIcon, ArrowUpIcon, InboxIcon, MoreIcon, RefreshIcon, ShieldIcon } from "./icons";
 
 export function PageHeader({ title, description, actions, meta }: { title: string; description?: ReactNode; actions?: ReactNode; meta?: ReactNode }) {
   return (
@@ -367,5 +368,22 @@ export function Card({ title, subtitle, actions, children, className, flush }: {
       </div>
       {children}
     </section>
+  );
+}
+
+const ROLE_RANK: PlatformRole[] = ["super_admin", "platform_admin", "content_moderator", "community_moderator", "campaign_moderator"];
+
+/** A member's platform roles in one line: the highest role, then "+N more" with the full list on hover. */
+export function RoleSummary({ roles, empty = "Member" }: { roles: PlatformRole[]; empty?: string }) {
+  if (roles.length === 0) return <span className="admMutedCell">{empty}</span>;
+  const sorted = [...roles].sort((a, b) => ROLE_RANK.indexOf(a) - ROLE_RANK.indexOf(b));
+  const [top, ...rest] = sorted;
+  const all = sorted.map((role) => ROLE_LABELS[role]).join(", ");
+  return (
+    <span className="admRoleSummary" title={all}>
+      <span className={`admRoleChip admTone-${ROLE_TONES[top!]}`}><ShieldIcon aria-hidden="true" />{ROLE_LABELS[top!]}</span>
+      {rest.length > 0 && <span aria-hidden="true" className="admRoleMore">+{rest.length}</span>}
+      {rest.length > 0 && <span className="admSrOnly">, also {rest.map((role) => ROLE_LABELS[role]).join(", ")}</span>}
+    </span>
   );
 }
