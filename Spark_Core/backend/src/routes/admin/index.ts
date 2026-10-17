@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 
+import { registerAnalyticsRoutes } from "./analytics.js";
 import { registerAuditRoutes } from "./audit.js";
+import { registerBillingRoutes } from "./billing.js";
 import { registerCampaignRoutes } from "./campaigns.js";
 import { registerCommunityRoutes } from "./communities.js";
 import { createStaffGuard } from "./guard.js";
@@ -26,4 +28,6 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminPluginOp
   registerUserRoutes(app, guard);
   registerCampaignRoutes(app, guard);
   registerAuditRoutes(app, guard);
+  registerAnalyticsRoutes(app, guard);
+  registerBillingRoutes(app, guard);
 }

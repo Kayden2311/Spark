@@ -47,6 +47,19 @@ const ROUTES: Array<{ method: "GET" | "POST" | "PATCH" | "DELETE"; url: string; 
   { method: "GET", url: `/api/v1/admin/campaigns/${target}`, allowed: ["campaign_moderator"] },
   { method: "POST", url: `/api/v1/admin/campaigns/${target}/review`, payload: { decision: "approve", reason }, allowed: ["campaign_moderator"] },
   { method: "GET", url: "/api/v1/admin/audit-logs", allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/analytics/activity", allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/analytics/engagement", allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/analytics/retention", allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/analytics/top-communities", allowed: ["community_moderator"] },
+  { method: "GET", url: "/api/v1/admin/billing/overview", allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/billing/mrr", allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/billing/subscriptions", allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/billing/invoices", allowed: ["platform_admin"] },
+  { method: "GET", url: `/api/v1/admin/communities/${target}`, allowed: ["community_moderator"] },
+  { method: "GET", url: `/api/v1/admin/users/${target}/activity`, allowed: ["platform_admin"] },
+  { method: "GET", url: `/api/v1/admin/users/${target}/sessions`, allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/reports/stats", allowed: ["content_moderator"] },
+  { method: "GET", url: `/api/v1/admin/reports/${target}/context`, allowed: ["content_moderator"] },
 ];
 
 // A role outside each route's allowed set, chosen so every route has a meaningful denial.
@@ -262,5 +275,58 @@ describe("database input errors and request origin", () => {
     await app.close();
     expect(fromFrontend.statusCode).toBe(200);
     expect(read.statusCode).not.toBe(403);
+  });
+});
+
+describe("admin insight routes", () => {
+  it.each([
+    "/api/v1/admin/analytics/activity?days=6",
+    "/api/v1/admin/analytics/activity?days=366",
+    "/api/v1/admin/analytics/retention?weeks=27",
+    "/api/v1/admin/billing/mrr?months=25",
+    "/api/v1/admin/billing/subscriptions?status=gone",
+    "/api/v1/admin/billing/subscriptions?kind=gold",
+    "/api/v1/admin/billing/invoices?status=gone",
+  ])("rejects out-of-range input: %s", async (url) => {
+    const { response, calls } = await call(["super_admin"], { method: "GET", url });
+    expect(response.statusCode).toBe(400);
+    expect(calls.some((entry) => entry.sql.includes("staff_"))).toBe(false);
+  });
+
+  it("splits the activity series into the period and the one before it", async () => {
+    const day = (index: number) => ({ day: `2026-10-${String(index + 1).padStart(2, "0")}`, signups: "1", active_users: String(index), sign_ins: "2", posts: "3", comments: "4", reports_opened: "0", reports_closed: "0" });
+    const { response, calls } = await call(["platform_admin"], { method: "GET", url: "/api/v1/admin/analytics/activity?days=7" }, [
+      ["staff_activity_series", () => Array.from({ length: 14 }, (_, index) => day(index))],
+      ["staff_active_user_totals", () => [{ dau: "3", wau: "9", mau: "20", total_users: "40" }]],
+    ]);
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(calls.find((entry) => entry.sql.includes("staff_activity_series"))?.params).toEqual([14]);
+    expect(body.series).toHaveLength(7);
+    expect(body.series[0].day).toBe("2026-10-08");
+    expect(body.current).toMatchObject({ signups: 7, posts: 21, avgActiveUsers: 10 });
+    expect(body.previous).toMatchObject({ signups: 7, avgActiveUsers: 3 });
+    expect(body.audience).toEqual({ dau: 3, wau: 9, mau: 20, totalUsers: 40 });
+  });
+
+  it("reports MRR and ARR per currency from the billing functions", async () => {
+    const { response } = await call(["platform_admin"], { method: "GET", url: "/api/v1/admin/billing/overview" }, [
+      ["staff_billing_counts", () => [{ free_workspaces: "5", trialing: "1", paying: "2", past_due: "0", cancelled_30d: "1", new_paid_30d: "1", failed_payments_30d: "0" }]],
+      ["staff_billing_revenue", () => [{ currency: "USD", mrr_minor: "12900", collected_30d_minor: "2900", open_minor: "0", uncollectible_minor: "0" }]],
+      ["staff_billing_plan_mix", () => [{ plan_code: "pro", plan_name: "Pro", billing_kind: "paid", subscriptions: "2", currency: "USD", mrr_minor: "12900" }]],
+    ]);
+    expect(response.json()).toMatchObject({
+      counts: { freeWorkspaces: 5, paying: 2 },
+      revenue: [{ currency: "USD", mrrMinor: 12900, arrMinor: 154800 }],
+      planMix: [{ code: "pro", subscriptions: 2, mrrMinor: 12900 }],
+    });
+  });
+
+  it("never exposes session secrets", async () => {
+    const { response } = await call(["platform_admin"], { method: "GET", url: `/api/v1/admin/users/${target}/sessions` }, [
+      ["staff_user_sessions", () => [{ id: target, created_at: new Date(), last_seen_at: new Date(), expires_at: new Date(), auth_method: "password", state: "active", token_hash: "secret" }]],
+    ]);
+    expect(JSON.stringify(response.json())).not.toContain("secret");
+    expect(Object.keys(response.json().items[0]).sort()).toEqual(["createdAt", "expiresAt", "id", "lastSeenAt", "method", "state"]);
   });
 });

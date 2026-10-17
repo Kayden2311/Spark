@@ -1,9 +1,10 @@
-import { and, count, desc, eq, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { FastifyInstance } from "fastify";
+import type { PoolClient } from "pg";
 
-import { communities, communityMemberships, users } from "../../infrastructure/database/schema.js";
-import { pageSize, toPage } from "../pagination.js";
+import { communities, platformAuditEvents, users } from "../../infrastructure/database/schema.js";
+import { pageSize, toPage, withoutCursor } from "../pagination.js";
 import { problem } from "../responses.js";
 import { COMMUNITY_STAFF, MUTATION_RATE_LIMIT, expectOutcome, idParams, likePattern, pageQueryProperties, readCursor, reasonProperty, type StaffGuard } from "./guard.js";
 
@@ -42,8 +43,104 @@ const communitySchema = {
     creator: { type: "object", properties: { id: { type: "string" }, displayName: { type: "string" } } },
     memberCount: { type: "integer" },
     openReports: { type: "integer" },
+    newMembers30d: { type: "integer" },
+    posts30d: { type: "integer" },
+    comments30d: { type: "integer" },
+    weeklyActivity: { type: "array", items: { type: "integer" } },
   },
 } as const;
+
+const historyEntry = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    action: { type: "string" },
+    reason: { type: "string" },
+    createdAt: { type: "string", format: "date-time" },
+    actor: { type: "object", properties: { id: { type: "string" }, displayName: { type: "string" } } },
+  },
+} as const;
+
+interface Health {
+  members: number;
+  newMembers30d: number;
+  posts30d: number;
+  comments30d: number;
+  weeklyActivity: number[];
+  openReports: number;
+}
+
+const EMPTY_HEALTH: Health = { members: 0, newMembers30d: 0, posts30d: 0, comments30d: 0, weeklyActivity: [], openReports: 0 };
+
+async function healthFor(client: PoolClient, ids: string[]): Promise<Map<string, Health>> {
+  if (ids.length === 0) return new Map();
+  const result = await client.query<{ community_id: string; members: string; new_members_30d: string; posts_30d: string; comments_30d: string; weekly_activity: string[]; open_reports: string }>(
+    "SELECT * FROM spark.staff_community_health($1::uuid[])",
+    [ids],
+  );
+  return new Map(result.rows.map((row) => [row.community_id, {
+    members: Number(row.members),
+    newMembers30d: Number(row.new_members_30d),
+    posts30d: Number(row.posts_30d),
+    comments30d: Number(row.comments_30d),
+    weeklyActivity: row.weekly_activity.map(Number),
+    openReports: Number(row.open_reports),
+  }]));
+}
+
+async function selectCommunities(client: PoolClient, conditions: Array<SQL | undefined>, limit: number) {
+  return drizzle(client)
+    .select({
+      id: communities.id,
+      cursorTs: sql<string>`${communities.createdAt}::text`,
+      slug: communities.slug,
+      name: communities.name,
+      description: communities.description,
+      visibility: communities.visibility,
+      stage: communities.stage,
+      city: communities.city,
+      countryCode: communities.countryCode,
+      createdAt: communities.createdAt,
+      featuredAt: communities.featuredAt,
+      frozenAt: communities.frozenAt,
+      archivedAt: communities.archivedAt,
+      creatorId: communities.createdByUserId,
+      creatorName: users.displayName,
+    })
+    .from(communities)
+    .leftJoin(users, eq(users.id, communities.createdByUserId))
+    .where(and(...conditions))
+    .orderBy(desc(communities.createdAt), desc(communities.id))
+    .limit(limit);
+}
+
+type CommunityRow = Awaited<ReturnType<typeof selectCommunities>>[number];
+
+function toCommunity(row: CommunityRow, health: Health) {
+  return {
+    id: row.id,
+    cursorTs: row.cursorTs,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    visibility: row.visibility,
+    stage: row.stage,
+    city: row.city,
+    countryCode: row.countryCode,
+    state: stateOf(row),
+    createdAt: row.createdAt.toISOString(),
+    featuredAt: row.featuredAt?.toISOString() ?? null,
+    frozenAt: row.frozenAt?.toISOString() ?? null,
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    creator: { id: row.creatorId, displayName: row.creatorName ?? "Unknown member" },
+    memberCount: health.members,
+    openReports: health.openReports,
+    newMembers30d: health.newMembers30d,
+    posts30d: health.posts30d,
+    comments30d: health.comments30d,
+    weeklyActivity: health.weeklyActivity,
+  };
+}
 
 function stateOf(row: { archivedAt: Date | null; frozenAt: Date | null; featuredAt: Date | null }) {
   if (row.archivedAt) return "archived";
@@ -86,79 +183,76 @@ export function registerCommunityRoutes(app: FastifyInstance, guard: StaffGuard)
       const search = request.query.search?.trim();
 
       const page = await guard.run(request, reply, staff, async (client) => {
-        const db = drizzle(client);
         const conditions: Array<SQL | undefined> = [stateCondition(request.query.status)];
         if (request.query.status === "flagged") {
           const flagged = await client.query<{ community_id: string }>("SELECT community_id FROM spark.staff_open_report_counts(NULL)");
-          if (flagged.rows.length === 0) return { rows: [], members: new Map<string, number>(), reports: new Map<string, number>() };
+          if (flagged.rows.length === 0) return { rows: [] as CommunityRow[], health: new Map<string, Health>() };
           conditions.push(inArray(communities.id, flagged.rows.map((row) => row.community_id)));
         }
         if (search) conditions.push(or(ilike(communities.name, likePattern(search)), ilike(communities.slug, likePattern(search))));
         if (cursor) conditions.push(sql`(${communities.createdAt}, ${communities.id}) < (${cursor.createdAt}::timestamptz, ${cursor.id}::uuid)`);
-
-        const rows = await db
-          .select({
-            id: communities.id,
-            cursorTs: sql<string>`${communities.createdAt}::text`,
-            slug: communities.slug,
-            name: communities.name,
-            description: communities.description,
-            visibility: communities.visibility,
-            stage: communities.stage,
-            city: communities.city,
-            countryCode: communities.countryCode,
-            createdAt: communities.createdAt,
-            featuredAt: communities.featuredAt,
-            frozenAt: communities.frozenAt,
-            archivedAt: communities.archivedAt,
-            creatorId: communities.createdByUserId,
-            creatorName: users.displayName,
-          })
-          .from(communities)
-          .leftJoin(users, eq(users.id, communities.createdByUserId))
-          .where(and(...conditions))
-          .orderBy(desc(communities.createdAt), desc(communities.id))
-          .limit(limit + 1);
-        if (rows.length === 0) return { rows, members: new Map<string, number>(), reports: new Map<string, number>() };
-
-        const ids = rows.map((row) => row.id);
-        const [memberCounts, reportCounts] = await Promise.all([
-          db.select({ communityId: communityMemberships.communityId, value: count() })
-            .from(communityMemberships)
-            .where(and(inArray(communityMemberships.communityId, ids), eq(communityMemberships.status, "active")))
-            .groupBy(communityMemberships.communityId),
-          client.query<{ community_id: string; open_reports: string }>("SELECT * FROM spark.staff_open_report_counts($1::uuid[])", [ids]),
-        ]);
-        return {
-          rows,
-          members: new Map(memberCounts.map((row) => [row.communityId, row.value])),
-          reports: new Map(reportCounts.rows.map((row) => [row.community_id, Number(row.open_reports)])),
-        };
+        const rows = await selectCommunities(client, conditions, limit + 1);
+        return { rows, health: await healthFor(client, rows.map((row) => row.id)) };
       });
       if (reply.sent || !page) return reply;
 
       return toPage(
-        page.rows.map((row) => ({
-          id: row.id,
-          cursorTs: row.cursorTs,
-          slug: row.slug,
-          name: row.name,
-          description: row.description,
-          visibility: row.visibility,
-          stage: row.stage,
-          city: row.city,
-          countryCode: row.countryCode,
-          state: stateOf(row),
-          createdAt: row.createdAt.toISOString(),
-          featuredAt: row.featuredAt?.toISOString() ?? null,
-          frozenAt: row.frozenAt?.toISOString() ?? null,
-          archivedAt: row.archivedAt?.toISOString() ?? null,
-          creator: { id: row.creatorId, displayName: row.creatorName ?? "Unknown member" },
-          memberCount: page.members.get(row.id) ?? 0,
-          openReports: page.reports.get(row.id) ?? 0,
-        })),
+        page.rows.map((row) => toCommunity(row, page.health.get(row.id) ?? EMPTY_HEALTH)),
         limit,
       );
+    },
+  );
+
+  // One community with its health, a daily series and the staff decisions taken on it.
+  app.get<{ Params: { id: string }; Querystring: { days: number } }>(
+    "/api/v1/admin/communities/:id",
+    {
+      schema: {
+        params: idParams,
+        querystring: { type: "object", properties: { days: { type: "integer", minimum: 7, maximum: 365, default: 90 } }, additionalProperties: false },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              community: communitySchema,
+              series: {
+                type: "array",
+                items: { type: "object", properties: { day: { type: "string", format: "date" }, newMembers: { type: "integer" }, posts: { type: "integer" }, comments: { type: "integer" }, reportsOpened: { type: "integer" } } },
+              },
+              history: { type: "array", items: historyEntry },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const staff = await guard.authorize(request, reply, COMMUNITY_STAFF);
+      if (!staff) return reply;
+      const detail = await guard.run(request, reply, staff, async (client) => {
+        const [row] = await selectCommunities(client, [eq(communities.id, request.params.id)], 1);
+        if (!row) return null;
+        const health = await healthFor(client, [row.id]);
+        const series = await client.query<{ day: string; new_members: string; posts: string; comments: string; reports_opened: string }>(
+          "SELECT day::text AS day, new_members, posts, comments, reports_opened FROM spark.staff_community_series($1, $2)",
+          [row.id, request.query.days],
+        );
+        // RLS shows audit rows to platform admins only; community moderators get an empty history.
+        const history = await drizzle(client)
+            .select({ id: platformAuditEvents.id, action: platformAuditEvents.action, reason: platformAuditEvents.reason, createdAt: platformAuditEvents.createdAt, actorId: platformAuditEvents.actorUserId, actorName: users.displayName })
+            .from(platformAuditEvents)
+            .leftJoin(users, eq(users.id, platformAuditEvents.actorUserId))
+            .where(and(eq(platformAuditEvents.targetType, "community"), eq(platformAuditEvents.targetId, row.id)))
+            .orderBy(desc(platformAuditEvents.createdAt), desc(platformAuditEvents.id))
+            .limit(20);
+        return { row, health: health.get(row.id) ?? EMPTY_HEALTH, series: series.rows, history };
+      });
+      if (reply.sent) return reply;
+      if (!detail) return problem(request, reply, 404, "Not Found", "community_not_found", "Community does not exist.");
+      return {
+        community: withoutCursor(toCommunity(detail.row, detail.health)),
+        series: detail.series.map((point) => ({ day: point.day, newMembers: Number(point.new_members), posts: Number(point.posts), comments: Number(point.comments), reportsOpened: Number(point.reports_opened) })),
+        history: detail.history.map((entry) => ({ id: entry.id, action: entry.action, reason: entry.reason, createdAt: entry.createdAt.toISOString(), actor: { id: entry.actorId, displayName: entry.actorName ?? "Unknown member" } })),
+      };
     },
   );
 

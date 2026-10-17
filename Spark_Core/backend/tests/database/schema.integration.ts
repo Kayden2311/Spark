@@ -118,7 +118,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(12);
+    expect(result.rows[0].count).toBe(13);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -626,9 +626,13 @@ describe("Local PostgreSQL schema", () => {
     const runtimeFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
-      "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "is_community_member", "is_workspace_member",
-      "staff_active_session_count", "staff_grant_role", "staff_list_reports", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
-      "staff_resolve_report", "staff_review_campaign", "staff_revoke_role", "staff_set_user_status", "staff_user_roles", "staff_user_session_count",
+      "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "is_community_member",
+      "is_workspace_member", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
+      "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_health", "staff_community_series", "staff_engagement_heatmap", "staff_grant_role",
+      "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
+      "staff_report_context", "staff_report_stats", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
+      "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
+      "staff_user_sessions",
     ]);
   });
   it("protects admin-tier accounts, drops revoked roles at once and guards promotions of closed communities", async () => {
@@ -708,5 +712,136 @@ describe("Local PostgreSQL schema", () => {
       await Promise.allSettled([first.end(), second.end()]);
     }
     expect((await owner.query(`SELECT review_status FROM ${table("promotion_campaigns")} WHERE id=$1`, [campaign])).rows[0].review_status).toBe("pending");
+  });
+  it("serves admin insights: activity, engagement, retention, communities, users, reports and billing", async () => {
+    const admin = randomUUID(), moderator = randomUUID(), member = randomUUID(), adminToken = newTokenHash(), moderatorToken = newTokenHash();
+    const tenant = randomUUID(), community = randomUUID(), post = randomUUID(), comment = randomUUID(), report = randomUUID();
+    const freePlan = randomUUID(), proPlan = randomUUID(), monthly = randomUUID(), yearly = randomUUID(), customer = randomUUID();
+    const tenantB = randomUUID(), customerB = randomUUID(), subA = randomUUID(), subB = randomUUID(), subFree = randomUUID(), tenantFree = randomUUID();
+    const tenantPaused = randomUUID(), tenantTrial = randomUUID(), customerPaused = randomUUID(), customerTrial = randomUUID(), euro = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Insight admin'),($2,'Insight moderator'),($3,'Insight member')`, [admin, moderator, member]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'platform_admin',$1),($2,'content_moderator',$1)`, [admin, moderator]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$5),($3,$4,'password',$5)`, [admin, adminToken, moderator, moderatorToken, future()]);
+    // The member signed in today and twice three days ago; one session is revoked, one expired.
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,created_at,expires_at,revoked_at) VALUES
+      ($1,$2,'password',now(),now()+interval '1 day',NULL),
+      ($1,$3,'password',now()-interval '3 days',now()+interval '1 day',now()-interval '2 days'),
+      ($1,$4,'password',now()-interval '3 days',now()-interval '1 day',NULL)`, [member, newTokenHash(), newTokenHash(), newTokenHash()]);
+    await owner.query("BEGIN");
+    for (const [id, user] of [[tenant, member], [tenantB, member], [tenantFree, member], [tenantPaused, member], [tenantTrial, member]]) {
+      await owner.query(`INSERT INTO ${table("workspaces")} (id,slug,name,created_by_user_id) VALUES ($1::uuid,$1::text,'Insight workspace',$2)`, [id, user]);
+      await owner.query(`INSERT INTO ${table("workspace_memberships")} (tenant_id,user_id,role) VALUES ($1,$2,'owner')`, [id, user]);
+    }
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Insight Circle','Description','public',$3)`, [community, tenant, member]);
+    await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenant, community, member]);
+    await owner.query("COMMIT");
+    await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body,moderation_status) VALUES ($1,$2,$3,$4,'Insight post','Body','hidden')`, [post, tenant, community, member]);
+    await owner.query(`INSERT INTO ${table("post_comments")} (id,tenant_id,community_id,post_id,author_user_id,body) VALUES ($1,$2,$3,$4,$5,'Insight comment')`, [comment, tenant, community, post, member]);
+    await owner.query(`INSERT INTO ${table("content_reports")} (id,tenant_id,community_id,reporter_user_id,post_id,reason_code,status,resolved_at,created_at) VALUES ($1,$2,$3,$4,$5,'spam','resolved',now(),now()-interval '2 hours')`, [report, tenant, community, admin, post]);
+    // Billing: one monthly and one yearly paid subscription plus one free workspace.
+    await owner.query(`INSERT INTO ${table("subscription_plans")} (id,code,name,billing_kind) VALUES ($1,$3,'Free','free'),($2,$4,'Pro','paid')`, [freePlan, proPlan, `free-${freePlan}`, `pro-${proPlan}`]);
+    await owner.query(`INSERT INTO ${table("plan_prices")} (id,plan_id,currency,amount_minor,billing_interval,provider,provider_price_id) VALUES ($1,$3,'USD',2900,'month','demo',$4),($2,$3,'USD',120000,'year','demo',$5)`, [monthly, yearly, proPlan, `m-${monthly}`, `y-${yearly}`]);
+    await owner.query(`INSERT INTO ${table("billing_customers")} (id,tenant_id,provider,provider_customer_id) VALUES ($1,$2,'demo',$3),($4,$5,'demo',$6)`, [customer, tenant, `c-${customer}`, customerB, tenantB, `c-${customerB}`]);
+    await owner.query(`INSERT INTO ${table("subscriptions")} (id,tenant_id,billing_customer_id,plan_id,price_id,provider,provider_subscription_id,billing_kind,status,created_at) VALUES
+      ($1,$2,$3,$4,$5,'demo',$6,'paid','active',now()-interval '40 days'),
+      ($7,$8,$9,$4,$10,'demo',$11,'paid','active',now()-interval '10 days')`, [subA, tenant, customer, proPlan, monthly, `s-${subA}`, subB, tenantB, customerB, yearly, `s-${subB}`]);
+    await owner.query(`INSERT INTO ${table("subscriptions")} (id,tenant_id,plan_id,billing_kind,status) VALUES ($1,$2,$3,'free','active')`, [subFree, tenantFree, freePlan]);
+    // Not revenue: a paused subscription on a EUR price, and a trial cancelled before it ended.
+    await owner.query(`INSERT INTO ${table("plan_prices")} (id,plan_id,currency,amount_minor,billing_interval,provider,provider_price_id) VALUES ($1,$2,'EUR',5000,'month','demo',$3)`, [euro, proPlan, `e-${euro}`]);
+    await owner.query(`INSERT INTO ${table("billing_customers")} (id,tenant_id,provider,provider_customer_id) VALUES ($1,$2,'demo',$3),($4,$5,'demo',$6)`, [customerPaused, tenantPaused, `c-${customerPaused}`, customerTrial, tenantTrial, `c-${customerTrial}`]);
+    await owner.query(`INSERT INTO ${table("subscriptions")} (tenant_id,billing_customer_id,plan_id,price_id,provider,provider_subscription_id,billing_kind,status,created_at,trial_ends_at,cancelled_at) VALUES
+      ($1,$2,$3,$4,'demo',$5,'paid','paused',now()-interval '60 days',NULL,NULL),
+      ($6,$7,$3,$8,'demo',$9,'paid','cancelled',now()-interval '9 days',now()+interval '5 days',now()-interval '5 days')`,
+      [tenantPaused, customerPaused, proPlan, euro, `s-${tenantPaused}`, tenantTrial, customerTrial, monthly, `s-${tenantTrial}`]);
+    await owner.query(`INSERT INTO ${table("invoices")} (tenant_id,subscription_id,provider,provider_invoice_id,currency,subtotal_minor,total_minor,status,issued_at,paid_at) VALUES
+      ($1,$2,'demo',$3,'USD',2900,2900,'paid',now()-interval '5 days',now()-interval '5 days'),
+      ($1,$2,'demo',$4,'USD',2900,2900,'open',now()-interval '1 day',NULL)`, [tenant, subA, `i1-${subA}`, `i2-${subA}`]);
+    await owner.query(`INSERT INTO ${table("payment_events")} (provider,provider_event_id,tenant_id,payload,status) VALUES ('demo',$1,$2,'{}','failed')`, [`e-${subA}`, tenant]);
+
+    const call = (token: Buffer | null, sql: string, values: unknown[] = []) => asSession(token, sql, values).then((r) => r.rows);
+
+    // Activity series: one row per day, today last, with the member's sign-in, post and comment.
+    const series = await call(adminToken, `SELECT * FROM ${fn("staff_activity_series")}(7)`);
+    expect(series).toHaveLength(7);
+    const today = series[6];
+    expect(Number(today.sign_ins)).toBeGreaterThanOrEqual(1);
+    expect(Number(today.posts)).toBeGreaterThanOrEqual(1);
+    expect(Number(today.comments)).toBeGreaterThanOrEqual(1);
+    expect(Number(today.reports_closed)).toBeGreaterThanOrEqual(1);
+    expect(Number(series[3].sign_ins)).toBeGreaterThanOrEqual(2);
+    const totals = (await call(adminToken, `SELECT * FROM ${fn("staff_active_user_totals")}()`))[0];
+    expect(Number(totals.dau)).toBeGreaterThanOrEqual(1);
+    expect(Number(totals.mau)).toBeGreaterThanOrEqual(Number(totals.wau));
+    const heat = await call(adminToken, `SELECT * FROM ${fn("staff_engagement_heatmap")}(30)`);
+    expect(heat.every((row) => row.dow >= 1 && row.dow <= 7 && row.hour >= 0 && row.hour <= 23)).toBe(true);
+    const cohorts = await call(adminToken, `SELECT * FROM ${fn("staff_retention_cohorts")}(8)`);
+    expect(cohorts.some((row) => row.week_offset === 0 && Number(row.active_users) >= 1)).toBe(true);
+
+    // Bounds and roles.
+    for (const bad of [6, 366]) await expect(call(adminToken, `SELECT * FROM ${fn("staff_activity_series")}($1)`, [bad])).rejects.toMatchObject({ code: "22023" });
+    await expect(call(adminToken, `SELECT * FROM ${fn("staff_top_communities")}(30, 51)`)).rejects.toMatchObject({ code: "22023" });
+    for (const sql of [`SELECT * FROM ${fn("staff_activity_series")}(7)`, `SELECT * FROM ${fn("staff_billing_counts")}()`, `SELECT * FROM ${fn("staff_user_sessions")}($1, 5)`]) {
+      await expect(call(moderatorToken, sql, sql.includes("$1") ? [member] : [])).rejects.toMatchObject({ code: "42501" });
+      await expect(call(null, sql, sql.includes("$1") ? [member] : [])).rejects.toMatchObject({ code: "28000" });
+    }
+
+    // Communities.
+    const top = await call(adminToken, `SELECT * FROM ${fn("staff_top_communities")}(30, 50)`);
+    // The post is hidden, so only the visible comment counts towards community activity.
+    expect(top.find((row) => row.community_id === community)).toMatchObject({ posts: "0", comments: "1", contributors: "1" });
+    const [health] = await call(adminToken, `SELECT * FROM ${fn("staff_community_health")}($1::uuid[])`, [[community]]);
+    expect(health).toMatchObject({ members: "1", posts_30d: "0", comments_30d: "1", open_reports: "0" });
+    expect(health.weekly_activity).toHaveLength(8);
+    expect(Number(health.weekly_activity[7])).toBe(1);
+    const communitySeries = await call(adminToken, `SELECT * FROM ${fn("staff_community_series")}($1, 7)`, [community]);
+    expect(communitySeries).toHaveLength(7);
+    expect(communitySeries[6]).toMatchObject({ posts: "0", comments: "1", reports_opened: "1" });
+
+    // Users: activity, sessions without token hashes, and risk signals.
+    const userDays = await call(adminToken, `SELECT * FROM ${fn("staff_user_activity")}($1, 7)`, [member]);
+    expect(userDays[6]).toMatchObject({ sign_ins: "1", posts: "1", comments: "1" });
+    expect(userDays[3]).toMatchObject({ sign_ins: "2" });
+    const sessionRows = await asSession(adminToken, `SELECT * FROM ${fn("staff_user_sessions")}($1, 10)`, [member]);
+    expect(sessionRows.fields.map((field) => field.name)).toEqual(["id", "created_at", "last_seen_at", "expires_at", "auth_method", "state"]);
+    expect(sessionRows.rows.map((row) => row.state).sort()).toEqual(["active", "expired", "revoked"]);
+    const [risk] = await call(adminToken, `SELECT * FROM ${fn("staff_user_risk")}($1::uuid[])`, [[member]]);
+    expect(risk).toMatchObject({ hidden_posts: "1", hidden_comments: "0", reports_against: "1" });
+
+    // Reports.
+    const [context] = await call(moderatorToken, `SELECT * FROM ${fn("staff_report_context")}($1)`, [report]);
+    expect(context).toMatchObject({ author_id: member, author_name: "Insight member", author_reports: "1", author_hidden: "1" });
+    expect(await call(moderatorToken, `SELECT * FROM ${fn("staff_report_context")}($1)`, [randomUUID()])).toEqual([]);
+    const [stats] = await call(moderatorToken, `SELECT * FROM ${fn("staff_report_stats")}(30)`);
+    expect(Number(stats.closed)).toBeGreaterThanOrEqual(1);
+    expect(stats.median_hours_to_close).not.toBeNull();
+
+    // Billing: the yearly price counts as 120000 / 12 = 10000 per month.
+    const [counts] = await call(adminToken, `SELECT * FROM ${fn("staff_billing_counts")}()`);
+    // The trial cancelled before it ended never paid, so it is not a cancellation of a paying customer.
+    expect(counts).toMatchObject({ free_workspaces: "1", paying: "2", trialing: "0", past_due: "0", cancelled_30d: "0", new_paid_30d: "1", failed_payments_30d: "1" });
+    const revenue = await call(adminToken, `SELECT * FROM ${fn("staff_billing_revenue")}()`);
+    expect(revenue).toEqual([{ currency: "USD", mrr_minor: "12900", collected_30d_minor: "2900", open_minor: "2900", uncollectible_minor: "0" }]);
+    const mrrSeries = await call(adminToken, `SELECT * FROM ${fn("staff_billing_mrr_series")}(3)`);
+    // The chart counts the same subscriptions as the headline MRR: no paused EUR row, no trial churn.
+    expect(mrrSeries).toHaveLength(3);
+    expect(mrrSeries.every((row) => row.currency === "USD" && row.churned === "0")).toBe(true);
+    expect(mrrSeries[2]).toMatchObject({ currency: "USD", mrr_minor: "12900" });
+    const mix = await call(adminToken, `SELECT * FROM ${fn("staff_billing_plan_mix")}()`);
+    // One row per plan and currency, so amounts in different currencies are never added together.
+    expect(mix.find((row) => row.plan_code === `pro-${proPlan}` && row.currency === "USD")).toMatchObject({ subscriptions: "2", mrr_minor: "12900" });
+    expect(mix.find((row) => row.plan_code === `pro-${proPlan}` && row.currency === "EUR")).toMatchObject({ subscriptions: "1", mrr_minor: "0" });
+    expect(mix.find((row) => row.plan_code === `free-${freePlan}`)).toMatchObject({ subscriptions: "1", mrr_minor: "0" });
+    const subs = await call(adminToken, `SELECT * FROM ${fn("staff_list_subscriptions")}(NULL,NULL,NULL,NULL,2)`);
+    expect(subs).toHaveLength(2);
+    const nextSubs = await call(adminToken, `SELECT * FROM ${fn("staff_list_subscriptions")}(NULL,NULL,$1,$2,10)`, [subs[1].created_at, subs[1].id]);
+    expect(nextSubs.map((row) => row.id)).not.toContain(subs[0].id);
+    expect((await call(adminToken, `SELECT * FROM ${fn("staff_list_subscriptions")}('active',NULL,NULL,NULL,10)`)).every((row) => row.status === "active")).toBe(true);
+    expect((await call(adminToken, `SELECT * FROM ${fn("staff_list_subscriptions")}(NULL,'free',NULL,NULL,10)`)).every((row) => row.billing_kind === "free")).toBe(true);
+    await expect(call(adminToken, `SELECT * FROM ${fn("staff_list_subscriptions")}(NULL,'gold',NULL,NULL,10)`)).rejects.toMatchObject({ code: "22023" });
+    await expect(call(adminToken, `SELECT * FROM ${fn("staff_list_subscriptions")}('gone',NULL,NULL,NULL,10)`)).rejects.toMatchObject({ code: "22023" });
+    const invoices = await call(adminToken, `SELECT * FROM ${fn("staff_list_invoices")}('open',NULL,NULL,10)`);
+    expect(invoices).toHaveLength(1);
+    expect(invoices[0]).toMatchObject({ plan_name: "Pro", total_minor: "2900", status: "open" });
   });
 });

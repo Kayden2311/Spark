@@ -121,6 +121,83 @@ export function registerReportRoutes(app: FastifyInstance, guard: StaffGuard): v
     },
   );
 
+  // Queue health for the range: flow in and out, current backlog and median time to a decision.
+  app.get<{ Querystring: { days: number } }>(
+    "/api/v1/admin/reports/stats",
+    {
+      schema: {
+        querystring: { type: "object", properties: { days: { type: "integer", minimum: 7, maximum: 365, default: 30 } }, additionalProperties: false },
+        response: {
+          200: {
+            type: "object",
+            properties: { days: { type: "integer" }, opened: { type: "integer" }, closed: { type: "integer" }, backlog: { type: "integer" }, medianHoursToClose: { type: ["number", "null"] } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const staff = await guard.authorize(request, reply, CONTENT_STAFF);
+      if (!staff) return reply;
+      const row = await guard.run(request, reply, staff, async (client) =>
+        (await client.query<{ opened: string; closed: string; backlog: string; median_hours_to_close: string | null }>("SELECT * FROM spark.staff_report_stats($1)", [request.query.days])).rows[0]);
+      if (reply.sent) return reply;
+      return {
+        days: request.query.days,
+        opened: Number(row?.opened ?? 0),
+        closed: Number(row?.closed ?? 0),
+        backlog: Number(row?.backlog ?? 0),
+        medianHoursToClose: row?.median_hours_to_close === null || row?.median_hours_to_close === undefined ? null : Number(row.median_hours_to_close),
+      };
+    },
+  );
+
+  // Who wrote the reported content and how often their content has been reported or hidden before.
+  app.get<{ Params: { id: string } }>(
+    "/api/v1/admin/reports/:id/context",
+    {
+      schema: {
+        params: idParams,
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              author: {
+                anyOf: [
+                  {
+                    type: "object",
+                    properties: { id: { type: "string" }, displayName: { type: "string" }, status: { type: "string" }, joinedAt: { type: "string", format: "date-time" }, reportsAgainst: { type: "integer" }, hiddenContent: { type: "integer" } },
+                  },
+                  { type: "null" },
+                ],
+              },
+              communityOpenReports: { type: "integer" },
+              reporterReportsFiled: { type: "integer" },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const staff = await guard.authorize(request, reply, CONTENT_STAFF);
+      if (!staff) return reply;
+      const rows = await guard.run(request, reply, staff, async (client) =>
+        (await client.query<{ author_id: string | null; author_name: string; author_status: string; author_joined: Date; author_reports: string; author_hidden: string; community_open_reports: string; reporter_reports: string }>(
+          "SELECT * FROM spark.staff_report_context($1)",
+          [request.params.id],
+        )).rows);
+      if (reply.sent || !rows) return reply;
+      const row = rows[0];
+      if (!row) return problem(request, reply, 404, "Not Found", "report_not_found", "Report does not exist.");
+      return {
+        author: row.author_id
+          ? { id: row.author_id, displayName: row.author_name, status: row.author_status, joinedAt: row.author_joined.toISOString(), reportsAgainst: Number(row.author_reports), hiddenContent: Number(row.author_hidden) }
+          : null,
+        communityOpenReports: Number(row.community_open_reports),
+        reporterReportsFiled: Number(row.reporter_reports),
+      };
+    },
+  );
+
   app.post<{ Params: { id: string }; Body: { action: "hide" | "restore" | "dismiss"; reason: string } }>(
     "/api/v1/admin/reports/:id/actions",
     {

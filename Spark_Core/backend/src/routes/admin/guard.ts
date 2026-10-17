@@ -67,6 +67,10 @@ const KNOWN_INPUT_ERRORS = new Set([
   "Invalid campaign review",
   "Invalid community action",
   "Invalid user status",
+  "Invalid range",
+  "Invalid limit",
+  "Invalid subscription status",
+  "Invalid invoice status", "Invalid plan kind",
 ]);
 
 function invalidInputDetail(error: unknown): string {
@@ -120,7 +124,11 @@ export function createStaffGuard(pool: Pool): StaffGuard {
 
     async run(request, reply, staff, work) {
       try {
-        return await withSessionContext(pool, staff.tokenHash, work);
+        return await withSessionContext(pool, staff.tokenHash, async (client) => {
+          // Reporting queries scan months of activity; cap each one so a slow query cannot hold a pool connection.
+          await client.query("SET LOCAL statement_timeout = '15s'");
+          return work(client);
+        });
       } catch (error) {
         const denial = governanceError(error);
         if (denial === "no_session") {
