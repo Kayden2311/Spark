@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import Image from "next/image";
 
 import { HeroParticles } from "./hero-particles";
 import { SignalParticles } from "./signal-particles";
@@ -9,6 +9,7 @@ import { SparkWordmarkReveal } from "./spark-wordmark-reveal";
 import { LiveSignalFlow } from "./live-signal-flow";
 import { PathwayShowcase } from "./pathway-showcase";
 import { ProductShowcase } from "./product-showcase";
+import { TypingHeading } from "./typing-heading";
 
 
 function SparkMark() {
@@ -22,21 +23,6 @@ function PlayVideoIcon() {
       <polygon points="6 3 20 12 6 21 6 3" />
     </svg>
   );
-}
-
-const heroHeadline = "Turn scattered work into forward motion.";
-
-function HeroTypingHeadline() {
-  let characterIndex = 0;
-
-  return <h1 className="sparkTypingHeadline" aria-label={heroHeadline}>
-    {heroHeadline.split(" ").map((word, wordIndex) => <span className="heroTypingWord" aria-hidden="true" key={`${word}-${wordIndex}`}>
-      {Array.from(word).map((character) => {
-        const index = characterIndex++;
-        return <span className={wordIndex >= 4 ? "heroTypingCharacter heroTypingAccent" : "heroTypingCharacter"} key={`${character}-${index}`} style={{ "--character-index": index } as CSSProperties}>{character}</span>;
-      })}
-    </span>)}
-  </h1>;
 }
 
 function RadarIcons() {
@@ -108,7 +94,7 @@ export default function HomePage() {
       <div className="sparkHeroInner">
         <div className="sparkHeroCopy">
           <p className="sparkKicker heroKicker"><span className="heroKickerBrand" aria-label="Spark"><SparkMark /><span aria-hidden="true">Spark</span></span><span className="heroKickerLabel">Built for startup teams</span></p>
-          <HeroTypingHeadline />
+          <TypingHeading as="h1" accentFrom={25}>Turn scattered work into forward motion.</TypingHeading>
           <p className="sparkLead">Spark brings your startup community, member work, and shared schedule into one focused workspace, so every conversation has a clear next step.</p>
           <div className="sparkActions">
             <Link className="sparkPrimary" href="/signup">Start free today</Link>
@@ -117,16 +103,15 @@ export default function HomePage() {
           <div className="heroProof" aria-label="Product highlights"><span><b>01</b> One shared view</span><span><b>02</b> Clear ownership</span><span><b>03</b> Less status chasing</span></div>
         </div>
 
-        <aside className="sparkPreview" aria-label="Spark workspace preview">
-          <div className="previewRail"><span className="previewRailLogo"><SparkMark /></span><span className="railActive" /><span /><span /><span /><i>ML</i></div>
-          <div className="previewBody">
-            <div className="previewTop"><div><small>Northstar / Product</small><strong>Launch workspace</strong></div><button type="button" aria-label="More workspace options">•••</button></div>
-            <div className="previewStats"><div><span>Weekly progress</span><strong>68%</strong></div><div className="previewProgress"><i /></div></div>
-            <div className="previewColumns">
-              <section><header><span>To do</span><b>3</b></header><article><span className="previewTag blue">Product</span><strong>Finalize onboarding flow</strong><footer><i>DK</i><small>Today</small></footer></article><article><span className="previewTag orange">Growth</span><strong>Share launch update</strong><footer><i>ML</i><small>Fri</small></footer></article></section>
-              <section><header><span>In progress</span><b>2</b></header><article><span className="previewTag green">Research</span><strong>Founder interviews</strong><footer><i>HN</i><small>2 days</small></footer></article><article className="previewNote"><small>Next community session</small><strong>Product Circle · 14:00</strong></article></section>
-            </div>
-          </div>
+        <aside className="productHeroVisual" aria-label="A preview of the Spark workspace">
+          <Image
+            alt="A Spark workspace shown on a dark floating tablet"
+            className="productHeroImage"
+            fill
+            priority
+            sizes="(max-width: 760px) calc(100vw - 3rem), (max-width: 1100px) 45vw, 34rem"
+            src="/spark-product-hero.png"
+          />
         </aside>
       </div>
     </section>
@@ -142,12 +127,31 @@ export default function HomePage() {
 
     <PathwayShowcase />
 
+    <section className="founderCircleSection" aria-labelledby="founder-circle-heading">
+      <div className="founderCircleBanner">
+        <Image
+          alt="A Spark workspace dashboard shown on a floating tablet"
+          className="founderCircleImage"
+          fill
+          sizes="(max-width: 760px) 100vw, min(100vw - 3rem, 76rem)"
+          src="/spark-product-banner.png"
+        />
+        <div className="founderCircleShade" aria-hidden="true" />
+        <div className="founderCircleCopy">
+          <p className="sparkKicker">One shared operating view</p>
+          <TypingHeading id="founder-circle-heading">See the whole room. Move the right work.</TypingHeading>
+          <p>Bring conversations, priorities, and the next decision into the same focused workspace.</p>
+          <Link className="founderCircleLink" href="/workspace">See the workspace</Link>
+        </div>
+      </div>
+    </section>
+
     <ProductShowcase />
 
     <section className="workflowSection" id="workflow">
       <div className="workflowHeader">
         <p className="sparkKicker"><span />A lighter workflow</p>
-        <h2>From signal to done, without losing context.</h2>
+        <TypingHeading>From signal to done, without losing context.</TypingHeading>
         <p className="workflowSubtitle">Every step stays connected to the people and decisions behind it.</p>
       </div>
       <div className="workflowStepsGrid">
@@ -182,7 +186,7 @@ export default function HomePage() {
             <span className="ctaPulseDot" />
             Ready when you are
           </div>
-          <h2 id="cta-heading">Give your team one clear place to move forward.</h2>
+          <TypingHeading id="cta-heading">Make the next decision easier.</TypingHeading>
           <p className="ctaDescription">
             Join founders and builders using Spark to turn community conversations into owned tasks, scheduled moments, and real delivery momentum.
           </p>
@@ -206,6 +210,9 @@ export default function HomePage() {
     {/* Enterprise-Grade Multi-Column Footer */}
     <footer className="sparkFooter">
       <div className="footerInner">
+        <div className="footerSignal">
+          <p>Less noise. More momentum.</p>
+        </div>
         <div className="footerGrid">
           {/* Brand Column */}
           <div className="footerBrandCol">

@@ -1,291 +1,348 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+
 import { useAuth } from "./auth-context";
+import { TypingHeading } from "./typing-heading";
 
+type SceneId = "people" | "plan" | "next";
 
-function FeatureIcon({ type }: { type: "people" | "board" | "calendar" }) {
+const SCENE_SECONDS = 7;
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+function subscribeReducedMotion(onChange: () => void) {
+  const query = window.matchMedia?.(REDUCED_MOTION);
+  query?.addEventListener("change", onChange);
+  return () => query?.removeEventListener("change", onChange);
+}
+
+function usePrefersReducedMotion() {
+  return useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia?.(REDUCED_MOTION).matches ?? false, () => false);
+}
+
+function SceneIcon({ type }: { type: SceneId }) {
   if (type === "people") {
     return (
-      <svg aria-hidden="true" className="productFeatureIcon" viewBox="0 0 24 24">
+      <svg aria-hidden="true" viewBox="0 0 24 24">
         <circle cx="8" cy="8" r="3" />
         <circle cx="17" cy="9" r="2.5" />
         <path d="M2.5 21c.5-4 2.3-6 5.5-6s5 2 5.5 6M14 16c3.7-.4 6 1.3 6.5 5" />
       </svg>
     );
   }
-  if (type === "board") {
+  if (type === "plan") {
     return (
-      <svg aria-hidden="true" className="productFeatureIcon" viewBox="0 0 24 24">
+      <svg aria-hidden="true" viewBox="0 0 24 24">
         <rect x="3" y="3" width="18" height="18" rx="2" />
-        <path d="M9 3v18M15 3v18M5.5 7h1M11.5 9h1M17.5 6h1" />
+        <path d="M9 3v18M15 3v18" />
       </svg>
     );
   }
   return (
-    <svg aria-hidden="true" className="productFeatureIcon" viewBox="0 0 24 24">
+    <svg aria-hidden="true" viewBox="0 0 24 24">
       <rect x="3" y="5" width="18" height="16" rx="2" />
-      <path d="M7 3v4M17 3v4M3 10h18M7 14h3M14 14h3M7 17h3" />
+      <path d="M7 3v4M17 3v4M3 10h18" />
     </svg>
+  );
+}
+
+function PointerIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M9 4v10.5l-2.2-2.2a1.6 1.6 0 0 0-2.3 2.3L9.6 20h8.2l1.2-6.4a2 2 0 0 0-1.6-2.3L13 10.5V4a2 2 0 0 0-4 0Z" />
+    </svg>
+  );
+}
+
+function PeopleScene({ onInteract }: { onInteract: () => void }) {
+  const [requested, setRequested] = useState(false);
+  return (
+    <div className="stageScene">
+      <Image alt="" className="stagePhoto" fill sizes="(max-width: 900px) 100vw, 46rem" src="/spark-community-discussion.png" />
+      <div className="stagePhotoShade" />
+      <div className="stageGlass stageCircleCard">
+        <div className="stageCircleTop">
+          <span className="stageCircleMark">NF</span>
+          <div>
+            <strong>Northstar Founders</strong>
+            <span>B2B SaaS · Ho Chi Minh City · Seed</span>
+          </div>
+        </div>
+        <div className="stageCircleStats">
+          <span><b>186</b> members</span>
+          <span><b>42</b> posts this week</span>
+        </div>
+        <button
+          className={`stageAction${requested ? " stageActionDone" : ""}`}
+          onClick={() => { setRequested((value) => !value); onInteract(); }}
+          type="button"
+        >
+          {requested ? "✓ Request sent" : "Request to join"}
+        </button>
+      </div>
+      <div className="stageGlass stageProfileCard">
+        <span className="stageAvatarLg tone-amber">TL</span>
+        <div>
+          <strong>Thu Le</strong>
+          <span>Looking for a technical co-founder</span>
+        </div>
+      </div>
+      {requested && (
+        <div className="stageToast" role="status">
+          <span className="stageToastCheck">✓</span> The owner of Northstar Founders will review your request.
+        </div>
+      )}
+    </div>
+  );
+}
+
+const COLUMNS = ["To do", "In progress", "Done"] as const;
+const INITIAL_TASKS = [
+  { id: 1, tag: "Research", tone: "green", title: "Interview 5 founders", who: "HN", column: 0 },
+  { id: 2, tag: "Design", tone: "violet", title: "Sketch onboarding flow", who: "TL", column: 0 },
+  { id: 3, tag: "Growth", tone: "amber", title: "Launch community page", who: "ML", column: 1 },
+  { id: 4, tag: "P0", tone: "blue", title: "Ship session security", who: "DK", column: 2 },
+];
+
+function PlanScene({ onInteract }: { onInteract: () => void }) {
+  const [tasks, setTasks] = useState(INITIAL_TASKS);
+  const done = tasks.filter((task) => task.column === 2).length;
+  const advance = (id: number) => {
+    setTasks((current) => current.map((task) => (task.id === id ? { ...task, column: (task.column + 1) % COLUMNS.length } : task)));
+    onInteract();
+  };
+  return (
+    <div className="stageScene">
+      <Image alt="" className="stagePhoto stagePhotoMuted" fill sizes="(max-width: 900px) 100vw, 46rem" src="/spark-builder-circle.png" />
+      <div className="stagePhotoShade stagePhotoShadeStrong" />
+      <div className="stagePlanBody">
+        <div className="stageBoardHeader">
+          <div>
+            <strong>Sprint Alpha</strong>
+            <span>{done} of {tasks.length} done · click a card to move it</span>
+          </div>
+          <div className="stageProgress">
+            <span className="stageProgressFill" style={{ width: `${(done / tasks.length) * 100}%` }} />
+          </div>
+        </div>
+        <div className="stageBoard">
+          {COLUMNS.map((column, columnIndex) => (
+            <div className="stageColumn" key={column}>
+              <p>{column}</p>
+              {tasks.filter((task) => task.column === columnIndex).map((task) => (
+                <button
+                  aria-label={`${task.title}, ${column}. Move to ${COLUMNS[(columnIndex + 1) % COLUMNS.length]}`}
+                  className={`stageTask${columnIndex === 2 ? " stageTaskDone" : ""}`}
+                  key={task.id}
+                  onClick={() => advance(task.id)}
+                  type="button"
+                >
+                  <span className={`stageTag tone-${task.tone}`}>{task.tag}</span>
+                  <strong>{task.title}</strong>
+                  <i className="stageTaskOwner">{task.who}</i>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NextScene({ onInteract }: { onInteract: () => void }) {
+  const [joined, setJoined] = useState(false);
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  return (
+    <div className="stageScene">
+      <Image alt="" className="stagePhoto stagePhotoBanner" fill sizes="(max-width: 900px) 100vw, 46rem" src="/spark-product-banner.png" />
+      <div className="stagePhotoShade stagePhotoShadeSide" />
+      <div className="stageCalendar">
+        <div className="stageCalendarHeader">
+          <strong>This week</strong>
+          <span>3 sessions · 1 milestone</span>
+        </div>
+        <div className="stageWeek">
+          {days.map((day, index) => (
+            <div className={`stageDay${index === 2 ? " stageDayToday" : ""}`} key={day}>
+              <span>{day}</span>
+              {index === 0 && <i className="stageSlot tone-blue">Standup</i>}
+              {index === 2 && <i className="stageSlot stageSlotLive">Founder demo</i>}
+              {index === 3 && <i className="stageSlot tone-violet">Mentor sync</i>}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="stageGlass stageEventCard">
+        <span className="stageLive"><span /> Starting in 15 min</span>
+        <strong>Founder demo &amp; architecture review</strong>
+        <div className="stageEventFooter">
+          <div className="stageAvatarStack">
+            <i className="tone-blue">ML</i>
+            <i className="tone-violet">DK</i>
+            <i className="tone-green">HN</i>
+            {joined && <i className="tone-amber">You</i>}
+            <b>+5</b>
+          </div>
+          <button
+            className={`stageAction stageActionSmall${joined ? " stageActionDone" : ""}`}
+            onClick={() => { setJoined((value) => !value); onInteract(); }}
+            type="button"
+          >
+            {joined ? "✓ You're in" : "Join session"}
+          </button>
+        </div>
+      </div>
+      <div className="stageGlass stageMilestone">
+        <svg aria-hidden="true" viewBox="0 0 44 44">
+          <circle className="stageRingTrack" cx="22" cy="22" r="18" />
+          <circle className="stageRingValue" cx="22" cy="22" r="18" />
+        </svg>
+        <div>
+          <span>Next milestone</span>
+          <strong>Public beta · 3 days</strong>
+        </div>
+      </div>
+    </div>
   );
 }
 
 export function ProductShowcase() {
   const { isAuthenticated } = useAuth();
-  const [activeMember, setActiveMember] = useState<number>(0);
-  const [tasks, setTasks] = useState([
-    { id: 1, title: "Finalize Auth & Session Tokens", tag: "P0", tagType: "blue", assignee: "DK", done: true },
-    { id: 2, title: "Run 5 Founder Testing Interviews", tag: "Research", tagType: "green", assignee: "HN", done: false },
-    { id: 3, title: "Launch Community Showcase", tag: "Growth", tagType: "orange", assignee: "ML", done: false },
-  ]);
+  const [active, setActive] = useState<SceneId>("people");
+  const [autoplayChoice, setAutoplay] = useState(true);
+  const reducedMotion = usePrefersReducedMotion();
+  const autoplay = autoplayChoice && !reducedMotion;
+  const [hovering, setHovering] = useState(false);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  const toggleTask = (id: number) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t))
-    );
-  };
-
-  const members = [
+  const scenes: Array<{ id: SceneId; label: string; title: string; summary: string; cta: string; href: string }> = [
     {
-      name: "Mai Linh",
-      role: "Founder · Fintech",
-      avatar: "ML",
-      avatarBg: "blue",
-      task: "Setting up Seed round pitch & cap table",
-      tags: ["Fintech", "Seed", "Next.js"],
-      pos: { top: "16%", left: "10%" },
+      id: "people",
+      label: "The people",
+      title: "Find the minds that unblock the work",
+      summary: "Discover circles by stage and city, then ask to join in one step.",
+      cta: "Explore communities",
+      href: "/communities",
     },
     {
-      name: "Diep Khanh",
-      role: "Product · SaaS",
-      avatar: "DK",
-      avatarBg: "indigo",
-      task: "Building Fastify REST & Session backend",
-      tags: ["TypeScript", "Fastify", "Postgres"],
-      pos: { top: "54%", left: "56%" },
+      id: "plan",
+      label: "The plan",
+      title: "Keep momentum visible",
+      summary: "One light board with clear owners. No ceremony.",
+      cta: "Open boards",
+      href: isAuthenticated ? "/workspace" : "/login?redirect=/workspace",
     },
     {
-      name: "Hai Nguyen",
-      role: "Growth · Climate",
-      avatar: "HN",
-      avatarBg: "emerald",
-      task: "Coordinating Beta Cohort on-boarding",
-      tags: ["Growth", "Community", "Analytics"],
-      pos: { top: "24%", left: "62%" },
+      id: "next",
+      label: "The next move",
+      title: "Make time match the work",
+      summary: "Syncs and milestones live next to the work they move.",
+      cta: "View schedule",
+      href: "/schedule",
     },
   ];
+  const activeIndex = scenes.findIndex((scene) => scene.id === active);
+  const current = scenes[activeIndex] ?? scenes[0]!;
+  const running = autoplay && !hovering;
+
+  const select = (id: SceneId) => {
+    setActive(id);
+    setAutoplay(false);
+  };
+  const stopAutoplay = () => setAutoplay(false);
+  const showNext = () => setActive(scenes[(activeIndex + 1) % scenes.length]!.id);
+
+  const onTabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const offset = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 0;
+    if (!offset) return;
+    event.preventDefault();
+    const next = (index + offset + scenes.length) % scenes.length;
+    select(scenes[next]!.id);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
     <section className="productShowcaseSection" id="product" aria-labelledby="product-title">
-      {/* Background ambient lighting */}
-      <div className="productAtmosphereGlow" aria-hidden="true" />
-
       <div className="productShowcaseInner">
-        {/* Section Header */}
         <div className="productSectionHeader">
-          <div className="sparkKicker productKicker">
-            <span className="productPulseDot" />
-            Everything in context
-          </div>
-          <h2 id="product-title">The people, the plan, and the next move.</h2>
-          <p className="productSectionSubtitle">
-            Replace fragmented chats and status chasing with one unified operating system for community activity, sprint momentum, and milestone execution.
-          </p>
+          <p className="sparkKicker"><span />Everything in context</p>
+          <TypingHeading id="product-title">The people, the plan, and the next move.</TypingHeading>
         </div>
 
-        {/* Bento Grid */}
-        <div className="productBentoGrid">
-          {/* Bento Card 1: The People (Community & Networks) */}
-          <article className="bentoCard bentoCardPeople">
-            <div className="bentoCopy">
-              <div className="bentoIndexHeader">
-                <FeatureIcon type="people" />
-                <span className="bentoBadge">01 / The People</span>
-              </div>
-              <h3>Connect the minds that unblock the work.</h3>
-              <p>
-                Discover startup communities and trusted collaborators by stage, tech stack, and location. Turn casual discussions directly into shared milestones.
-              </p>
-              <div className="bentoFeatureHighlights">
-                <span>✓ Matched by stage & tech stack</span>
-                <span>✓ Verified founder network</span>
-              </div>
-              <Link className="bentoBoxButton bentoBoxButtonBlue" href="/communities">
-                Explore directory
-              </Link>
-            </div>
-
-            {/* Interactive Network Graph Visual (Zero Clipping Docked Layout) */}
-            <div className="bentoVisual bentoVisualNetwork" aria-hidden="true">
-              <div className="networkHudHeader">
-                <span>Live Circle Hub</span>
-                <span className="liveStatusPill"><i /> 3 active founders</span>
-              </div>
-
-              {/* Connecting Interactive Node Graph */}
-              <div className="networkGraphStage">
-                <svg className="networkSvgWires" viewBox="0 0 360 120">
-                  <line x1="60" y1="55" x2="180" y2="35" className="networkWire" />
-                  <line x1="180" y1="35" x2="300" y2="60" className="networkWire" />
-                  <line x1="60" y1="55" x2="300" y2="60" className="networkWire" />
-                  <circle cx="60" cy="55" r="3" className="wirePulseNode wirePulse1" />
-                  <circle cx="180" cy="35" r="3" className="wirePulseNode wirePulse2" />
-                  <circle cx="300" cy="60" r="3" className="wirePulseNode wirePulse3" />
-                </svg>
-
-                <div className="networkNodesRow">
-                  {members.map((m, idx) => (
-                    <button
-                      key={m.name}
-                      type="button"
-                      className={`memberInteractiveNode ${idx === activeMember ? "active" : ""}`}
-                      onClick={() => setActiveMember(idx)}
-                      onMouseEnter={() => setActiveMember(idx)}
-                      aria-label={`Select ${m.name}`}
-                    >
-                      <span className={`memberAvatarNode ${m.avatarBg}`}>
-                        {m.avatar}
-                      </span>
-                      <span className="memberNamePill">{m.name.split(" ")[0]}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Docked Active Member Info Card (Never Clipped) */}
-              <div className="dockedMemberCard">
-                <div className="dockedMemberTop">
-                  <div className="dockedMemberIdentity">
-                    <strong>{members[activeMember].name}</strong>
-                    <small>{members[activeMember].role}</small>
-                  </div>
-                  <span className="dockedTaskBadge">Active task</span>
-                </div>
-                <p className="dockedTaskSnippet">{members[activeMember].task}</p>
-                <div className="dockedSkillTags">
-                  {members[activeMember].tags.map((t) => (
-                    <span key={t}>{t}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </article>
-
-          {/* Bento Card 2: The Plan (Projects & Boards) */}
-          <article className="bentoCard bentoCardPlan">
-            <div className="bentoCopy">
-              <div className="bentoIndexHeader">
-                <FeatureIcon type="board" />
-                <span className="bentoBadge">02 / The Plan</span>
-              </div>
-              <h3>Keep momentum visible.</h3>
-              <p>
-                A high-speed Kanban board without Jira ceremony. Priorities, assignees, and real-time progress stay completely transparent.
-              </p>
-              <div className="bentoFeatureHighlights">
-                <span>✓ Custom sprint velocity</span>
-                <span>✓ Zero setup ceremony</span>
-              </div>
-              <Link
-                className="bentoBoxButton bentoBoxButtonDark"
-                href={isAuthenticated ? "/workspace" : "/login?redirect=/workspace"}
+        <div
+          className="productStage"
+          onBlur={() => setHovering(false)}
+          onFocus={() => setHovering(true)}
+          onMouseEnter={() => setHovering(true)}
+          onMouseLeave={() => setHovering(false)}
+        >
+          <div className="productTabs" role="tablist" aria-label="Spark capabilities" aria-orientation="vertical">
+            {scenes.map((scene, index) => (
+              <button
+                aria-controls="product-stage-panel"
+                aria-selected={scene.id === active}
+                className="productTab"
+                id={`product-tab-${scene.id}`}
+                key={scene.id}
+                onClick={() => select(scene.id)}
+                onKeyDown={(event) => onTabKey(event, index)}
+                ref={(element) => { tabRefs.current[index] = element; }}
+                role="tab"
+                tabIndex={scene.id === active ? 0 : -1}
+                type="button"
               >
-                Open boards
-              </Link>
-            </div>
-
-            {/* Interactive Mini Board Visual */}
-            <div className="bentoVisual bentoVisualBoard">
-              <div className="boardMiniHeader">
-                <div>
-                  <span className="boardTitle">Sprint Alpha</span>
-                  <span className="boardProgressCount">
-                    {tasks.filter((t) => t.done).length}/{tasks.length} Completed
+                <span className="productTabIcon"><SceneIcon type={scene.id} /></span>
+                <span className="productTabText">
+                  <span className="productTabLabel">0{index + 1} · {scene.label}</span>
+                  <strong>{scene.title}</strong>
+                  <span className="productTabSummary">{scene.summary}</span>
+                </span>
+                {scene.id === active && autoplay && (
+                  <span aria-hidden="true" className="productTabTimer">
+                    <span
+                      className="productTabTimerFill"
+                      data-running={running}
+                      key={active}
+                      onAnimationEnd={showNext}
+                      style={{ animationDuration: `${SCENE_SECONDS}s` }}
+                    />
                   </span>
-                </div>
-                <div className="boardProgressBar">
-                  <span
-                    style={{
-                      width: `${(tasks.filter((t) => t.done).length / tasks.length) * 100}%`,
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="boardTaskList">
-                {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={`boardTaskItem ${task.done ? "taskDone" : ""}`}
-                    onClick={() => toggleTask(task.id)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => e.key === "Enter" && toggleTask(task.id)}
-                  >
-                    <span className={`taskCheckDot ${task.done ? "checked" : ""}`} />
-                    <div className="taskItemBody">
-                      <div className="taskItemTop">
-                        <span className={`taskTag ${task.tagType}`}>{task.tag}</span>
-                        <span className="taskAssignee">{task.assignee}</span>
-                      </div>
-                      <strong>{task.title}</strong>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </article>
-
-          {/* Bento Card 3: The Next Move (Schedule & Delivery) */}
-          <article className="bentoCard bentoCardNext">
-            <div className="bentoCopy">
-              <div className="bentoIndexHeader">
-                <FeatureIcon type="calendar" />
-                <span className="bentoBadge">03 / The Next Move</span>
-              </div>
-              <h3>Make time match the work.</h3>
-              <p>
-                Coordinate syncs, milestone reviews, and delivery targets directly inside the shared context of your circle.
-              </p>
-              <div className="bentoFeatureHighlights">
-                <span>✓ 2-way Google & iCal sync</span>
-                <span>✓ Milestone countdown</span>
-              </div>
-              <Link className="bentoBoxButton bentoBoxButtonIndigo" href="/schedule">
-                View schedule
+                )}
+              </button>
+            ))}
+            <div className="productTabsFooter">
+              <Link className="productStageCta" href={current.href}>
+                {current.cta}
               </Link>
+              <button
+                aria-label={autoplay ? "Pause the tour" : "Play the tour"}
+                aria-pressed={!autoplay}
+                className="productAutoplay"
+                onClick={() => setAutoplay(!autoplay)}
+                type="button"
+              >
+                {autoplay ? "❚❚" : "▶"}
+              </button>
             </div>
+          </div>
 
-            {/* Interactive Schedule & Milestone Visual */}
-            <div className="bentoVisual bentoVisualSchedule">
-              <div className="scheduleHighlightCard">
-                <div className="scheduleTopRow">
-                  <span className="schedulePillLive">
-                    <span className="scheduleBlinkDot" /> Next Circle
-                  </span>
-                  <time className="scheduleTime">14:00 Today</time>
-                </div>
-                <strong>Founder Demo & Architecture Review</strong>
-                <div className="scheduleAttendees">
-                  <div className="attendeeAvatars">
-                    <span className="avatarSm blue">ML</span>
-                    <span className="avatarSm indigo">DK</span>
-                    <span className="avatarSm emerald">HN</span>
-                  </div>
-                  <span className="attendeeCount">+5 attending</span>
-                </div>
-              </div>
-
-              <div className="milestoneMiniCard">
-                <div className="milestoneMeta">
-                  <span>Target Release</span>
-                  <strong>v1.0 Public Beta</strong>
-                </div>
-                <div className="milestoneStatusBadge">3 days left</div>
-              </div>
+          <div
+            aria-labelledby={`product-tab-${active}`}
+            className="productStageView"
+            id="product-stage-panel"
+            role="tabpanel"
+          >
+            <span className="productTryHint"><PointerIcon /> Try it</span>
+            <div className="productSceneSlot" data-active={active === "people"} inert={active !== "people"}><PeopleScene onInteract={stopAutoplay} /></div>
+            <div className="productSceneSlot" data-active={active === "plan"} inert={active !== "plan"}><PlanScene onInteract={stopAutoplay} /></div>
+            <div className="productSceneSlot" data-active={active === "next"} inert={active !== "next"}><NextScene onInteract={stopAutoplay} /></div>
+            <div className="productStageDots" aria-hidden="true">
+              {scenes.map((scene) => <span data-active={scene.id === active} key={scene.id} />)}
             </div>
-          </article>
+          </div>
         </div>
       </div>
     </section>
