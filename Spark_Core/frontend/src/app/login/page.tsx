@@ -6,14 +6,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useAuth } from "../auth-context";
 import { safeRedirect } from "../safe-redirect";
 import { HeroParticles } from "../hero-particles";
+import { SparkLogo as SparkMark } from "../brand/spark-logo";
 
-function SparkMark() {
-  return (
-    <svg aria-hidden="true" className="sparkMark" viewBox="0 0 48 48">
-      <path className="sparkBolt" d="M27 2 8 27h13l-2 19 21-27H27z" />
-    </svg>
-  );
-}
 
 function GitHubIcon() {
   return (

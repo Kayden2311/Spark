@@ -15,6 +15,7 @@ import { isStaff, sectionForPath, visibleSections, type SectionId } from "./_lib
 import { adminFont } from "./_lib/font";
 import { ROLE_LABELS } from "./_lib/format";
 import type { Overview, PlatformRole } from "./_lib/types";
+import { SparkLogo as SparkMark } from "../brand/spark-logo";
 
 const SECTION_ICONS: Record<SectionId, ReactNode> = {
   overview: <OverviewIcon />,
@@ -37,13 +38,6 @@ function badgeFor(section: SectionId, overview: Overview | null): number | null 
   return null;
 }
 
-function SparkMark() {
-  return (
-    <svg aria-hidden="true" className="sparkMark" viewBox="0 0 48 48">
-      <path className="sparkBolt" d="M27 2 8 27h13l-2 19 21-27H27z" />
-    </svg>
-  );
-}
 
 const RAIL_KEY = "spark.admin.sidebar";
 
@@ -95,7 +89,7 @@ function Sidebar({ open, collapsed, onNavigate, onToggle }: { open: boolean; col
     <aside className="admSidebar" data-open={open} id="admin-navigation">
       <div className="admBrandRow">
         <Link aria-label="Spark admin console, overview" className="admBrand" href="/admin" onClick={onNavigate}>
-          <span className="admBrandMark"><SparkMark /></span>
+          <span className="admBrandMark"><SparkMark tone="dark" /></span>
           <span className="admBrandText">
             <strong>Spark</strong>
             <span>Admin console</span>

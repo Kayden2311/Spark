@@ -4,14 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useAuth } from "./auth-context";
+import { SparkLogo as SparkMark } from "./brand/spark-logo";
 
-function SparkMark() {
-  return (
-    <svg aria-hidden="true" className="sparkMark" viewBox="0 0 48 48" style={{ width: "1.4rem", height: "1.4rem" }}>
-      <path className="sparkBolt" d="M27 2 8 27h13l-2 19 21-27H27z" fill="#38bdf8" />
-    </svg>
-  );
-}
 
 const navigation = [
   ["Board", "/workspace"],
@@ -53,7 +47,7 @@ export function WorkspaceShell({ children, current }: { children: ReactNode; cur
       <a className="skipLink workspaceSkip" href="#workspace-main">Skip to content</a>
       <aside className="sidebar">
         <Link className="brand sidebarBrand" href="/">
-          <SparkMark />
+          <SparkMark tone="dark" />
           <span>Spark</span>
         </Link>
         <div className="workspacePicker">

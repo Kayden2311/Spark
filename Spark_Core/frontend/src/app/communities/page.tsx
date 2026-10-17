@@ -10,14 +10,8 @@ import { CommunityCard } from "./community-card";
 import { communitySummaries } from "./community-summaries";
 import { formatCount, formatEventDate } from "./format";
 import type { CommunityCategory } from "./types";
+import { SparkLogo as SparkMark } from "../brand/spark-logo";
 
-function SparkMark() {
-  return (
-    <svg aria-hidden="true" className="sparkMark" viewBox="0 0 48 48">
-      <path className="sparkBolt" d="M27 2 8 27h13l-2 19 21-27H27z" />
-    </svg>
-  );
-}
 
 function SearchIcon() {
   return (
@@ -260,7 +254,7 @@ export default function CommunitiesPage() {
             {/* Brand Column */}
             <div className="footerBrandCol">
               <Link className="sparkBrand footerBrand" href="/" aria-label="Spark home">
-                <SparkMark />
+                <SparkMark tone="dark" />
                 <span>Spark</span>
               </Link>
               <p className="footerTagline">

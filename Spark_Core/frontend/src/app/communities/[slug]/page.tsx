@@ -2,14 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SignalParticles } from "../../signal-particles";
 import { communities, type Community } from "../mock-data";
+import { SparkLogo as SparkMark } from "../../brand/spark-logo";
 
-function SparkMark() {
-  return (
-    <svg aria-hidden="true" className="sparkMark" viewBox="0 0 48 48">
-      <path className="sparkBolt" d="M27 2 8 27h13l-2 19 21-27H27z" />
-    </svg>
-  );
-}
 
 function VerifiedBadgeIcon() {
   return (
@@ -365,7 +359,7 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
           <div className="footerGrid">
             <div className="footerBrandCol">
               <Link className="sparkBrand footerBrand" href="/" aria-label="Spark home">
-                <SparkMark />
+                <SparkMark tone="dark" />
                 <span>Spark</span>
               </Link>
               <p className="footerTagline">

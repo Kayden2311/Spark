@@ -265,8 +265,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 .sparkHeader { display: grid; width: min(100% - 3rem, 76rem); min-height: 5rem; grid-template-columns: 1fr auto 1fr; align-items: center; margin: auto; border-bottom: 1px solid var(--landing-line); }
 .sparkBrand { display: inline-flex; width: max-content; align-items: center; gap: .55rem; font-size: 1.2rem; font-weight: 750; letter-spacing: -.04em; }
-.sparkMark { width: 1.7rem; height: 1.7rem; }
-.sparkBolt { fill: var(--landing-blue); }
+.sparkMark { width: 1.9rem; height: 1.9rem; flex: none; }
 .sparkHeader nav { display: flex; align-items: center; gap: 2rem; color: var(--landing-muted); font-size: .86rem; font-weight: 600; }
 .sparkHeader nav a, .headerActions > a:first-child, .sparkFooter a { transition: color .18s ease; }
 .sparkHeader nav a:hover, .headerActions > a:first-child:hover, .sparkFooter a:hover { color: var(--landing-blue); }
@@ -1919,9 +1918,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 
 .authBrandBolt svg,
 .loginBrandBolt svg {
-  width: 1.25rem;
-  height: 1.25rem;
-  fill: #2563eb;
+  width: 1.7rem;
+  height: 1.7rem;
 }
 
 .authBrandName,
