@@ -32,8 +32,9 @@ async function toError(response: Response): Promise<ApiError> {
   } catch {
     // Non-JSON error body: fall back to a status-based message.
   }
-  // Server-side detail is written for people, except generic 5xx text, which we replace.
-  const message = response.status >= 500 || !detail ? FALLBACK_MESSAGES[response.status] ?? "Something went wrong on our side. Try again in a moment." : detail;
+  // Server-side detail is written for people, except generic 5xx text, which we replace. The API's own
+  // "database unavailable" explanation is kept, because it says exactly what is wrong.
+  const message = (response.status >= 500 && code !== "database_unavailable") || !detail ? FALLBACK_MESSAGES[response.status] ?? "Something went wrong on our side. Try again in a moment." : detail;
   return new ApiError(response.status, code, message);
 }
 

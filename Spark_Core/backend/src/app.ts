@@ -14,6 +14,7 @@ import { registerCredentialRoutes } from "./routes/auth-credentials.js";
 import { registerAuthProxyRoutes } from "./routes/auth-proxy.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoute } from "./routes/health.js";
+import { RequestMetrics } from "./infrastructure/metrics.js";
 
 export interface BuildAppOptions {
   readonly config: AppConfig;
@@ -24,6 +25,8 @@ export interface BuildAppOptions {
   readonly logger?: boolean;
   /** Overrides fetch for the auth-service forwarding routes (tests). */
   readonly fetchImpl?: typeof fetch;
+  /** Request metrics shown on the admin system health page; one is created when omitted. */
+  readonly metrics?: RequestMetrics;
 }
 
 export interface BuildAuthAppOptions {
@@ -201,11 +204,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     rateLimit: options.rateLimit,
     logger: options.logger,
   });
+  const metrics = options.metrics ?? new RequestMetrics();
+  // Route patterns, not raw URLs, so ids in paths do not create one entry per item.
+  app.addHook("onResponse", async (request, reply) => {
+    metrics.record(request.method, request.routeOptions.url ?? "unmatched", reply.statusCode, reply.elapsedTime);
+  });
+  app.addHook("onClose", async () => metrics.close());
   registerOriginGuard(app, config.corsOrigins);
   registerAuthProxyRoutes(app, { authServiceUrl: config.authServiceUrl, fetchImpl: options.fetchImpl });
   if (options.pool) {
     registerAuthRoutes(app, { pool: options.pool });
-    registerAdminRoutes(app, { pool: options.pool });
+    registerAdminRoutes(app, { pool: options.pool, redis: options.redis, metrics });
   }
   return app;
 }

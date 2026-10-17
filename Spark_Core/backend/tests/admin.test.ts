@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import { encodeCursor } from "../src/routes/pagination.js";
-import { fakePool, principalRow, type QueryHandler } from "./fake-pool.js";
+import { dbError, fakePool, principalRow, type QueryHandler } from "./fake-pool.js";
 
 const config = loadConfig({ NODE_ENV: "test" });
 const cookie = "spark_session=staff-token";
@@ -33,6 +33,7 @@ const ROUTES: Array<{ method: "GET" | "POST" | "PATCH" | "DELETE"; url: string; 
   // Open to every platform role; only a signed-in user without one is denied.
   { method: "GET", url: "/api/v1/admin/overview", allowed: [] },
   { method: "GET", url: "/api/v1/admin/system", allowed: ["platform_admin"] },
+  { method: "GET", url: "/api/v1/admin/system/health", allowed: ["platform_admin"] },
   { method: "GET", url: "/api/v1/admin/reports", allowed: ["content_moderator"] },
   { method: "GET", url: `/api/v1/admin/reports/${target}`, allowed: ["content_moderator"] },
   { method: "POST", url: `/api/v1/admin/reports/${target}/actions`, payload: { action: "hide", reason }, allowed: ["content_moderator"] },
@@ -60,6 +61,7 @@ const ROUTES: Array<{ method: "GET" | "POST" | "PATCH" | "DELETE"; url: string; 
   { method: "GET", url: `/api/v1/admin/users/${target}/sessions`, allowed: ["platform_admin"] },
   { method: "GET", url: "/api/v1/admin/reports/stats", allowed: ["content_moderator"] },
   { method: "GET", url: `/api/v1/admin/reports/${target}/context`, allowed: ["content_moderator"] },
+  { method: "GET", url: `/api/v1/admin/reports/${target}/preview`, allowed: ["content_moderator"] },
 ];
 
 // A role outside each route's allowed set, chosen so every route has a meaningful denial.
@@ -328,5 +330,93 @@ describe("admin insight routes", () => {
     ]);
     expect(JSON.stringify(response.json())).not.toContain("secret");
     expect(Object.keys(response.json().items[0]).sort()).toEqual(["createdAt", "expiresAt", "id", "lastSeenAt", "method", "state"]);
+  });
+});
+
+describe("system health", () => {
+  it("reports checks, traffic and process stats without exposing internals", async () => {
+    const { response } = await call(["platform_admin"], { method: "GET", url: "/api/v1/admin/system/health?minutes=60" }, [
+      ["pg_database_size", () => [{ size: String(64 * 1024 * 1024), connections: "7", hits: "990", reads: "10" }]],
+      ["staff_active_session_count", () => [{ total: "12" }]],
+    ]);
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.status).toMatch(/operational|degraded/u);
+    expect(body.checks.database).toMatchObject({ status: "ok", detail: "Responding" });
+    // No Redis is wired into this test app, so the check says so instead of guessing.
+    expect(body.checks.redis).toMatchObject({ status: "unknown" });
+    expect(body.database).toMatchObject({ sizeMb: 64, connections: 7, cacheHitRatio: 0.99, activeSessions: 12 });
+    expect(body.traffic.series).toHaveLength(60);
+    expect(body.process.nodeVersion).toBe(process.version);
+  });
+
+  it("still answers when Redis is down, while rate-limited routes fail", async () => {
+    // A Redis client whose every command fails, as during an outage.
+    const failing = () => { throw Object.assign(new Error("Connection is closed."), { code: "ECONNREFUSED" }); };
+    const redis = {
+      defineCommand: () => undefined,
+      rateLimit: (...args: unknown[]) => (args.at(-1) as (error: Error) => void)(new Error("Connection is closed.")),
+      ping: failing,
+      info: failing,
+      on: () => undefined,
+    };
+    const { pool } = fakePool([
+      ["auth_session_principal", principal(["platform_admin"])],
+      ["pg_database_size", () => [{ size: "0", connections: "1", hits: "1", reads: "0" }]],
+    ]);
+    const app = await buildApp({ config, pool, redis: redis as never, rateLimit: true, logger: false });
+    try {
+      const health = await app.inject({ method: "GET", url: "/api/v1/admin/system/health", headers: { cookie } });
+      expect(health.statusCode).toBe(200);
+      expect(health.json().checks.redis).toMatchObject({ status: "down" });
+      expect(health.json().status).toBe("degraded");
+      const other = await app.inject({ method: "GET", url: "/api/v1/admin/overview", headers: { cookie } });
+      expect(other.statusCode).toBe(500);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("says the database is unreachable instead of a generic error", async () => {
+    const { pool } = fakePool([["auth_session_principal", () => dbError("ECONNREFUSED")]]);
+    const app = await buildApp({ config, pool, rateLimit: false, logger: false });
+    try {
+      const response = await app.inject({ method: "GET", url: "/api/v1/admin/system/health", headers: { cookie } });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ code: "database_unavailable" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("keeps unexpected database errors as server errors rather than calling them an outage", async () => {
+    const { response } = await call(["platform_admin"], { method: "GET", url: "/api/v1/admin/system/health" }, [
+      ["pg_database_size", () => dbError("42883")],
+    ]);
+    expect(response.statusCode).toBe(500);
+  });
+
+  it("covers the whole 24-hour window in eight-minute buckets", async () => {
+    const { response } = await call(["platform_admin"], { method: "GET", url: "/api/v1/admin/system/health?minutes=1440" });
+    expect(response.json().traffic).toMatchObject({ windowMinutes: 1440, stepMinutes: 8 });
+    expect(response.json().traffic.series).toHaveLength(180);
+  });
+
+  it("limits health checks per client without using Redis", async () => {
+    const { pool } = fakePool([["auth_session_principal", principal(["platform_admin"])]]);
+    const app = await buildApp({ config, pool, rateLimit: false, logger: false });
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 31; i++) statuses.push((await app.inject({ method: "GET", url: "/api/v1/admin/system/health", headers: { cookie } })).statusCode);
+      expect(statuses.slice(0, 30).every((status) => status === 200)).toBe(true);
+      expect(statuses[30]).toBe(429);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects a window outside 15 minutes to a day", async () => {
+    const { response } = await call(["platform_admin"], { method: "GET", url: "/api/v1/admin/system/health?minutes=5" });
+    expect(response.statusCode).toBe(400);
   });
 });

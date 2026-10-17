@@ -4,32 +4,48 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { useAdmin } from "../_components/admin-context";
-import { BarList, ChartCard, ChartLegend, CohortGrid, Heatmap, TrendChart } from "../_components/charts";
+import { BarList, ChartCard, ChartLegend, Heatmap, TrendChart } from "../_components/charts";
 import { PulseIcon, SignupIcon, TrendIcon, UserIcon } from "../_components/icons";
-import { Card, ErrorBanner, KpiCards, NoAccess, PageHeader, RangePicker, Segmented, SkeletonRows } from "../_components/ui";
+import { ErrorBanner, KpiCards, NoAccess, PageHeader, RangePicker, Segmented, SkeletonRows } from "../_components/ui";
 import { canAccess } from "../_lib/access";
 import { formatCount, formatPercent, shortDate } from "../_lib/format";
 import { SERIES, VIZ } from "../_lib/palette";
 import { useRange } from "../_lib/range";
-import type { ActivityResponse, EngagementResponse, RetentionResponse, TopCommunity } from "../_lib/types";
+import type { ActivityResponse, EngagementResponse, TopCommunity } from "../_lib/types";
 import { useAdminData } from "../_lib/use-admin-data";
 import { useQueryState } from "../_lib/use-query-state";
+import { SystemHealthPanel } from "./system-health";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 type Rank = "activity" | "growth";
+type View = "health" | "engagement";
 
 function Analytics() {
   const { roles } = useAdmin();
   const allowed = canAccess(roles, "analytics");
+  const [view, setView] = useQueryState<View>("view", "health", ["health", "engagement"]);
+  if (!allowed) return <NoAccess />;
+  return (
+    <>
+      <PageHeader
+        actions={<Segmented label="Analytics view" onChange={setView} options={[{ value: "health", label: "System health" }, { value: "engagement", label: "Engagement" }]} value={view} />}
+        description={view === "health"
+          ? "Is Spark up and fast? Live checks for the API, database and Redis, with traffic, errors and response times."
+          : "Who is active, when they show up, and which communities drive it."}
+        title="Analytics"
+      />
+      {view === "health" ? <SystemHealthPanel /> : <Engagement />}
+    </>
+  );
+}
+
+function Engagement() {
   const [range, setRange] = useRange(30);
   const [rank, setRank] = useQueryState<Rank>("rank", "activity", ["activity", "growth"]);
 
-  const activity = useAdminData<ActivityResponse>(allowed ? `/analytics/activity?days=${range}` : null);
-  const engagement = useAdminData<EngagementResponse>(allowed ? `/analytics/engagement?days=${range}` : null);
-  const retention = useAdminData<RetentionResponse>(allowed ? "/analytics/retention?weeks=8" : null);
-  const top = useAdminData<{ items: TopCommunity[] }>(allowed ? `/analytics/top-communities?days=${range}&limit=8` : null);
-
-  if (!allowed) return <NoAccess />;
+  const activity = useAdminData<ActivityResponse>(`/analytics/activity?days=${range}`);
+  const engagement = useAdminData<EngagementResponse>(`/analytics/engagement?days=${range}`);
+  const top = useAdminData<{ items: TopCommunity[] }>(`/analytics/top-communities?days=${range}&limit=8`);
 
   const series = activity.data?.series ?? [];
   const audience = activity.data?.audience;
@@ -40,11 +56,7 @@ function Analytics() {
 
   return (
     <>
-      <PageHeader
-        actions={<RangePicker onChange={setRange} value={range} />}
-        description="Who is active, when they show up, whether they come back, and which communities drive it."
-        title="Analytics"
-      />
+      <div className="admToolbar"><RangePicker onChange={setRange} value={range} /></div>
 
       {activity.error && <ErrorBanner message={activity.error} onRetry={activity.reload} />}
       <KpiCards
@@ -102,14 +114,6 @@ function Analytics() {
         <Heatmap cells={engagement.data?.cells ?? []} />
       </ChartCard>
 
-      <div className="admGrid2">
-        <Card subtitle="Share of each weekly sign-up cohort that was active again in the following weeks." title="Retention by sign-up week">
-          {retention.error && <div className="admCardInset"><ErrorBanner message={retention.error} onRetry={retention.reload} /></div>}
-          {!retention.data && !retention.error && <div className="admCardInset"><SkeletonRows rows={5} /></div>}
-          {retention.data && (retention.data.cohorts.length === 0
-            ? <p className="admCardEmpty">No sign-ups in the last 8 weeks.</p>
-            : <div className="admCardInset"><CohortGrid cohorts={retention.data.cohorts} /></div>)}
-        </Card>
         <ChartCard
           actions={<Segmented label="Rank communities by" onChange={setRank} options={[{ value: "activity", label: "Activity" }, { value: "growth", label: "New members" }]} value={rank} />}
           empty={top.data?.items.length === 0}
@@ -133,7 +137,6 @@ function Analytics() {
             }))}
           />
         </ChartCard>
-      </div>
     </>
   );
 }

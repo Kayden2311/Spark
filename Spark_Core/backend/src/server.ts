@@ -11,6 +11,8 @@ const config = loadConfig();
 const postgres = new Pool({
   connectionString: config.databaseUrl,
   ssl: config.databaseSsl ? { rejectUnauthorized: true } : false,
+  // Fail fast when PostgreSQL is unreachable, so requests (and the health check) report it instead of hanging.
+  connectionTimeoutMillis: 5000,
 });
 const redis = new Redis(config.redisUrl, {
   lazyConnect: true,
