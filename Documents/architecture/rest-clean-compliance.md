@@ -16,6 +16,7 @@ This document is the backend contract for `Spark_Core/backend`. Apply each rule 
 - Retry-sensitive mutations use an actor-scoped `Idempotency-Key`. Reusing the key with a different payload returns `409`.
 - Concurrent edits use `ETag`/`If-Match` or an explicit version contract.
 - OpenAPI describes every implemented status, media type, header, authentication rule, and limit.
+- Credential operations (`POST /api/v1/auth/password/sign-up` and `/sign-in`) are served by the private auth process (`src/auth-server.ts`) under the same paths. The public API forwards them unchanged with the client address in `X-Forwarded-For` and relays status, body and `Set-Cookie`. If the auth process is unreachable the API returns `503` with `code: auth_unavailable`. No other route may move into the auth process without a matching security reason.
 
 ## Clean Architecture
 
@@ -34,7 +35,7 @@ presentation -> application <- infrastructure
 - Infrastructure implements database, cache, and provider ports. It does not decide business policy or construct HTTP responses.
 - The composition root validates configuration, creates adapters, wires use cases, and owns lifecycle.
 
-Database rows, domain entities, and API DTOs are separate roles. Map them explicitly when their shapes or trust boundaries differ. Avoid generic repositories and shared `utils` modules that collect unrelated behavior. Cross-module calls use a public application contract. Circular dependencies fail CI.
+Database rows, domain entities, and API DTOs are separate roles. Map them explicitly when their shapes or trust boundaries differ. Avoid generic repositories and shared `utils` modules that collect unrelated behavior. Cross-module calls use a public application contract. Circular dependencies are not allowed; no automated cycle gate exists yet, so reviewers check them manually.
 
 A simple technical endpoint may use a direct, small implementation when no domain rule exists. Introduce an interface when there is a real alternate adapter, test boundary, or dependency inversion need.
 

@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
+import { fakePool, principalRow } from "./fake-pool.js";
 
 const config = loadConfig({ NODE_ENV: "test" });
 
@@ -93,5 +94,36 @@ describe("Admin & Moderator Governance API", () => {
 
     expect(response.statusCode).toBe(401);
     await app.close();
+  });
+});
+
+describe("admin user status route", () => {
+  const target = "1d4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
+
+  async function suspend(outcome: string) {
+    const { pool } = fakePool([
+      ["auth_session_principal", () => [principalRow]],
+      ["staff_set_user_status", () => [{ outcome }]],
+    ]);
+    const app = await buildApp({ config, pool, rateLimit: false, logger: false });
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/admin/users/${target}/status`,
+      payload: { status: "suspended" },
+      headers: { cookie: "spark_session=admin-token" },
+    });
+    await app.close();
+    return response;
+  }
+
+  it("reports a refused last-super-admin suspension as 409", async () => {
+    const response = await suspend("last_super_admin");
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ code: "last_super_admin" });
+  });
+
+  it("never reports an unknown outcome as success", async () => {
+    expect((await suspend("something_else")).statusCode).toBe(500);
+    expect((await suspend("ok")).statusCode).toBe(200);
   });
 });

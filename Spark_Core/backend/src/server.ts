@@ -3,7 +3,10 @@ import { Pool } from "pg";
 
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { assertRuntimeRole } from "./infrastructure/database/roles.js";
 
+// Public API process. It holds only the runtime database role; sign-up and sign-in are
+// forwarded to the auth process (src/auth-server.ts), which alone holds the login role.
 const config = loadConfig();
 const postgres = new Pool({
   connectionString: config.databaseUrl,
@@ -32,7 +35,7 @@ process.once("SIGINT", () => void stop("SIGINT"));
 process.once("SIGTERM", () => void stop("SIGTERM"));
 
 try {
-  await postgres.query("select 1");
+  await assertRuntimeRole(postgres);
   await redis.connect();
   await app.listen({ host: config.host, port: config.port });
 } catch (error) {

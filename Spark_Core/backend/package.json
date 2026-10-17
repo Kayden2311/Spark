@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --env-file-if-exists=../.env --watch --import tsx src/server.ts",
+    "dev": "pnpm run --parallel \"/^dev:(api|auth)$/\"",
+    "dev:api": "node --env-file-if-exists=../.env --watch --import tsx src/server.ts",
+    "dev:auth": "node --env-file-if-exists=../.env --watch --import tsx src/auth-server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=../.env dist/server.js",
+    "start:auth": "node --env-file-if-exists=../.env dist/auth-server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",

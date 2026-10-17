@@ -1,8 +1,30 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations (`0000_init.sql` to `0005_platform_roles.sql`), baseline constraints, FORCE RLS, read-only runtime grants, and authentication APIs (`/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) are implemented and verified. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0008_login_role.sql`), baseline constraints, FORCE RLS, read-only runtime grants, and authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) are implemented and verified. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
+
+## Runtime access model
+
+Migrations `0006_scoped_runtime_access.sql`, `0007_governance_corrections.sql`, and `0008_login_role.sql` replace the permissive runtime policies added in `0005`.
+
+- `spark_app` has no INSERT, UPDATE, or DELETE grant on any table, and no direct read of credentials, sessions, tokens, reports, or platform roles.
+- `spark_auth` is a login-only role created by `pnpm db:bootstrap:local`. It has no table privileges and is the only role that can execute `auth_register_password`, `auth_password_login`, and `auth_start_session`. Only the auth process connects with it (see "Process boundary").
+- `auth_session_principal` and `auth_revoke_session` are executable by both roles because they require an existing session token hash.
+- Registration is one atomic transaction. `auth_start_session` creates the session and returns its principal in the same call, so no unclaimed session rows remain.
+- Platform governance runs inside a transaction that sets `spark.session_token_hash`. Staff read policies and `staff_*` functions resolve the actor from a live, unexpired session of an active user, never from a user id argument. A missing session raises `28000` (HTTP 401); a missing role raises `42501` (HTTP 403).
+- Moderation actions may be recorded by community owners and moderators or by active platform content moderators.
+- Suspending a super admin and revoking the `super_admin` role take the same row locks, so concurrent requests cannot leave the platform without an active super admin.
+- Process boundary: the backend runs as two processes from one build. The public API (`src/server.ts`, port 4000) connects only as `spark_app` and forwards `POST /api/v1/auth/password/sign-up` and `/sign-in` to the private auth process (`src/auth-server.ts`, port 4100, loopback by default), which alone connects as `spark_auth`. `/api/v1/me` and sign-out stay in the API because they only need an existing token hash. Locally both processes read the same `.env` for convenience; in production each process refuses to start with the other's database URL or `MIGRATION_DATABASE_URL`, so secrets must be provisioned per process.
+- Startup probes fail closed: the API refuses a role that can execute any of the three credential functions, has role memberships, is a superuser, or bypasses RLS; the auth process refuses a role that is a superuser, bypasses RLS, has role memberships, or can read `spark.users`. In production `AUTH_SERVICE_URL` must use HTTPS unless it is a loopback address.
+- What the split guarantees: the API's database role cannot read password hashes or create a session for an existing user, so SQL injection or logic errors in the API cannot mint logins.
+- Residual risks (not solved by the split):
+  - Code execution in the API process sees every plaintext password and every newly issued session token it relays, and it sets `X-Forwarded-For`, so it can spread password guesses across fake client addresses and evade per-IP limits. The auth process has no per-account attempt limit yet.
+  - Compromise of the auth process itself exposes password hashes and session creation; its surface is two routes and their dependencies.
+  - Nothing authenticates the API to the auth process beyond network reachability. Keep `AUTH_TRUSTED_PROXIES` limited to the API hosts and restrict the auth port with a network policy; mTLS is the follow-up if that is insufficient. Separate secrets and the network policy are deployment work and are not verified locally. See the [hosting checklist](../deployment/hosting-checklist.md).
+  - The API waits up to 15 s for the auth process. A sign-up that commits after that is reported as `503 auth_unavailable`; retrying returns `409 email_already_exists` and the user signs in normally.
+- Accepted low-severity edge cases: lock contention beyond `lock_timeout` (2 s) on governance writes surfaces as HTTP 500; a super-admin grant committed between the status check and the update of a concurrent suspension is not covered by the row lock (it requires three simultaneous administrative operations).
+- Open product decision: sign-up returns `409 email_already_exists`, which reveals registered emails. A neutral response needs an email-delivery flow first.
 
 ## Scope and assumptions
 

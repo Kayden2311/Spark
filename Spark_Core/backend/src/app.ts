@@ -7,17 +7,47 @@ import type { Redis } from "ioredis";
 import type { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 
-import type { AppConfig } from "./config.js";
+import type { AppConfig, AuthConfig } from "./config.js";
 import { registerAdminRoutes } from "./routes/admin.js";
+import { registerCredentialRoutes } from "./routes/auth-credentials.js";
+import { registerAuthProxyRoutes } from "./routes/auth-proxy.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoute } from "./routes/health.js";
 
 export interface BuildAppOptions {
   readonly config: AppConfig;
+  /** Runtime pool (spark_app). */
   readonly pool?: Pool;
   readonly redis?: Redis;
   readonly rateLimit?: boolean;
   readonly logger?: boolean;
+  /** Overrides fetch for the auth-service forwarding routes (tests). */
+  readonly fetchImpl?: typeof fetch;
+}
+
+export interface BuildAuthAppOptions {
+  readonly config: AuthConfig;
+  /** Login-only pool (spark_auth). */
+  readonly pool?: Pool;
+  readonly redis?: Redis;
+  readonly rateLimit?: boolean;
+  readonly logger?: boolean;
+}
+
+interface BaseAppOptions {
+  readonly title: string;
+  readonly logLevel: string;
+  readonly trustedProxies: readonly string[];
+  readonly corsOrigins?: readonly string[];
+  /** Accept a UUID X-Request-Id from the caller (only the trusted API reaches the auth process). */
+  readonly acceptRequestId?: boolean;
+  readonly rateLimitMax: number;
+  readonly rateLimitWindowMs: number;
+  /** Redis key prefix; each process needs its own so one request is not counted twice. */
+  readonly rateLimitNamespace: string;
+  readonly redis?: Redis | undefined;
+  readonly rateLimit?: boolean | undefined;
+  readonly logger?: boolean | undefined;
 }
 
 function statusCode(error: unknown): number {
@@ -58,26 +88,28 @@ function problemCode(code: number): string {
   }
 }
 
-export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+async function createBaseApp(options: BaseAppOptions): Promise<FastifyInstance> {
   const app: FastifyInstance = Fastify({
     logger:
       options.logger === false
         ? false
         : {
-            level: options.config.logLevel,
+            level: options.logLevel,
             redact: [
               "req.headers.authorization",
               "req.headers.cookie",
               "res.headers.set-cookie",
             ],
           },
-    trustProxy:
-      options.config.trustedProxies.length > 0
-        ? [...options.config.trustedProxies]
-        : false,
+    trustProxy: options.trustedProxies.length > 0 ? [...options.trustedProxies] : false,
     bodyLimit: 1_048_576,
     requestIdHeader: false,
-    genReqId: () => randomUUID(),
+    genReqId: (request) => {
+      const incoming = request.headers["x-request-id"];
+      return options.acceptRequestId && typeof incoming === "string" && UUID.test(incoming) ? incoming : randomUUID();
+    },
   });
 
   app.addHook("onSend", async (request, reply) => {
@@ -110,30 +142,29 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   await app.register(swagger, {
-    openapi: { info: { title: "Spark API", version: "0.1.0" } },
+    openapi: { info: { title: options.title, version: "0.1.0" } },
   });
   await app.register(helmet);
-  await app.register(cors, {
-    credentials: true,
-    origin: [...options.config.corsOrigins],
-  });
+  if (options.corsOrigins) {
+    await app.register(cors, {
+      credentials: true,
+      origin: [...options.corsOrigins],
+    });
+  }
 
   if (options.rateLimit !== false) {
     if (!options.redis) throw new Error("Redis is required for rate limiting");
     await app.register(rateLimit, {
       redis: options.redis,
       global: true,
-      max: options.config.rateLimitMax,
-      timeWindow: options.config.rateLimitWindowMs,
+      max: options.rateLimitMax,
+      timeWindow: options.rateLimitWindowMs,
+      nameSpace: options.rateLimitNamespace,
       skipOnError: false,
     });
   }
 
   registerHealthRoute(app);
-  if (options.pool) {
-    registerAuthRoutes(app, { pool: options.pool });
-    registerAdminRoutes(app, { pool: options.pool });
-  }
 
   app.setNotFoundHandler(async (request, reply) =>
     reply
@@ -151,5 +182,47 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       }),
   );
 
+  return app;
+}
+
+/** Public API process: runtime pool only; credential routes are forwarded to the auth process. */
+export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
+  const { config } = options;
+  const app = await createBaseApp({
+    title: "Spark API",
+    rateLimitNamespace: "spark-api-rate-limit-",
+    logLevel: config.logLevel,
+    trustedProxies: config.trustedProxies,
+    corsOrigins: config.corsOrigins,
+    rateLimitMax: config.rateLimitMax,
+    rateLimitWindowMs: config.rateLimitWindowMs,
+    redis: options.redis,
+    rateLimit: options.rateLimit,
+    logger: options.logger,
+  });
+  registerAuthProxyRoutes(app, { authServiceUrl: config.authServiceUrl, fetchImpl: options.fetchImpl });
+  if (options.pool) {
+    registerAuthRoutes(app, { pool: options.pool });
+    registerAdminRoutes(app, { pool: options.pool });
+  }
+  return app;
+}
+
+/** Private auth process: the only holder of the login-only database role. No CORS: it is not browser-facing. */
+export async function buildAuthApp(options: BuildAuthAppOptions): Promise<FastifyInstance> {
+  const { config } = options;
+  const app = await createBaseApp({
+    title: "Spark Auth",
+    acceptRequestId: true,
+    rateLimitNamespace: "spark-auth-rate-limit-",
+    logLevel: config.logLevel,
+    trustedProxies: config.trustedProxies,
+    rateLimitMax: config.rateLimitMax,
+    rateLimitWindowMs: config.rateLimitWindowMs,
+    redis: options.redis,
+    rateLimit: options.rateLimit,
+    logger: options.logger,
+  });
+  if (options.pool) registerCredentialRoutes(app, { pool: options.pool });
   return app;
 }

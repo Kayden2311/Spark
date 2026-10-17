@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Redis } from "ioredis";
 
 import { buildApp } from "../src/app.js";
-import { loadConfig } from "../src/config.js";
+import { loadAuthConfig, loadConfig } from "../src/config.js";
 
 const config = loadConfig({ NODE_ENV: "test" });
 
@@ -101,15 +101,43 @@ describe("Spark API", () => {
     const base = {
       NODE_ENV: "production",
       DATABASE_URL: "postgresql://spark_app:secret@db.internal/spark",
+      AUTH_SERVICE_URL: "https://auth.internal:4100",
       DATABASE_SSL: "true",
       REDIS_URL: "rediss://redis.internal:6380",
       CORS_ORIGINS: "https://spark.example",
       TRUSTED_PROXIES: "10.0.0.0/8",
     };
 
+    expect(loadConfig(base).authServiceUrl).toBe("https://auth.internal:4100");
+    expect(() => loadConfig({ ...base, AUTH_SERVICE_URL: undefined })).toThrow();
+    expect(() => loadConfig({ ...base, AUTH_SERVICE_URL: "https://auth.internal:4100/path" })).toThrow();
+    // The API process must never receive the login database credentials.
+    expect(() => loadConfig({ ...base, AUTH_DATABASE_URL: "postgresql://spark_auth:secret@db.internal/spark" })).toThrow("must not be set for the API");
+    expect(() => loadConfig({ ...base, MIGRATION_DATABASE_URL: "postgresql://spark_migrator:secret@db.internal/spark" })).toThrow("must not be set for the API");
+    // Off-host auth traffic carries passwords and tokens, so it must be encrypted.
+    expect(() => loadConfig({ ...base, AUTH_SERVICE_URL: "http://auth.internal:4100" })).toThrow("must use HTTPS");
+    expect(loadConfig({ ...base, AUTH_SERVICE_URL: "http://127.0.0.1:4100" }).authServiceUrl).toBe("http://127.0.0.1:4100");
     expect(() => loadConfig({ ...base, DATABASE_SSL: "false" })).toThrow();
     expect(() => loadConfig({ ...base, REDIS_URL: "redis://redis.internal" })).toThrow();
     expect(() => loadConfig({ ...base, CORS_ORIGINS: "http://spark.example" })).toThrow();
     expect(() => loadConfig({ ...base, TRUSTED_PROXIES: "0.0.0.0/0" })).toThrow();
+  });
+
+  it("keeps the auth process separate from runtime credentials", () => {
+    const base = {
+      NODE_ENV: "production",
+      AUTH_DATABASE_URL: "postgresql://spark_auth:secret@db.internal/spark",
+      DATABASE_SSL: "true",
+      REDIS_URL: "rediss://redis.internal:6380",
+      AUTH_TRUSTED_PROXIES: "10.0.0.5",
+    };
+
+    expect(loadAuthConfig(base)).toMatchObject({ host: "127.0.0.1", port: 4100, trustedProxies: ["10.0.0.5"] });
+    expect(() => loadAuthConfig({ ...base, DATABASE_URL: "postgresql://spark_app:secret@db.internal/spark" })).toThrow("must not be set for the auth process");
+    expect(() => loadAuthConfig({ ...base, AUTH_DATABASE_URL: undefined })).toThrow();
+    expect(() => loadAuthConfig({ ...base, AUTH_TRUSTED_PROXIES: undefined })).toThrow();
+    expect(() => loadAuthConfig({ ...base, DATABASE_SSL: "false" })).toThrow();
+    expect(() => loadAuthConfig({ ...base, MIGRATION_DATABASE_URL: "postgresql://spark_migrator:secret@db.internal/spark" })).toThrow("must not be set for the auth process");
+    expect(() => loadAuthConfig({ NODE_ENV: "test", DATABASE_URL: "postgresql://spark_auth:x@127.0.0.1/spark" })).toThrow("different database role");
   });
 });
