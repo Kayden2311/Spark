@@ -44,3 +44,6 @@ export const KeyboardIcon = (p: IconProps) => <Icon {...p}><rect x="2" y="6" wid
 export const TrendIcon = (p: IconProps) => <Icon {...p}><path d="m3 17 6-6 4 4 8-8" /><path d="M15 7h6v6" /></Icon>;
 export const SignupIcon = (p: IconProps) => <Icon {...p}><circle cx="10" cy="8" r="4" /><path d="M3 21c.7-3.8 3.4-6 7-6 1.4 0 2.6.3 3.7.9M19 15v6M16 18h6" /></Icon>;
 export const ChatIcon = (p: IconProps) => <Icon {...p}><path d="M4 5h16v11H9l-5 4V5Z" /></Icon>;
+export const DatabaseIcon = (p: IconProps) => <Icon {...p}><ellipse cx="12" cy="5.5" rx="8" ry="3" /><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></Icon>;
+export const LayersIcon = (p: IconProps) => <Icon {...p}><path d="m12 3 9 4.5-9 4.5-9-4.5 9-4.5Z" /><path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5" /></Icon>;
+export const CpuIcon = (p: IconProps) => <Icon {...p}><rect x="7" y="7" width="10" height="10" rx="1.5" /><path d="M9 7V3M15 7V3M9 21v-4M15 21v-4M7 9H3M7 15H3M21 9h-4M21 15h-4" /></Icon>;

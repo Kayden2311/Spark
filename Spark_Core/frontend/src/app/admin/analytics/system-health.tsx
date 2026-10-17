@@ -2,11 +2,14 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { ChartCard, ChartLegend, TrendChart } from "../_components/charts";
-import { AlertIcon, ClockIcon, PulseIcon, ShieldIcon } from "../_components/icons";
+import { ChartCard, ChartLegend, Gauge, TrendChart } from "../_components/charts";
+import { AlertIcon, ClockIcon, CpuIcon, DatabaseIcon, LayersIcon, PulseIcon, ShieldIcon } from "../_components/icons";
 import { Badge, Card, KpiCards, Segmented, SkeletonRows } from "../_components/ui";
 import { formatCount, formatDuration, formatPercent, formatRelative, type Tone } from "../_lib/format";
 import { VIZ } from "../_lib/palette";
+
+/** Status colors, matched to the `.admTone-*` badge tones so a gauge and its badge always agree. */
+const STATUS_HEX = { green: "#10b981", amber: "#f59e0b", red: "#ef4444", blue: "#2563eb" } as const;
 import type { HealthCheck, RouteSummary, SystemHealth } from "../_lib/types";
 import { useAdminData } from "../_lib/use-admin-data";
 import { useQueryState } from "../_lib/use-query-state";
@@ -33,11 +36,12 @@ const OVERALL: Record<SystemHealth["status"], { tone: Tone; title: string; text:
 const ms = (value: number | null | undefined) => (value === null || value === undefined ? "–" : `${value < 10 ? value.toFixed(1) : Math.round(value)} ms`);
 const minuteLabel = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
-function CheckTile({ name, check, children }: { name: string; check: HealthCheck; children?: ReactNode }) {
+function CheckTile({ name, icon, check, children }: { name: string; icon: ReactNode; check: HealthCheck; children?: ReactNode }) {
   const state = CHECK_TONE[check.status];
   return (
-    <li className="admCheck" data-status={check.status}>
+    <li className={`admCheck admTone-${state.tone}`} data-status={check.status}>
       <div className="admCheckTop">
+        <span aria-hidden="true" className={`admCheckIcon admTone-${state.tone}`}>{icon}</span>
         <span className="admCheckName">{name}</span>
         <Badge tone={state.tone}>{state.label}</Badge>
       </div>
@@ -50,35 +54,63 @@ function CheckTile({ name, check, children }: { name: string; check: HealthCheck
   );
 }
 
+/** Icon chip plus a big number: one focused fact, used in place of a dense list row. */
+function MetricTile({ icon, label, value, hint }: { icon: ReactNode; label: string; value: ReactNode; hint?: ReactNode }) {
+  return (
+    <div className="admMetricTile">
+      {icon}
+      <div className="admMetricText">
+        <span className="admMetricLabel">{label}</span>
+        <strong className="admMetricValue">{value}</strong>
+        {hint && <span className="admMetricHint">{hint}</span>}
+      </div>
+    </div>
+  );
+}
+
+function InlineBar({ ratio, color }: { ratio: number; color: string }) {
+  return (
+    <span aria-hidden="true" className="admInlineBarTrack">
+      <span className="admInlineBarFill" style={{ width: `${Math.max(4, Math.min(100, ratio * 100))}%`, background: color }} />
+    </span>
+  );
+}
+
+/** One route per row: the endpoint with its traffic as a caption, and one metric with a bar showing it relative to the worst row in the list. */
 function RouteTable({ routes, empty, focus }: { routes: RouteSummary[]; empty: string; focus: "latency" | "errors" }) {
   if (routes.length === 0) return <p className="admCardEmpty">{empty}</p>;
+  const weight = (route: RouteSummary) => (focus === "latency" ? (route.p95Ms ?? 0) : route.serverErrors * 3 + route.clientErrors);
+  const max = Math.max(1, ...routes.map(weight));
   return (
     <table className="admTable admRouteTable">
       <thead>
         <tr>
           <th scope="col">Endpoint</th>
-          <th className="admNum" scope="col">Requests</th>
-          {focus === "errors" ? <><th className="admNum" scope="col">5xx</th><th className="admNum" scope="col">4xx</th></> : <><th className="admNum" scope="col">Average</th><th className="admNum" scope="col">p95</th></>}
+          <th className="admNum" scope="col">{focus === "latency" ? "Response time" : "Errors"}</th>
         </tr>
       </thead>
       <tbody>
         {routes.map((route) => {
           const [method, ...path] = route.route.split(" ");
+          const warn = focus === "latency" ? (route.p95Ms ?? 0) > 1000 : route.serverErrors > 0;
+          const color = focus === "latency" ? ((route.p95Ms ?? 0) > 1000 ? STATUS_HEX.amber : VIZ.violet) : (route.serverErrors > 0 ? STATUS_HEX.red : STATUS_HEX.amber);
           return (
             <tr key={route.route}>
-              <td data-label="Endpoint"><span className="admRoute"><span className="admMethod">{method}</span><code>{path.join(" ")}</code></span></td>
-              <td className="admNum" data-label="Requests">{formatCount(route.requests)}</td>
-              {focus === "errors" ? (
-                <>
-                  <td className="admNum" data-label="5xx">{route.serverErrors > 0 ? <Badge tone="red">{route.serverErrors}</Badge> : 0}</td>
-                  <td className="admNum" data-label="4xx">{route.clientErrors}</td>
-                </>
-              ) : (
-                <>
-                  <td className="admNum" data-label="Average">{ms(route.avgMs)}</td>
-                  <td className="admNum" data-label="p95">{route.p95Ms !== null && route.p95Ms > 1000 ? <Badge tone="amber">{ms(route.p95Ms)}</Badge> : ms(route.p95Ms)}</td>
-                </>
-              )}
+              <td data-label="Endpoint">
+                <div className="admRouteCell">
+                  <span className="admRoute"><span className="admMethod">{method}</span><code>{path.join(" ")}</code></span>
+                  <span className="admRouteSub">{formatCount(route.requests)} {route.requests === 1 ? "request" : "requests"}</span>
+                </div>
+              </td>
+              <td className="admNum" data-label={focus === "latency" ? "Response time" : "Errors"}>
+                <div className="admRouteMetric">
+                  <span className="admRouteMetricTop">
+                    <strong className={warn ? "admRouteMetricWarn" : undefined}>{focus === "latency" ? ms(route.p95Ms) : `${route.serverErrors} 5xx`}</strong>
+                    <span className="admRouteSub">{focus === "latency" ? `avg ${ms(route.avgMs)}` : `${route.clientErrors} 4xx`}</span>
+                  </span>
+                  <InlineBar color={color} ratio={weight(route) / max} />
+                </div>
+              </td>
             </tr>
           );
         })}
@@ -146,6 +178,7 @@ export function SystemHealthPanel() {
   const perBucket = traffic.stepMinutes === 1 ? "per minute" : `per ${traffic.stepMinutes} minutes`;
   const charted = traffic.series.reduce((sum, point) => sum + point.requests, 0);
   const series = traffic.series.map((point) => ({ ...point, ok: point.requests - point.clientErrors - point.serverErrors }));
+  const cacheHitText = data.database.cacheHitRatio === null ? "–" : formatPercent(data.database.cacheHitRatio, 1);
 
   return (
     <>
@@ -163,18 +196,20 @@ export function SystemHealthPanel() {
           </div>
         </div>
       </section>
+      <p className="admEyebrow">Live checks</p>
       <ul aria-label="Service checks" className="admChecks" data-stale={failure ? "true" : undefined}>
-        <CheckTile check={data.checks.api} name="API">
+        <CheckTile check={data.checks.api} icon={<PulseIcon />} name="API">
           <div><dt>Uptime</dt><dd>{formatDuration(data.process.uptimeSeconds)}</dd></div>
         </CheckTile>
-        <CheckTile check={data.checks.database} name="PostgreSQL">
+        <CheckTile check={data.checks.database} icon={<DatabaseIcon />} name="PostgreSQL">
           <div><dt>Pool in use</dt><dd>{data.database.poolTotal - data.database.poolIdle} / {data.database.poolTotal}{data.database.poolWaiting > 0 ? `, ${data.database.poolWaiting} waiting` : ""}</dd></div>
         </CheckTile>
-        <CheckTile check={data.checks.redis} name="Redis (rate limits)">
+        <CheckTile check={data.checks.redis} icon={<LayersIcon />} name="Redis (rate limits)">
           <div><dt>Memory</dt><dd>{data.redis.usedMemoryMb === null ? "–" : `${data.redis.usedMemoryMb} MB`}</dd></div>
         </CheckTile>
       </ul>
 
+      <p className="admEyebrow">Traffic summary</p>
       <KpiCards
         items={[
           { label: `Requests, ${windowLabel}`, value: formatCount(traffic.requests), hint: `${formatCount(traffic.clientErrors)} client errors (4xx)`, icon: <PulseIcon />, tone: "blue", trend: { values: traffic.series.map((point) => point.requests), color: VIZ.blue } },
@@ -185,6 +220,7 @@ export function SystemHealthPanel() {
         label="Traffic summary"
       />
 
+      <p className="admEyebrow">Traffic over time</p>
       <div className="admGrid2">
         <ChartCard
           empty={charted === 0}
@@ -221,6 +257,7 @@ export function SystemHealthPanel() {
         </ChartCard>
       </div>
 
+      <p className="admEyebrow">Slowest &amp; failing endpoints</p>
       <div className="admGrid2">
         <Card flush subtitle={`Highest p95 response time, ${windowLabel} (endpoints with 3+ requests)`} title="Slowest endpoints">
           <RouteTable empty="Not enough traffic to rank endpoints yet." focus="latency" routes={traffic.slowest} />
@@ -230,24 +267,51 @@ export function SystemHealthPanel() {
         </Card>
       </div>
 
-      <div className="admGrid3">
+      <p className="admEyebrow">Infrastructure</p>
+      <div className="admGrid2">
         <Card subtitle="Size, connections and how often reads are served from memory" title="Database">
-          <ul className="admStatList">
-            <li><span>Round trip</span><strong>{ms(data.checks.database.latencyMs)}</strong></li>
-            <li><span>Database size</span><strong>{data.database.sizeMb === null ? "–" : `${data.database.sizeMb} MB`}</strong></li>
-            <li><span>Open connections</span><strong>{data.database.connections ?? "–"}</strong></li>
-            <li><span>Cache hit ratio</span>{data.database.cacheHitRatio === null ? <strong>–</strong> : data.database.cacheHitRatio < 0.95 ? <Badge tone="amber">{formatPercent(data.database.cacheHitRatio, 1)}</Badge> : <strong>{formatPercent(data.database.cacheHitRatio, 1)}</strong>}</li>
-            <li><span>API pool</span><strong>{data.database.poolTotal - data.database.poolIdle} busy · {data.database.poolIdle} idle</strong></li>
-          </ul>
+          <div className="admMetricTiles">
+            <MetricTile
+              hint="share of reads from memory, not disk"
+              icon={
+                <Gauge
+                  ratio={data.database.cacheHitRatio ?? 0}
+                  tone={data.database.cacheHitRatio === null ? STATUS_HEX.blue : data.database.cacheHitRatio < 0.95 ? STATUS_HEX.amber : STATUS_HEX.green}
+                  valueText={cacheHitText}
+                />
+              }
+              label="Cache hit ratio"
+              value={cacheHitText}
+            />
+            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-blue"><ClockIcon /></span>} label="Round trip" value={ms(data.checks.database.latencyMs)} />
+            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-blue"><DatabaseIcon /></span>} label="Database size" value={data.database.sizeMb === null ? "–" : `${data.database.sizeMb} MB`} />
+            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-blue"><LayersIcon /></span>} label="Open connections" value={data.database.connections ?? "–"} />
+            <MetricTile hint={data.database.poolWaiting > 0 ? `${data.database.poolWaiting} waiting` : undefined} icon={<span aria-hidden="true" className="admMetricIcon admTone-blue"><CpuIcon /></span>} label="API pool" value={`${data.database.poolTotal - data.database.poolIdle} / ${data.database.poolTotal}`} />
+          </div>
         </Card>
         <Card subtitle="The API process that answered this request" title="API process">
-          <ul className="admStatList">
-            <li><span>Memory (RSS)</span><strong>{data.process.rssMb} MB</strong></li>
-            <li><span>Heap used</span><strong>{data.process.heapUsedMb} / {data.process.heapTotalMb} MB</strong></li>
-            <li><span>Event loop delay (p99)</span>{data.process.eventLoopP99Ms > 200 ? <Badge tone="amber">{ms(data.process.eventLoopP99Ms)}</Badge> : <strong>{ms(data.process.eventLoopP99Ms)}</strong>}</li>
-            <li><span>Runtime</span><strong>Node.js {data.process.nodeVersion.replace(/^v/u, "")}</strong></li>
-            <li><span>Redis</span><strong>{data.redis.version ? `v${data.redis.version} · ${data.redis.connectedClients ?? "–"} clients` : "–"}</strong></li>
-          </ul>
+          <div className="admMetricTiles">
+            <MetricTile
+              hint="p99 over the last minute"
+              icon={
+                <Gauge
+                  ratio={Math.min(1, data.process.eventLoopP99Ms / 200)}
+                  tone={data.process.eventLoopP99Ms > 200 ? STATUS_HEX.red : data.process.eventLoopP99Ms > 100 ? STATUS_HEX.amber : STATUS_HEX.green}
+                  valueText={ms(data.process.eventLoopP99Ms)}
+                />
+              }
+              label="Event loop delay"
+              value={ms(data.process.eventLoopP99Ms)}
+            />
+            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-violet"><CpuIcon /></span>} label="Memory (RSS)" value={`${data.process.rssMb} MB`} />
+            <MetricTile
+              hint={<span className="admInlineBarTrack admMetricBarTrack"><span className="admInlineBarFill" style={{ width: `${Math.min(100, (data.process.heapUsedMb / Math.max(1, data.process.heapTotalMb)) * 100)}%`, background: VIZ.violet }} /></span>}
+              icon={<span aria-hidden="true" className="admMetricIcon admTone-violet"><CpuIcon /></span>}
+              label="Heap used"
+              value={`${data.process.heapUsedMb} / ${data.process.heapTotalMb} MB`}
+            />
+          </div>
+          <p className="admMetricFootnote">Node.js {data.process.nodeVersion.replace(/^v/u, "")} · Redis {data.redis.version ? `v${data.redis.version}, ${data.redis.connectedClients ?? "–"} clients` : "–"}</p>
         </Card>
       </div>
       <p className="admMuted admSmall">Traffic figures come from the API process that answered, collected since {new Date(data.collectingSince).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}. They reset when it restarts and do not include other instances.</p>

@@ -340,6 +340,36 @@ export function BarList({ items, color, valueFormat = formatCount, emptyText = "
   );
 }
 
+/**
+ * A small ring gauge for one ratio metric (0–1): a status color fills the ring, the value sits in the
+ * center. Always paired by the caller with a text label, so meaning never rests on color alone.
+ */
+export function Gauge({ ratio, valueText, tone, size = 56, thickness = 6 }: { ratio: number; valueText: string; tone: string; size?: number; thickness?: number }) {
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
+  const radius = (size - thickness) / 2;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <div className="admGauge" style={{ width: size, height: size }}>
+      <svg height={size} viewBox={`0 0 ${size} ${size}`} width={size}>
+        <circle cx={size / 2} cy={size / 2} fill="none" r={radius} stroke={CHART_INK.grid} strokeWidth={thickness} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          fill="none"
+          r={radius}
+          stroke={tone}
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - clamped)}
+          strokeLinecap="round"
+          strokeWidth={thickness}
+          style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: "stroke-dashoffset .3s ease" }}
+        />
+      </svg>
+      <span className="admGaugeValue">{valueText}</span>
+    </div>
+  );
+}
+
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 /** Day-of-week by hour-of-day activity (UTC), shaded with one hue from light to dark. */
