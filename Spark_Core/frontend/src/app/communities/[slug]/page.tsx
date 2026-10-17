@@ -114,7 +114,7 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
       <nav className="circleBreadcrumbHeader" aria-label="Breadcrumb">
         <div className="circleBreadcrumbContainer">
           <Link href="/communities" className="circleBackLink">
-            ← Directory
+            Back to directory
           </Link>
           <span className="circleBreadcrumbDivider">/</span>
           <span className="circleBreadcrumbCategory">{community.category}</span>
@@ -172,9 +172,9 @@ export default async function CommunityDetailPage({ params }: { params: Promise<
             <div className="circleActionGroup">
               <Link
                 className="circleCtaBtn"
-                href={`/signup?redirect=/communities/${community.slug}`}
+                href={`/communities/${community.slug}/request`}
               >
-                Join {community.name}
+                Request access
               </Link>
             </div>
           </div>
