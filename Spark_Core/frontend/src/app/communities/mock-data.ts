@@ -1,3 +1,5 @@
+import type { CommunityCategory, CommunityStage } from "./types";
+
 export interface CommunityTopic {
   title: string;
   author: string;
@@ -16,9 +18,9 @@ export interface Community {
   slug: string;
   name: string;
   topic: string;
-  category: "B2B SaaS" | "Climate Tech" | "AI & Data" | "Product" | "FinTech" | "Founders Circle";
+  category: CommunityCategory;
   location: string;
-  stage: "Idea to Pre-seed" | "Pre-seed to Seed" | "Seed to Series A" | "Growth" | "Any stage";
+  stage: CommunityStage;
   members: string;
   memberCount: number;
   description: string;

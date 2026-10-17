@@ -5,7 +5,9 @@ import { useState, useMemo } from "react";
 import { useAuth } from "../auth-context";
 import { HeroParticles } from "../hero-particles";
 import { SignalParticles } from "../signal-particles";
-import { communities, type Community } from "./mock-data";
+import { filterCommunities, hasActiveFilters } from "./filter";
+import { CommunityCard } from "./community-card";
+import { communitySummaries } from "./community-summaries";
 
 function SparkMark() {
   return (
@@ -43,38 +45,12 @@ export default function CommunitiesPage() {
   const [selectedLocation, setSelectedLocation] = useState<string>("all");
   const [selectedStage, setSelectedStage] = useState<string>("all");
 
-  const filteredCommunities = useMemo(() => {
-    return communities.filter((item: Community) => {
-      // Category filter
-      if (selectedCategory !== "All topics" && item.category !== selectedCategory) {
-        return false;
-      }
-      // Location filter
-      if (selectedLocation !== "all" && item.location !== selectedLocation) {
-        return false;
-      }
-      // Stage filter
-      if (selectedStage !== "all" && item.stage !== selectedStage) {
-        return false;
-      }
-      // Search term
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        const matchesName = item.name.toLowerCase().includes(term);
-        const matchesDesc = item.description.toLowerCase().includes(term);
-        const matchesTopic = item.topic.toLowerCase().includes(term);
-        const matchesTags = item.tags.some((t) => t.toLowerCase().includes(term));
-        return matchesName || matchesDesc || matchesTopic || matchesTags;
-      }
-      return true;
-    });
-  }, [searchTerm, selectedCategory, selectedLocation, selectedStage]);
-
-  const hasActiveFilters =
-    searchTerm.trim() !== "" ||
-    selectedCategory !== "All topics" ||
-    selectedLocation !== "all" ||
-    selectedStage !== "all";
+  const filters = useMemo(
+    () => ({ searchTerm, category: selectedCategory, location: selectedLocation, stage: selectedStage }),
+    [searchTerm, selectedCategory, selectedLocation, selectedStage],
+  );
+  const filteredCommunities = useMemo(() => filterCommunities(communitySummaries, filters), [filters]);
+  const hasFilters = hasActiveFilters(filters);
 
   const handleResetFilters = () => {
     setSearchTerm("");
@@ -201,7 +177,7 @@ export default function CommunitiesPage() {
         <span>
           Showing <b>{filteredCommunities.length}</b> {filteredCommunities.length === 1 ? "community circle" : "community circles"}
         </span>
-        {hasActiveFilters && (
+        {hasFilters && (
           <button type="button" className="resetFiltersBtn" onClick={handleResetFilters}>
             Reset filters
           </button>
@@ -209,60 +185,9 @@ export default function CommunitiesPage() {
       </div>
 
       {/* Community Grid */}
-      <section className="communityGrid" aria-label="Featured communities">
+      <section className="communityGrid" aria-label="Community results">
         {filteredCommunities.length > 0 ? (
-          filteredCommunities.map((community) => (
-            <article className="communityCard" key={community.slug}>
-              <div className="communityCardHeader">
-                <div className="communityMonogram" style={{ background: community.gradient }}>
-                  {community.initials}
-                </div>
-                <div className="communityCardBadges">
-                  {community.featured && (
-                    <span className="communityFeaturedBadge">Featured</span>
-                  )}
-                  <span className="communityTopicBadge">{community.topic}</span>
-                </div>
-              </div>
-
-              <h3>{community.name}</h3>
-              <p className="communityCardDesc">{community.description}</p>
-
-              {/* Tag Chips */}
-              <div className="communityTagsRow">
-                {community.tags.map((tag) => (
-                  <span key={tag} className="communityTagChip">
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-
-              {/* Location & Stage Metadata */}
-              <dl className="communityMetaDl">
-                <div>
-                  <dt>Location</dt>
-                  <dd title={community.location}>{community.location}</dd>
-                </div>
-                <div>
-                  <dt>Stage</dt>
-                  <dd title={community.stage}>{community.stage}</dd>
-                </div>
-              </dl>
-
-              {/* Activity Indicator */}
-              <div className="communityActivityRow">
-                <span className="communityActivityDot" />
-                <span>{community.activity}</span>
-              </div>
-
-              <div className="communityCardFooter">
-                <span className="communityMemberStat">{community.members}</span>
-                <Link className="communityCardActionBtn" href={`/communities/${community.slug}`}>
-                  Explore Circle
-                </Link>
-              </div>
-            </article>
-          ))
+          filteredCommunities.map((community) => <CommunityCard community={community} key={community.slug} />)
         ) : (
           <div className="communityEmptyState">
             <h3>No community circles found</h3>
