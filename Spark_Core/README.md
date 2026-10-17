@@ -57,6 +57,7 @@ The step-by-step deployment checklist lives in [Documents/deployment/hosting-che
 - **Standard User**: `user1@spark.app` / `UserPassword123!` (Workspace `spark-lab` owner)
 - **Platform Admin**: `admin@spark.app` / `AdminPassword123!` (`super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`)
 - **Moderator**: `moderator@spark.app` / `ModeratorPassword123!` (`content_moderator`, `community_moderator`; useful for checking role-gated sections)
+- Five more accounts, one per platform role held in isolation (`super_admin` only, `platform_admin` only, and one per moderator role) — see `Documents/admin-test-accounts.md` for the full roster, passwords and what to test with each.
 
 `pnpm --filter @spark/backend db:seed` also creates two pending sponsored campaigns when none exist.
 

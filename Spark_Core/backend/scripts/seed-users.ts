@@ -237,7 +237,27 @@ try {
     );
   }
 
-  // 7. Sponsored campaigns awaiting review.
+  // 7. One dedicated account per platform role, holding only that role, so each role's admin console
+  //    view can be tested in isolation (the "moderator" account above holds two roles at once, and
+  //    "admin" holds all five, which is useful for most testing but hides what a single role alone sees).
+  const singleRoleAccounts: Array<{ email: string; displayName: string; password: string; role: string }> = [
+    { email: "superadmin@spark.app", displayName: "Spark Super Admin", password: "SuperAdminPassword123!", role: "super_admin" },
+    { email: "platformadmin@spark.app", displayName: "Spark Platform Admin", password: "PlatformAdminPassword123!", role: "platform_admin" },
+    { email: "communitymod@spark.app", displayName: "Spark Community Mod", password: "CommunityModPassword123!", role: "community_moderator" },
+    { email: "contentmod@spark.app", displayName: "Spark Content Mod", password: "ContentModPassword123!", role: "content_moderator" },
+    { email: "campaignmod@spark.app", displayName: "Spark Campaign Mod", password: "CampaignModPassword123!", role: "campaign_moderator" },
+  ];
+  for (const account of singleRoleAccounts) {
+    const roleAccountId = await ensureUser({ email: account.email, displayName: account.displayName, password: account.password });
+    await client.query(
+      `INSERT INTO spark.platform_role_assignments (id, user_id, role, granted_by_user_id)
+       VALUES (gen_random_uuid(), $1, $2, $3)
+       ON CONFLICT DO NOTHING`,
+      [roleAccountId, account.role, adminId],
+    );
+  }
+
+  // 8. Sponsored campaigns awaiting review.
   const existingCampaigns = await client.query("SELECT count(*)::integer AS total FROM spark.promotion_campaigns");
   if (existingCampaigns.rows[0].total === 0) {
     await client.query("BEGIN");
@@ -269,9 +289,15 @@ try {
 
   console.log("\n==============================================");
   console.log("SEEDED USERS & GOVERNANCE DEMO DATA SUCCESSFULLY:");
-  console.log("1. Admin:     admin@spark.app / AdminPassword123! (Super Admin & Platform Governance)");
-  console.log("2. Moderator: moderator@spark.app / ModeratorPassword123! (Content and community moderator)");
-  console.log("3. User 1:    user1@spark.app / UserPassword123! (Owner of 'Spark Lab' and 'Hyperdrive')");
+  console.log("1. Admin:          admin@spark.app / AdminPassword123! (all five platform roles)");
+  console.log("2. Moderator:      moderator@spark.app / ModeratorPassword123! (content + community moderator)");
+  console.log("3. User 1:         user1@spark.app / UserPassword123! (Owner of 'Spark Lab' and 'Hyperdrive', no platform role)");
+  console.log("4. Super admin:    superadmin@spark.app / SuperAdminPassword123! (super_admin only)");
+  console.log("5. Platform admin: platformadmin@spark.app / PlatformAdminPassword123! (platform_admin only)");
+  console.log("6. Community mod:  communitymod@spark.app / CommunityModPassword123! (community_moderator only)");
+  console.log("7. Content mod:    contentmod@spark.app / ContentModPassword123! (content_moderator only)");
+  console.log("8. Campaign mod:   campaignmod@spark.app / CampaignModPassword123! (campaign_moderator only)");
+  console.log("Full roster with what each can test: Documents/admin-test-accounts.md");
   console.log("Note: seeded role grants are written directly and do not appear in the platform audit log.");
   console.log("==============================================\n");
 } catch (error) {
