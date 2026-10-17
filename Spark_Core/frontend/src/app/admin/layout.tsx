@@ -4,14 +4,15 @@ import "./admin.css";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "../auth-context";
 import { AdminProvider, useAdmin } from "./_components/admin-context";
-import { AuditIcon, CommunityIcon, FlagIcon, HomeIcon, LogoutIcon, MegaphoneIcon, MenuIcon, CloseIcon, OverviewIcon, UserIcon } from "./_components/icons";
+import { AuditIcon, ChevronIcon, CloseIcon, CommunityIcon, ExternalIcon, FlagIcon, LogoutIcon, MegaphoneIcon, MenuIcon, OverviewIcon, UserIcon } from "./_components/icons";
 import { Avatar } from "./_components/ui";
 import { SESSION_EXPIRED_EVENT } from "./_lib/api";
 import { isStaff, sectionForPath, visibleSections, type SectionId } from "./_lib/access";
+import { adminFont } from "./_lib/font";
 import { ROLE_LABELS } from "./_lib/format";
 import type { Overview, PlatformRole } from "./_lib/types";
 
@@ -23,6 +24,8 @@ const SECTION_ICONS: Record<SectionId, ReactNode> = {
   users: <UserIcon />,
   audit: <AuditIcon />,
 };
+
+const ROLE_ORDER: PlatformRole[] = ["super_admin", "platform_admin", "content_moderator", "community_moderator", "campaign_moderator"];
 
 function badgeFor(section: SectionId, overview: Overview | null): number | null {
   if (!overview) return null;
@@ -42,19 +45,19 @@ function SparkMark() {
 
 function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const pathname = usePathname();
-  const { user, logout } = useAuth();
   const { roles, overview } = useAdmin();
   const sections = visibleSections(roles);
   const active = sectionForPath(pathname)?.id;
   const groups = [...new Set(sections.map((section) => section.group))];
-  const primaryRole = (["super_admin", "platform_admin", "content_moderator", "community_moderator", "campaign_moderator"] as PlatformRole[]).find((role) => roles.includes(role));
 
   return (
     <aside className="admSidebar" data-open={open} id="admin-navigation">
       <Link className="admBrand" href="/admin" onClick={onNavigate}>
-        <SparkMark />
-        <span>Spark</span>
-        <span className="admBrandTag">Admin</span>
+        <span className="admBrandMark"><SparkMark /></span>
+        <span className="admBrandText">
+          <strong>Spark</strong>
+          <span>Admin console</span>
+        </span>
       </Link>
       <nav aria-label="Admin sections" className="admNav">
         {groups.map((group) => (
@@ -77,20 +80,51 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
           </div>
         ))}
       </nav>
-      <div className="admSidebarFooter">
-        <div className="admMe">
-          <Avatar name={user?.displayName ?? "Staff"} />
-          <div>
-            <strong>{user?.displayName ?? "Staff member"}</strong>
-            <span>{primaryRole ? ROLE_LABELS[primaryRole] : "Staff"}{roles.length > 1 ? ` +${roles.length - 1}` : ""}</span>
-          </div>
-        </div>
-        <div className="admSidebarActions">
-          <Link className="admBtn admBtnGhost admBtnSm" href="/"><HomeIcon /> Site</Link>
-          <button className="admBtn admBtnGhost admBtnSm" onClick={() => void logout()} type="button"><LogoutIcon /> Sign out</button>
-        </div>
-      </div>
+      <p className="admSidebarNote">Every action you take here is recorded in the audit log.</p>
     </aside>
+  );
+}
+
+function AccountMenu() {
+  const { user, logout } = useAuth();
+  const { roles } = useAdmin();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const primaryRole = ROLE_ORDER.find((role) => roles.includes(role));
+  const name = user?.displayName ?? "Staff member";
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => { if (!wrap.current?.contains(event.target as Node)) setOpen(false); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="admAccount" ref={wrap}>
+      <button aria-expanded={open} aria-haspopup="true" aria-label={`Account: ${name}`} className="admAccountButton" onClick={() => setOpen((value) => !value)} type="button">
+        <Avatar name={name} size="sm" />
+        <span className="admAccountName">{name}</span>
+      </button>
+      {open && (
+        <div className="admAccountPanel">
+          <div className="admAccountHead">
+            <strong>{name}</strong>
+            {user?.email && <span>{user.email}</span>}
+          </div>
+          <div className="admAccountRoles">
+            <span>{primaryRole ? ROLE_LABELS[primaryRole] : "Staff"}</span>
+            {roles.length > 1 && <span>+{roles.length - 1} more {roles.length === 2 ? "role" : "roles"}</span>}
+          </div>
+          <button className="admAccountItem" onClick={() => void logout()} type="button"><LogoutIcon /> Sign out</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -98,6 +132,7 @@ function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const pathname = usePathname();
   const current = sectionForPath(pathname);
+  const isDetail = Boolean(current && pathname !== current.href);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -107,17 +142,33 @@ function Shell({ children }: { children: ReactNode }) {
   }, [menuOpen]);
 
   return (
-    <div className="admShell">
+    <div className={`admShell ${adminFont.variable}`}>
       <a className="admSkip" href="#admin-main">Skip to content</a>
       <Sidebar onNavigate={() => setMenuOpen(false)} open={menuOpen} />
       {menuOpen && <button aria-label="Close navigation" className="admScrim" onClick={() => setMenuOpen(false)} type="button" />}
       <div className="admBody">
-        <div className="admTopbar">
-          <button aria-controls="admin-navigation" aria-expanded={menuOpen} aria-label={menuOpen ? "Close navigation" : "Open navigation"} className="admIconBtn" onClick={() => setMenuOpen((value) => !value)} type="button">
+        <header className="admTopbar">
+          <button aria-controls="admin-navigation" aria-expanded={menuOpen} aria-label={menuOpen ? "Close navigation" : "Open navigation"} className="admIconBtn admMenuToggle" onClick={() => setMenuOpen((value) => !value)} type="button">
             {menuOpen ? <CloseIcon /> : <MenuIcon />}
           </button>
-          <span className="admTopbarTitle">{current?.label ?? "Admin"}</span>
-        </div>
+          <nav aria-label="Breadcrumb" className="admCrumbs">
+            <ol>
+              <li><Link href="/admin">Admin</Link></li>
+              {current && current.id !== "overview" && (
+                <li>
+                  <ChevronIcon aria-hidden="true" />
+                  {isDetail ? <Link href={current.href}>{current.label}</Link> : <span aria-current="page">{current.label}</span>}
+                </li>
+              )}
+              {current?.id === "overview" && <li><ChevronIcon aria-hidden="true" /><span aria-current="page">Overview</span></li>}
+              {isDetail && <li><ChevronIcon aria-hidden="true" /><span aria-current="page">Details</span></li>}
+            </ol>
+          </nav>
+          <div className="admTopbarActions">
+            <Link className="admBtn admBtnGhost admBtnSm admViewSite" href="/">View site <ExternalIcon /></Link>
+            <AccountMenu />
+          </div>
+        </header>
         <main className="admMain" id="admin-main" tabIndex={-1}>{children}</main>
       </div>
     </div>
@@ -126,7 +177,7 @@ function Shell({ children }: { children: ReactNode }) {
 
 function CenteredMessage({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="admCentered">
+    <div className={`admCentered ${adminFont.variable}`}>
       <div className="admCenteredCard" role="status">
         <SparkMark />
         <h1>{title}</h1>

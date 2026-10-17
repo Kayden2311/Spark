@@ -5,7 +5,7 @@ import { Suspense, useState } from "react";
 import { useAdmin } from "../_components/admin-context";
 import { Drawer } from "../_components/drawer";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, NoAccess, PageHeader, SkeletonRows } from "../_components/ui";
+import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, NoAccess, PageHeader, Panel, SkeletonRows, Tag } from "../_components/ui";
 import { adminApi, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
 import { REPORT_STATUS, formatDateTime, formatRelative, humanize } from "../_lib/format";
@@ -80,26 +80,28 @@ function ReportsQueue() {
 
   return (
     <>
-      <PageHeader eyebrow="Moderation" title="Reports" description="Content members reported. Review each one and decide whether it stays, gets hidden, or the report is dismissed." />
-
-      <div className="admToolbar">
-        <FilterTabs
-          label="Report status"
-          onChange={setStatus}
-          options={STATUSES.map((value) => ({ value, label: REPORT_STATUS[value].label, count: value === "open" ? overview?.reports.open : undefined }))}
-          value={status}
-        />
-      </div>
+      <PageHeader title="Reports" description="Content members reported. Decide whether it stays, gets hidden, or the report is dismissed." />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
-      {list.loading ? (
-        <SkeletonRows />
-      ) : list.items.length === 0 && !list.error ? (
-        <EmptyState title={status === "open" ? "The queue is clear" : `No ${REPORT_STATUS[status].label.toLowerCase()} reports`}>
-          {status === "open" ? "New reports from members will appear here." : "Reports move here once they reach this status."}
-        </EmptyState>
-      ) : (
-        <div className="admTableCard">
+      <Panel
+        footer={!list.loading && list.items.length > 0 ? <LoadMore hasMore={list.hasMore} loading={list.loadingMore} noun="report" onClick={() => void list.loadMore()} shown={list.items.length} /> : undefined}
+        label="Reports"
+        tabs={
+          <FilterTabs
+            label="Report status"
+            onChange={setStatus}
+            options={STATUSES.map((value) => ({ value, label: REPORT_STATUS[value].label, count: value === "open" ? overview?.reports.open : undefined }))}
+            value={status}
+          />
+        }
+      >
+        {list.loading ? (
+          <SkeletonRows />
+        ) : list.items.length === 0 && !list.error ? (
+          <EmptyState title={status === "open" ? "The queue is clear" : `No ${REPORT_STATUS[status].label.toLowerCase()} reports`}>
+            {status === "open" ? "New reports from members will appear here." : "Reports move here once they reach this status."}
+          </EmptyState>
+        ) : (
           <table className="admTable">
             <thead>
               <tr>
@@ -107,6 +109,7 @@ function ReportsQueue() {
                 <th scope="col">Community</th>
                 <th scope="col">Reason</th>
                 <th scope="col">Reporter</th>
+                <th scope="col">Status</th>
                 <th scope="col">Reported</th>
                 <th scope="col"><span className="admSrOnly">Actions</span></th>
               </tr>
@@ -116,18 +119,22 @@ function ReportsQueue() {
                 <tr key={report.id}>
                   <td data-label="Content">
                     <div className="admCellMain">
-                      <span className="admCellTitle">{report.target.title ?? "Comment"}</span>
-                      <span className="admCellSub">{excerpt(report.target.body, 90)}</span>
-                    </div>
-                    <div className="admBadgeRow">
-                      <Badge>{report.target.kind === "post" ? "Post" : "Comment"}</Badge>
-                      {report.target.moderationStatus === "hidden" && <Badge tone="red">Hidden</Badge>}
+                      <span className="admCellTitle">
+                        <Tag>{report.target.kind === "post" ? "Post" : "Comment"}</Tag>
+                        {report.target.title ?? "Comment"}
+                      </span>
+                      <span className="admCellSub admClamp">{excerpt(report.target.body, 110)}</span>
                     </div>
                   </td>
                   <td data-label="Community">{report.community.name}</td>
                   <td data-label="Reason">{humanize(report.reasonCode)}</td>
                   <td data-label="Reporter">{report.reporter.displayName}</td>
-                  <td className="admNowrap" data-label="Reported"><time dateTime={report.createdAt} title={formatDateTime(report.createdAt)}>{formatRelative(report.createdAt)}</time></td>
+                  <td data-label="Status">
+                    {report.target.moderationStatus === "hidden"
+                      ? <Badge tone="red">Content hidden</Badge>
+                      : <Badge tone={REPORT_STATUS[report.status].tone}>{REPORT_STATUS[report.status].label}</Badge>}
+                  </td>
+                  <td className="admNowrap admMutedCell" data-label="Reported"><time dateTime={report.createdAt} title={formatDateTime(report.createdAt)}>{formatRelative(report.createdAt)}</time></td>
                   <td className="admCellActions">
                     <button className="admBtn admBtnSecondary admBtnSm" onClick={() => setSelected(report)} type="button">
                       {actionable(report) ? "Review" : "View"}
@@ -137,9 +144,8 @@ function ReportsQueue() {
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-      {!list.loading && <LoadMore hasMore={list.hasMore} loading={list.loadingMore} onClick={() => void list.loadMore()} shown={list.items.length} />}
+        )}
+      </Panel>
 
       <Drawer
         footer={selected && actionable(selected) ? (
@@ -159,6 +165,7 @@ function ReportsQueue() {
             <div className="admBadgeRow">
               <Badge tone={REPORT_STATUS[selected.status].tone}>{REPORT_STATUS[selected.status].label}</Badge>
               <Badge tone={selected.target.moderationStatus === "hidden" ? "red" : "green"}>{selected.target.moderationStatus === "hidden" ? "Content hidden" : "Content visible"}</Badge>
+              <Tag>{selected.target.kind === "post" ? "Post" : "Comment"}</Tag>
             </div>
             <article className="admContentPreview">
               {selected.target.title && <h3>{selected.target.title}</h3>}

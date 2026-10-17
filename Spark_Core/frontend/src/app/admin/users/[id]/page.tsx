@@ -6,13 +6,13 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "../../../auth-context";
 import { useAdmin } from "../../_components/admin-context";
-import { ChevronIcon } from "../../_components/icons";
+import { ArrowLeftIcon } from "../../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../../_components/reason-dialog";
 import { canChangeStatus, statusRequest } from "../../_components/user-actions";
-import { Avatar, Badge, EmptyState, ErrorBanner, KeyValue, NoAccess, SkeletonRows } from "../../_components/ui";
+import { Avatar, Badge, EmptyState, ErrorBanner, KeyValue, NoAccess, SkeletonRows, Tag } from "../../_components/ui";
 import { ApiError, adminApi, messageOf, reloadIfStale } from "../../_lib/api";
 import { PLATFORM_ROLES, canAccess, canManageRoles } from "../../_lib/access";
-import { AUDIT_ACTIONS, ROLE_DESCRIPTIONS, ROLE_LABELS, ROLE_TONES, USER_STATUS, describeAction, formatDate, formatDateTime, formatRelative } from "../../_lib/format";
+import { AUDIT_ACTIONS, ROLE_DESCRIPTIONS, ROLE_LABELS, USER_STATUS, describeAction, formatDate, formatDateTime, formatRelative } from "../../_lib/format";
 import type { PlatformRole, UserDetail } from "../../_lib/types";
 
 export default function UserDetailPage() {
@@ -87,60 +87,65 @@ export default function UserDetailPage() {
 
   return (
     <>
-      <nav aria-label="Breadcrumb" className="admBreadcrumb">
-        <Link href="/admin/users">Users</Link>
-        <ChevronIcon />
-        <span aria-current="page">{detail.displayName}</span>
-      </nav>
+      <Link className="admBackLink" href="/admin/users"><ArrowLeftIcon /> All users</Link>
 
       <header className="admProfileHeader">
         <Avatar name={detail.displayName} size="lg" />
         <div className="admProfileText">
-          <h1>{detail.displayName}{isMe ? " (you)" : ""}</h1>
-          <p>{detail.email ?? "No email on file"}</p>
+          <h1>{detail.displayName}{isMe ? <span className="admYou">You</span> : null}</h1>
+          <p>{detail.email ?? "No email on file"} · Joined {formatDate(detail.createdAt)}</p>
           <div className="admBadgeRow">
             <Badge tone={USER_STATUS[detail.status].tone}>{USER_STATUS[detail.status].label}</Badge>
-            {detail.platformRoles.map((role) => <Badge key={role} tone={ROLE_TONES[role]}>{ROLE_LABELS[role]}</Badge>)}
+            {detail.platformRoles.map((role) => <Tag key={role}>{ROLE_LABELS[role]}</Tag>)}
           </div>
         </div>
         {!isMe && canChangeStatus(roles, detail) && (
-          <button className={`admBtn ${detail.status === "active" ? "admBtnDanger" : "admBtnPrimary"}`} onClick={changeStatus} type="button">
+          <button className={`admBtn ${detail.status === "active" ? "admBtnDangerOutline" : "admBtnPrimary"}`} onClick={changeStatus} type="button">
             {detail.status === "active" ? "Suspend user" : "Reactivate user"}
           </button>
         )}
       </header>
       {error && <ErrorBanner message={error} onRetry={reload} />}
 
-      <div className="admSplit">
+      <div className="admGrid">
         <section aria-labelledby="profile-title" className="admCard">
-          <h2 className="admSectionTitle" id="profile-title">Account</h2>
+          <div className="admCardHead">
+            <div>
+              <h2 id="profile-title">Account</h2>
+              <p>Sign-in and membership details.</p>
+            </div>
+          </div>
           <KeyValue
             items={[
-              ["Email", detail.email ? <>{detail.email} {detail.emailVerified ? <Badge tone="green">Verified</Badge> : <Badge>Unverified</Badge>}</> : "None"],
-              ["Joined", formatDate(detail.createdAt)],
-              ["Last sign-in", detail.lastLoginAt ? `${formatRelative(detail.lastLoginAt)} (${formatDateTime(detail.lastLoginAt)})` : "Never"],
+              ["Email", detail.email ? <span className="admInline">{detail.email}{detail.emailVerified ? <Badge tone="green">Verified</Badge> : <Badge>Unverified</Badge>}</span> : "None"],
+              ["Last sign-in", detail.lastLoginAt ? <span title={formatDateTime(detail.lastLoginAt)}>{formatRelative(detail.lastLoginAt)}</span> : "Never"],
               ["Active sessions", detail.activeSessions],
               ["Workspaces", detail.workspaceCount],
               ["Communities", detail.communityCount],
-              ["Locale and time zone", `${detail.locale} · ${detail.timezone}`],
+              ["Locale", detail.locale],
+              ["Time zone", detail.timezone],
             ]}
           />
         </section>
 
         <section aria-labelledby="roles-title" className="admCard">
-          <h2 className="admSectionTitle" id="roles-title">Platform roles</h2>
-          <p className="admMuted admSmall">{manageRoles ? "Every change asks for a reason and is recorded in the audit log." : "Only a super admin can change platform roles."}</p>
+          <div className="admCardHead">
+            <div>
+              <h2 id="roles-title">Platform roles</h2>
+              <p>{manageRoles ? "Every change asks for a reason and is recorded in the audit log." : "Only a super admin can change platform roles."}</p>
+            </div>
+          </div>
           <ul className="admRoleList">
             {PLATFORM_ROLES.map((role) => {
               const grantedAt = held.get(role);
               return (
                 <li key={role}>
                   <div>
-                    <strong>{ROLE_LABELS[role]}</strong>
+                    <strong>{ROLE_LABELS[role]}{grantedAt && <Badge tone="blue">Held</Badge>}</strong>
                     <span>{ROLE_DESCRIPTIONS[role]}</span>
-                    {grantedAt && <span className="admRoleSince">Held since {formatDate(grantedAt)}</span>}
+                    {grantedAt && <span className="admRoleSince">Since {formatDate(grantedAt)}</span>}
                   </div>
-                  {manageRoles ? (
+                  {manageRoles && (
                     <button
                       aria-label={`${grantedAt ? "Revoke" : "Grant"} ${ROLE_LABELS[role]}`}
                       className={`admBtn admBtnSm ${grantedAt ? "admBtnDangerOutline" : "admBtnSecondary"}`}
@@ -151,8 +156,6 @@ export default function UserDetailPage() {
                     >
                       {grantedAt ? "Revoke" : "Grant"}
                     </button>
-                  ) : (
-                    grantedAt ? <Badge tone={ROLE_TONES[role]}>Held</Badge> : <span className="admMuted admSmall">Not held</span>
                   )}
                 </li>
               );
@@ -161,22 +164,29 @@ export default function UserDetailPage() {
         </section>
       </div>
 
-      <section aria-labelledby="history-title" className="admCard">
-        <h2 className="admSectionTitle" id="history-title">Governance history</h2>
+      <section aria-labelledby="history-title" className="admCard admCardFlush">
+        <div className="admCardHead">
+          <div>
+            <h2 id="history-title">Governance history</h2>
+            <p>Staff actions taken on this account, newest first.</p>
+          </div>
+        </div>
         {detail.history.length === 0 ? (
-          <p className="admMuted">No staff actions have been taken on this account.</p>
+          <p className="admCardEmpty">No staff actions have been taken on this account.</p>
         ) : (
-          <ol className="admTimeline">
+          <ul className="admActivity">
             {detail.history.map((entry) => (
               <li key={entry.id}>
-                <span className={`admTimelineDot admTone-${AUDIT_ACTIONS[entry.action]?.tone ?? "neutral"}`} />
-                <div>
-                  <p><strong>{describeAction(entry)}</strong> by {entry.actor.displayName}</p>
-                  <p className="admMuted">“{entry.reason}” · <time dateTime={entry.createdAt} title={formatDateTime(entry.createdAt)}>{formatRelative(entry.createdAt)}</time></p>
+                <Avatar name={entry.actor.displayName} size="sm" />
+                <div className="admActivityText">
+                  <p><strong>{entry.actor.displayName}</strong> {describeAction(entry).toLowerCase()}</p>
+                  <p className="admActivityReason">{entry.reason}</p>
                 </div>
+                <span className={`admActivityKind admTone-${AUDIT_ACTIONS[entry.action]?.tone ?? "neutral"}`}>{entry.action.split(".")[0]}</span>
+                <time dateTime={entry.createdAt} title={formatDateTime(entry.createdAt)}>{formatRelative(entry.createdAt)}</time>
               </li>
             ))}
-          </ol>
+          </ul>
         )}
       </section>
       <ReasonDialog onClose={() => setDialog(null)} request={dialog} />

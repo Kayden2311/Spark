@@ -5,7 +5,7 @@ import { Suspense, useState } from "react";
 import { useAdmin } from "../_components/admin-context";
 import { SearchIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Badge, EmptyState, ErrorBanner, FilterTabs, LoadMore, NoAccess, PageHeader, SkeletonRows } from "../_components/ui";
+import { Badge, EmptyState, ErrorBanner, FilterTabs, LoadMore, NoAccess, PageHeader, Panel, RowMenu, SkeletonRows } from "../_components/ui";
 import { adminApi, query, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
 import { COMMUNITY_STATE, formatDate, humanize } from "../_lib/format";
@@ -77,24 +77,26 @@ function CommunitiesList() {
 
   return (
     <>
-      <PageHeader eyebrow="Moderation" title="Communities" description="Feature standout communities, freeze ones that need a pause, and archive those that are no longer active." />
-
-      <div className="admToolbar">
-        <FilterTabs label="Community state" onChange={setFilter} options={FILTERS.map((value) => ({ value, label: value === "all" ? "All" : value === "flagged" ? "Flagged" : COMMUNITY_STATE[value].label, count: counts[value] }))} value={filter} />
-        <label className="admSearch">
-          <SearchIcon />
-          <span className="admSrOnly">Search communities</span>
-          <input onChange={(event) => setSearch(event.target.value)} placeholder="Search by name or slug" type="search" value={search} />
-        </label>
-      </div>
+      <PageHeader title="Communities" description="Feature standout communities, freeze ones that need a pause, and archive those that are no longer active." />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
-      {list.loading ? (
-        <SkeletonRows />
-      ) : list.items.length === 0 && !list.error ? (
-        <EmptyState title="No communities match">{settledSearch ? "Try a different name or slug." : "Communities in this state will appear here."}</EmptyState>
-      ) : (
-        <div className="admTableCard">
+      <Panel
+        footer={!list.loading && list.items.length > 0 ? <LoadMore hasMore={list.hasMore} loading={list.loadingMore} noun="community" plural="communities" onClick={() => void list.loadMore()} shown={list.items.length} /> : undefined}
+        label="Communities"
+        tabs={<FilterTabs label="Community state" onChange={setFilter} options={FILTERS.map((value) => ({ value, label: value === "all" ? "All" : value === "flagged" ? "Flagged" : COMMUNITY_STATE[value].label, count: counts[value] }))} value={filter} />}
+        tools={
+          <label className="admSearch">
+            <SearchIcon />
+            <span className="admSrOnly">Search communities</span>
+            <input onChange={(event) => setSearch(event.target.value)} placeholder="Search name or slug" type="search" value={search} />
+          </label>
+        }
+      >
+        {list.loading ? (
+          <SkeletonRows />
+        ) : list.items.length === 0 && !list.error ? (
+          <EmptyState title="No communities match">{settledSearch ? "Try a different name or slug." : "Communities in this state will appear here."}</EmptyState>
+        ) : (
           <table className="admTable">
             <thead>
               <tr>
@@ -110,37 +112,35 @@ function CommunitiesList() {
               {list.items.map((community) => (
                 <tr key={community.id}>
                   <td data-label="Community">
-                    <div className="admCellMain">
-                      <span className="admCellTitle">{community.name}</span>
-                      <span className="admCellSub">/{community.slug} · {humanize(community.visibility)}{community.stage ? ` · ${community.stage}` : ""} · by {community.creator.displayName}</span>
+                    <div className="admEntity">
+                      <span aria-hidden="true" className="admEntityMark">{community.name.slice(0, 1).toUpperCase()}</span>
+                      <div className="admCellMain">
+                        <span className="admCellTitle">{community.name}</span>
+                        <span className="admCellSub">/{community.slug} · {humanize(community.visibility)}{community.stage ? ` · ${community.stage}` : ""}</span>
+                      </div>
                     </div>
                   </td>
                   <td data-label="State"><Badge tone={COMMUNITY_STATE[community.state].tone}>{COMMUNITY_STATE[community.state].label}</Badge></td>
-                  <td className="admNum" data-label="Members">{community.memberCount}</td>
-                  <td className="admNum" data-label="Open reports">{community.openReports > 0 ? <Badge tone="red">{community.openReports}</Badge> : "0"}</td>
-                  <td className="admNowrap" data-label="Created">{formatDate(community.createdAt)}</td>
+                  <td className="admNum" data-label="Members">{community.memberCount.toLocaleString("en-US")}</td>
+                  <td className="admNum" data-label="Open reports">{community.openReports > 0 ? <Badge tone="red">{community.openReports}</Badge> : <span className="admMutedCell">0</span>}</td>
+                  <td className="admNowrap admMutedCell" data-label="Created">{formatDate(community.createdAt)}</td>
                   <td className="admCellActions">
-                    <div className="admActionGroup">
-                      {AVAILABLE[community.state].map((action) => (
-                        <button
-                          aria-label={`${COPY[action].label} ${community.name}`}
-                          className={`admBtn admBtnSm ${COPY[action].tone === "danger" ? "admBtnDangerOutline" : "admBtnSecondary"}`}
-                          key={action}
-                          onClick={() => act(community, action)}
-                          type="button"
-                        >
-                          {COPY[action].label}
-                        </button>
-                      ))}
-                    </div>
+                    <RowMenu
+                      actions={AVAILABLE[community.state].map((action) => ({
+                        label: COPY[action].label,
+                        tone: COPY[action].tone === "danger" ? ("danger" as const) : undefined,
+                        separated: action === "archive" && community.state !== "frozen",
+                        onSelect: () => act(community, action),
+                      }))}
+                      label={`Actions for ${community.name}`}
+                    />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-      {!list.loading && <LoadMore hasMore={list.hasMore} loading={list.loadingMore} onClick={() => void list.loadMore()} shown={list.items.length} />}
+        )}
+      </Panel>
       <ReasonDialog onClose={() => setDialog(null)} request={dialog} />
     </>
   );

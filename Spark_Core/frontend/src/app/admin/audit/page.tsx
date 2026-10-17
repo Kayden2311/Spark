@@ -4,10 +4,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { useAdmin } from "../_components/admin-context";
-import { Badge, EmptyState, ErrorBanner, LoadMore, NoAccess, PageHeader, SkeletonRows } from "../_components/ui";
+import { Avatar, Badge, EmptyState, ErrorBanner, LoadMore, NoAccess, PageHeader, Panel, SkeletonRows } from "../_components/ui";
 import { query } from "../_lib/api";
 import { canAccess } from "../_lib/access";
-import { AUDIT_ACTIONS, describeAction, formatDateTime, formatRelative, humanize } from "../_lib/format";
+import { AUDIT_ACTIONS, describeAction, formatDateTime, humanize } from "../_lib/format";
 import type { AuditAction, AuditEntry } from "../_lib/types";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useQueryState, useQueryUpdater } from "../_lib/use-query-state";
@@ -58,48 +58,52 @@ function AuditLog() {
 
   return (
     <>
-      <PageHeader eyebrow="Administration" title="Audit log" description="Every governance action, who took it and why. Entries are permanent and cannot be edited." />
-
-      <div className="admFilters" role="group" aria-label="Filter the audit log">
-        <label className="admSelect admLabeled">
-          <span>Action</span>
-          <select onChange={(event) => setAction(event.target.value as "any" | AuditAction)} value={action}>
-            <option value="any">Any action</option>
-            {ACTIONS.map((value) => <option key={value} value={value}>{AUDIT_ACTIONS[value].label}</option>)}
-          </select>
-        </label>
-        <label className="admSelect admLabeled">
-          <span>Target</span>
-          <select onChange={(event) => setTarget(event.target.value as TargetFilter)} value={target}>
-            <option value="any">Anything</option>
-            {TARGETS.map((value) => <option key={value} value={value}>{humanize(value)}s</option>)}
-          </select>
-        </label>
-        <label className="admDate admLabeled">
-          <span>From</span>
-          <input max={to || undefined} onChange={(event) => setFrom(event.target.value)} type="date" value={from} />
-        </label>
-        <label className="admDate admLabeled">
-          <span>To</span>
-          <input min={from || undefined} onChange={(event) => setTo(event.target.value)} type="date" value={to} />
-        </label>
-        {filtered && <button className="admBtn admBtnGhost admBtnSm" onClick={clear} type="button">Clear filters</button>}
-      </div>
+      <PageHeader title="Audit log" description="Every governance action, who took it and why. Entries are permanent and cannot be edited." />
 
       {invalidRange && <ErrorBanner message="The start date must be on or before the end date." />}
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
-      {list.loading ? (
-        <SkeletonRows />
-      ) : list.items.length === 0 && !list.error && !invalidRange ? (
-        <EmptyState title={filtered ? "No entries match these filters" : "No governance actions yet"}>
-          {filtered ? "Try a wider date range or a different action." : "Actions taken in this console are recorded here automatically."}
-        </EmptyState>
-      ) : (
-        <div className="admTableCard">
+      <Panel
+        footer={!list.loading && list.items.length > 0 ? <LoadMore hasMore={list.hasMore} loading={list.loadingMore} noun="entry" plural="entries" onClick={() => void list.loadMore()} shown={list.items.length} /> : undefined}
+        label="Audit entries"
+        tabs={
+          <div aria-label="Filter the audit log" className="admFilters" role="group">
+            <label className="admSelect">
+              <span className="admSrOnly">Action</span>
+              <select onChange={(event) => setAction(event.target.value as "any" | AuditAction)} value={action}>
+                <option value="any">All actions</option>
+                {ACTIONS.map((value) => <option key={value} value={value}>{AUDIT_ACTIONS[value].label}</option>)}
+              </select>
+            </label>
+            <label className="admSelect">
+              <span className="admSrOnly">Target</span>
+              <select onChange={(event) => setTarget(event.target.value as TargetFilter)} value={target}>
+                <option value="any">All targets</option>
+                {TARGETS.map((value) => <option key={value} value={value}>{humanize(value)}s</option>)}
+              </select>
+            </label>
+            <label className="admDate">
+              <span className="admDateLabel">From</span>
+              <input max={to || undefined} onChange={(event) => setFrom(event.target.value)} type="date" value={from} />
+            </label>
+            <label className="admDate">
+              <span className="admDateLabel">To</span>
+              <input min={from || undefined} onChange={(event) => setTo(event.target.value)} type="date" value={to} />
+            </label>
+            {filtered && <button className="admBtn admBtnGhost admBtnSm" onClick={clear} type="button">Clear filters</button>}
+          </div>
+        }
+      >
+        {list.loading ? (
+          <SkeletonRows />
+        ) : list.items.length === 0 && !list.error && !invalidRange ? (
+          <EmptyState title={filtered ? "No entries match these filters" : "No governance actions yet"}>
+            {filtered ? "Try a wider date range or a different action." : "Actions taken in this console are recorded here automatically."}
+          </EmptyState>
+        ) : (
           <table className="admTable">
             <thead>
               <tr>
-                <th scope="col">When</th>
+                <th scope="col">Time</th>
                 <th scope="col">Action</th>
                 <th scope="col">Target</th>
                 <th scope="col">Staff member</th>
@@ -111,27 +115,32 @@ function AuditLog() {
                 const detail = detailOf(entry);
                 return (
                   <tr key={entry.id}>
-                    <td className="admNowrap" data-label="When"><time dateTime={entry.createdAt} title={formatDateTime(entry.createdAt)}>{formatRelative(entry.createdAt)}</time></td>
+                    <td className="admNowrap admMutedCell" data-label="Time"><time dateTime={entry.createdAt} title={formatDateTime(entry.createdAt)}>{formatDateTime(entry.createdAt)}</time></td>
                     <td data-label="Action">
-                      <Badge tone={AUDIT_ACTIONS[entry.action]?.tone ?? "neutral"}>{describeAction(entry)}</Badge>
-                      {detail && <span className="admCellSub admBlock">{detail}</span>}
+                      <div className="admCellMain">
+                        <Badge tone={AUDIT_ACTIONS[entry.action]?.tone ?? "neutral"}>{describeAction(entry)}</Badge>
+                        {detail && <span className="admCellSub">{detail}</span>}
+                      </div>
                     </td>
                     <td data-label="Target">
-                      {entry.target.type === "user" && canAccess(roles, "users")
-                        ? <Link className="admTextLink" href={`/admin/users/${entry.target.id}`}>{entry.target.label}</Link>
-                        : entry.target.label}
-                      <span className="admCellSub admBlock">{humanize(entry.target.type)}</span>
+                      <div className="admCellMain">
+                        {entry.target.type === "user" && canAccess(roles, "users")
+                          ? <Link className="admTextLink" href={`/admin/users/${entry.target.id}`}>{entry.target.label}</Link>
+                          : <span>{entry.target.label}</span>}
+                        <span className="admCellSub">{humanize(entry.target.type)}</span>
+                      </div>
                     </td>
-                    <td data-label="Staff">{entry.actor.displayName}</td>
+                    <td data-label="Staff">
+                      <span className="admInline"><Avatar name={entry.actor.displayName} size="sm" />{entry.actor.displayName}</span>
+                    </td>
                     <td className="admReasonCell" data-label="Reason">{entry.reason}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        </div>
-      )}
-      {!list.loading && <LoadMore hasMore={list.hasMore} loading={list.loadingMore} onClick={() => void list.loadMore()} shown={list.items.length} />}
+        )}
+      </Panel>
     </>
   );
 }

@@ -161,7 +161,7 @@ describe("reports queue", () => {
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
     expect(await screen.findByText("Second report")).toBeInTheDocument();
-    expect(screen.getByText("2 shown")).toBeInTheDocument();
+    expect(screen.getByText("2 reports")).toBeInTheDocument();
   });
 
   it("explains missing access instead of calling the API", async () => {
@@ -223,7 +223,21 @@ describe("review fixes", () => {
       "GET /api/v1/admin/users": json({ items: [person("a", "Another Admin", ["platform_admin"]), person("m", "Member Mia", [])], nextCursor: null }),
     });
     render(<AdminLayout><UsersAdminPage /></AdminLayout>);
-    expect(await screen.findByRole("button", { name: "Suspend Member Mia" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Suspend Another Admin" })).not.toBeInTheDocument();
+    // Row actions live in an overflow menu that follows the menu button pattern.
+    const memberMenu = await screen.findByRole("button", { name: "Actions for Member Mia" });
+    expect(memberMenu).toHaveAttribute("aria-haspopup", "menu");
+    await userEvent.click(memberMenu);
+    expect(memberMenu).toHaveAttribute("aria-expanded", "true");
+    const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual(["View details", "Suspend user"]);
+    expect(items[0]).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(items[1]).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(memberMenu).toHaveFocus();
+
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Another Admin" }));
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View details"]);
   });
 });
