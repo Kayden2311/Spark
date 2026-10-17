@@ -1,13 +1,15 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useState, useMemo } from "react";
 import { useAuth } from "../auth-context";
-import { HeroParticles } from "../hero-particles";
 import { SignalParticles } from "../signal-particles";
-import { filterCommunities, hasActiveFilters } from "./filter";
+import { ALL_TOPICS, ALL_VALUES, emptyFilters, filterCommunities, hasActiveFilters } from "./filter";
 import { CommunityCard } from "./community-card";
 import { communitySummaries } from "./community-summaries";
+import { formatCount, formatEventDate } from "./format";
+import type { CommunityCategory } from "./types";
 
 function SparkMark() {
   return (
@@ -17,33 +19,35 @@ function SparkMark() {
   );
 }
 
-
-
 function SearchIcon() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </svg>
   );
 }
 
-const CATEGORIES = [
-  "All topics",
-  "B2B SaaS",
-  "AI & Data",
-  "Climate Tech",
-  "Product",
-  "FinTech",
-  "Founders Circle",
-] as const;
+const CATEGORIES: CommunityCategory[] = ["B2B SaaS", "AI & Data", "Climate Tech", "Product", "FinTech", "Founders Circle"];
+const LOCATIONS = ["Ho Chi Minh City", "Hanoi", "Remote · Vietnam"];
+const STAGES = ["Idea to Pre-seed", "Pre-seed to Seed", "Seed to Series A", "Any stage"];
+
+const totals = {
+  circles: communitySummaries.length,
+  members: communitySummaries.reduce((sum, item) => sum + item.memberCount, 0),
+  posts: communitySummaries.reduce((sum, item) => sum + item.weeklyPosts, 0),
+};
+const mostActive = [...communitySummaries].sort((a, b) => b.weeklyPosts - a.weeklyPosts)[0]!;
+const nextUp = communitySummaries
+  .filter((item) => item.nextEventAt)
+  .sort((a, b) => a.nextEventAt!.localeCompare(b.nextEventAt!))[0];
 
 export default function CommunitiesPage() {
   const { isAuthenticated } = useAuth();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string>("All topics");
-  const [selectedLocation, setSelectedLocation] = useState<string>("all");
-  const [selectedStage, setSelectedStage] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useState(emptyFilters.searchTerm);
+  const [selectedCategory, setSelectedCategory] = useState<string>(ALL_TOPICS);
+  const [selectedLocation, setSelectedLocation] = useState<string>(ALL_VALUES);
+  const [selectedStage, setSelectedStage] = useState<string>(ALL_VALUES);
 
   const filters = useMemo(
     () => ({ searchTerm, category: selectedCategory, location: selectedLocation, stage: selectedStage }),
@@ -51,20 +55,27 @@ export default function CommunitiesPage() {
   );
   const filteredCommunities = useMemo(() => filterCommunities(communitySummaries, filters), [filters]);
   const hasFilters = hasActiveFilters(filters);
+  // Category counts follow the other filters, so each chip shows what clicking it would return.
+  const categoryCounts = useMemo(() => {
+    const others = filterCommunities(communitySummaries, { ...filters, category: ALL_TOPICS });
+    const counts = new Map<string, number>([[ALL_TOPICS, others.length]]);
+    for (const item of others) counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+    return counts;
+  }, [filters]);
 
   const handleResetFilters = () => {
-    setSearchTerm("");
-    setSelectedCategory("All topics");
-    setSelectedLocation("all");
-    setSelectedStage("all");
+    setSearchTerm(emptyFilters.searchTerm);
+    setSelectedCategory(ALL_TOPICS);
+    setSelectedLocation(ALL_VALUES);
+    setSelectedStage(ALL_VALUES);
   };
+
+  const resultsTitle = selectedCategory === ALL_TOPICS ? "All circles" : selectedCategory;
 
   return (
     <main className="sparkLanding communityPageRoot">
-      {/* Global Background Particles (Live Signal Flow wave) */}
       <SignalParticles />
 
-      {/* Top Header */}
       <header className="sparkHeader">
         <Link className="sparkBrand" href="/" aria-label="Spark home">
           <SparkMark />
@@ -95,141 +106,149 @@ export default function CommunitiesPage() {
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="communityHeroSection">
-        <HeroParticles />
-        <div className="heroGlow" aria-hidden="true" />
-        <div className="communityHeroContent">
-          <div className="sparkKicker" style={{ justifyContent: "center" }}>
-            <span></span>
-            Public Community Directory
+      <section className="dirHero" aria-labelledby="directory-title">
+        <div className="dirHeroPanel">
+          <div className="dirHeroCopy">
+            <p className="dirEyebrow">Community directory</p>
+            <h1 id="directory-title">Find the right room for the work ahead.</h1>
+            <p className="dirHeroLead">
+              Curated founder circles and practitioner groups where conversations turn into shared plans.
+            </p>
+            <dl className="dirHeroStats">
+              <div>
+                <dt>Circles</dt>
+                <dd>{totals.circles}</dd>
+              </div>
+              <div>
+                <dt>Members</dt>
+                <dd>{formatCount(totals.members)}</dd>
+              </div>
+              <div>
+                <dt>Posts this week</dt>
+                <dd>{formatCount(totals.posts)}</dd>
+              </div>
+            </dl>
           </div>
-          <h1>Find the right room for the work ahead.</h1>
-          <p>
-            Explore curated startup circles, founder peer groups, and high-trust practitioner rooms
-            built to turn conversations into structured execution.
-          </p>
+
+          <div className="dirHeroArt" aria-hidden="true">
+            <div className="dirHeroPhoto dirHeroPhotoMain">
+              <Image alt="" fill priority sizes="(max-width: 900px) 90vw, 28rem" src="/spark-community-discussion.png" />
+            </div>
+            <div className="dirHeroPhoto dirHeroPhotoTop">
+              <Image alt="" fill sizes="12rem" src="/spark-builder-circle.png" />
+            </div>
+            <div className="dirHeroPhoto dirHeroPhotoBottom">
+              <Image alt="" fill sizes="13rem" src="/spark-founder-circle.png" />
+            </div>
+            <div className="dirHeroChip dirHeroChipActive">
+              <span className="dirHeroChipDot" />
+              <div>
+                <strong>{mostActive.weeklyPosts} posts this week</strong>
+                <span>{mostActive.name}</span>
+              </div>
+            </div>
+            {nextUp && (
+              <div className="dirHeroChip dirHeroChipEvent">
+                <span className="dirHeroChipDate">{formatEventDate(nextUp.nextEventAt)}</span>
+                <div>
+                  <strong>Next session</strong>
+                  <span>{nextUp.name}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="dirToolbar" role="search">
+          <label className="dirSearch">
+            <SearchIcon />
+            <span className="srOnly">Search communities</span>
+            <input
+              type="search"
+              placeholder="Search by name, topic or tag"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </label>
+          <div className="dirSelects">
+            <label className="dirSelect">
+              <span>Location</span>
+              <select value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)}>
+                <option value={ALL_VALUES}>Anywhere</option>
+                {LOCATIONS.map((location) => <option key={location} value={location}>{location}</option>)}
+              </select>
+            </label>
+            <label className="dirSelect">
+              <span>Stage</span>
+              <select value={selectedStage} onChange={(e) => setSelectedStage(e.target.value)}>
+                <option value={ALL_VALUES}>Any stage</option>
+                {STAGES.filter((stage) => stage !== "Any stage").map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+              </select>
+            </label>
+          </div>
         </div>
       </section>
 
-      {/* Filter and Search Bar */}
-      <section className="communityFilterContainer" aria-label="Filter communities">
-        <div className="communitySearchRow">
-          <div className="communitySearchInputWrapper">
-            <SearchIcon />
-            <input
-              type="search"
-              className="communitySearchInput"
-              placeholder="Search circles by name, topic, or tags (e.g. SaaS, AI, GTM)..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              aria-label="Search communities"
-            />
-          </div>
-
-          <div className="communityDropdownFilters">
-            <select
-              className="communitySelect"
-              value={selectedLocation}
-              onChange={(e) => setSelectedLocation(e.target.value)}
-              aria-label="Filter by location"
-            >
-              <option value="all">All locations</option>
-              <option value="Ho Chi Minh City">Ho Chi Minh City</option>
-              <option value="Hanoi">Hanoi</option>
-              <option value="Remote · Vietnam">Remote · Vietnam</option>
-            </select>
-
-            <select
-              className="communitySelect"
-              value={selectedStage}
-              onChange={(e) => setSelectedStage(e.target.value)}
-              aria-label="Filter by stage"
-            >
-              <option value="all">All stages</option>
-              <option value="Idea to Pre-seed">Idea to Pre-seed</option>
-              <option value="Pre-seed to Seed">Pre-seed to Seed</option>
-              <option value="Seed to Series A">Seed to Series A</option>
-              <option value="Any stage">Any stage</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Category Pills */}
-        <div className="communityCategoryTabs" role="tablist" aria-label="Categories">
-          {CATEGORIES.map((cat) => (
+      <section className="dirResults" aria-labelledby="directory-results-title">
+        <div className="dirChips" role="group" aria-label="Filter by topic">
+          {[ALL_TOPICS, ...CATEGORIES].map((category) => (
             <button
-              key={cat}
+              aria-pressed={selectedCategory === category}
+              className="dirChip"
+              key={category}
+              onClick={() => setSelectedCategory(category)}
               type="button"
-              role="tab"
-              aria-selected={selectedCategory === cat}
-              className={`categoryTabBtn ${selectedCategory === cat ? "active" : ""}`}
-              onClick={() => setSelectedCategory(cat)}
             >
-              {cat}
+              {category}
+              <span className="dirChipCount">{categoryCounts.get(category) ?? 0}</span>
             </button>
           ))}
         </div>
-      </section>
 
-      {/* Results Count & Reset Bar */}
-      <div className="communityResultsBar">
-        <span>
-          Showing <b>{filteredCommunities.length}</b> {filteredCommunities.length === 1 ? "community circle" : "community circles"}
-        </span>
-        {hasFilters && (
-          <button type="button" className="resetFiltersBtn" onClick={handleResetFilters}>
-            Reset filters
-          </button>
-        )}
-      </div>
-
-      {/* Community Grid */}
-      <section className="communityGrid" aria-label="Community results">
-        {filteredCommunities.length > 0 ? (
-          filteredCommunities.map((community) => <CommunityCard community={community} key={community.slug} />)
-        ) : (
-          <div className="communityEmptyState">
-            <h3>No community circles found</h3>
-            <p>We couldn&apos;t find any communities matching your current search and filter criteria.</p>
-            <button type="button" className="sparkPrimary" onClick={handleResetFilters}>
-              Clear all filters
+        <div className="dirResultsHeader">
+          <h2 id="directory-results-title">
+            {resultsTitle}
+            <span>{filteredCommunities.length} {filteredCommunities.length === 1 ? "circle" : "circles"}</span>
+          </h2>
+          {hasFilters && (
+            <button type="button" className="dirReset" onClick={handleResetFilters}>
+              Clear filters
             </button>
-          </div>
-        )}
+          )}
+        </div>
+
+        <div className="communityGrid">
+          {filteredCommunities.length > 0 ? (
+            filteredCommunities.map((community) => <CommunityCard community={community} key={community.slug} />)
+          ) : (
+            <div className="communityEmptyState">
+              <h3>No circles match these filters</h3>
+              <p>Try a broader topic or location, or clear the filters to see every circle.</p>
+              <button type="button" className="sparkPrimary" onClick={handleResetFilters}>
+                Clear all filters
+              </button>
+            </div>
+          )}
+        </div>
       </section>
 
-      {/* High-Impact Bottom Conversion Section */}
-      <section className="sparkCtaSection" aria-labelledby="community-cta-heading">
-        <div className="ctaBackgroundGlow" aria-hidden="true" />
-        <div className="sparkCtaCard">
-          <div className="ctaRadarField" aria-hidden="true">
-            <span className="ctaRadarRing ctaRadarRing1" />
-            <span className="ctaRadarRing ctaRadarRing2" />
-          </div>
-          <div className="sparkCtaContent">
-            <div className="sparkKicker ctaKicker">
-              <span className="ctaPulseDot" />
-              Build with Spark
-            </div>
-            <h2 id="community-cta-heading">Start your own community circle on Spark</h2>
-            <p className="ctaDescription">
-              Organize your startup cohort, founder alumni network, or niche developer group with
-              structured discussion rooms, task boards, and member schedules.
+      <section className="dirCta" aria-labelledby="community-cta-heading">
+        <div className="dirCtaCard">
+          <div>
+            <p className="dirEyebrow">Build with Spark</p>
+            <h2 id="community-cta-heading">Run a circle of your own</h2>
+            <p>
+              Give your cohort, alumni network or builder group discussion rooms, a shared board and one schedule.
+              Free to start.
             </p>
-            <div className="ctaActions">
-              <Link className="ctaPrimaryBtn" href={isAuthenticated ? "/workspace" : "/signup?redirect=/workspace"}>
-                Create a circle
-              </Link>
-              <Link className="ctaSecondaryBtn" href="/pricing">
-                View pricing plans
-              </Link>
-            </div>
-            <div className="ctaTrustRow">
-              <span>✓ Free for community starters</span>
-              <span>✓ Private & public rooms</span>
-              <span>✓ Instant setup</span>
-            </div>
+          </div>
+          <div className="dirCtaActions">
+            <Link className="dirCtaPrimary" href={isAuthenticated ? "/workspace" : "/signup?redirect=/workspace"}>
+              Create a circle
+            </Link>
+            <Link className="dirCtaSecondary" href="/pricing">
+              See pricing
+            </Link>
           </div>
         </div>
       </section>
