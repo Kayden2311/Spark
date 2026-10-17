@@ -8,7 +8,8 @@ import type { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 
 import type { AppConfig, AuthConfig } from "./config.js";
-import { registerAdminRoutes } from "./routes/admin.js";
+import { registerAdminRoutes } from "./routes/admin/index.js";
+import { registerOriginGuard } from "./routes/origin-guard.js";
 import { registerCredentialRoutes } from "./routes/auth-credentials.js";
 import { registerAuthProxyRoutes } from "./routes/auth-proxy.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -200,6 +201,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     rateLimit: options.rateLimit,
     logger: options.logger,
   });
+  registerOriginGuard(app, config.corsOrigins);
   registerAuthProxyRoutes(app, { authServiceUrl: config.authServiceUrl, fetchImpl: options.fetchImpl });
   if (options.pool) {
     registerAuthRoutes(app, { pool: options.pool });
