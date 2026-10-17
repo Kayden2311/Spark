@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { useAuth } from "../auth-context";
+import { safeRedirect } from "../safe-redirect";
 import { HeroParticles } from "../hero-particles";
 
 function SparkMark() {
@@ -75,7 +76,7 @@ function LockIcon() {
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectQuery = searchParams.get("redirect");
+  const redirectQuery = safeRedirect(searchParams.get("redirect"));
 
   const { isAuthenticated, signup, isLoading: authLoading } = useAuth();
 
