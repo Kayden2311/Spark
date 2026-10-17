@@ -8,8 +8,18 @@ const connectionString =
 
 // Seeded accounts have published passwords and their role grants bypass the audited staff functions,
 // so seeding is for local development only.
-const seedHost = new URL(connectionString).hostname;
+const seedUrl = new URL(connectionString);
+const seedHost = seedUrl.hostname;
 const loopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(seedHost);
+if (!["postgres:", "postgresql:"].includes(seedUrl.protocol)) {
+  console.error("Refusing to seed: the database URL must start with postgres:// or postgresql://.");
+  process.exit(1);
+}
+if (seedUrl.search) {
+  // node-postgres lets query parameters such as ?host= override the hostname checked below.
+  console.error("Refusing to seed: the database URL must not contain connection parameter overrides.");
+  process.exit(1);
+}
 if (process.env.NODE_ENV === "production" || (!loopback && process.env.SPARK_ALLOW_SEED !== "1")) {
   console.error(
     `Refusing to seed ${seedHost}: seeding creates accounts with published passwords. ` +
