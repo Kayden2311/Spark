@@ -76,6 +76,46 @@ function toReport(row: ReportRow) {
   };
 }
 
+interface PreviewRow {
+  post_id: string | null;
+  post_title: string | null;
+  post_body: string | null;
+  post_status: string | null;
+  post_created_at: Date | null;
+  post_deleted: boolean | null;
+  post_author_id: string | null;
+  post_author_name: string | null;
+  post_comment_count: string | null;
+  comment_id: string | null;
+  comment_body: string | null;
+  comment_status: string | null;
+  comment_created_at: Date | null;
+  comment_deleted: boolean | null;
+  comment_author_id: string | null;
+  comment_author_name: string | null;
+}
+
+function contentSchema(withComments: boolean) {
+  return {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      title: { type: ["string", "null"] },
+      body: { type: "string" },
+      moderationStatus: { type: "string", enum: ["visible", "hidden"] },
+      deleted: { type: "boolean" },
+      createdAt: { type: "string", format: "date-time" },
+      author: {
+        anyOf: [
+          { type: "object", properties: { id: { type: "string" }, displayName: { type: "string" } } },
+          { type: "null" },
+        ],
+      },
+      ...(withComments ? { commentCount: { type: "integer" } } : {}),
+    },
+  } as const;
+}
+
 const LIST_SQL = "SELECT *, created_at::text AS cursor_ts FROM spark.staff_list_reports($1, $2, $3::timestamptz, $4, $5)";
 
 export function registerReportRoutes(app: FastifyInstance, guard: StaffGuard): void {
@@ -194,6 +234,60 @@ export function registerReportRoutes(app: FastifyInstance, guard: StaffGuard): v
           : null,
         communityOpenReports: Number(row.community_open_reports),
         reporterReportsFiled: Number(row.reporter_reports),
+      };
+    },
+  );
+
+  // The reported content as members see it: the post with its author and, for a comment, the parent post.
+  app.get<{ Params: { id: string } }>(
+    "/api/v1/admin/reports/:id/preview",
+    {
+      schema: {
+        params: idParams,
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              post: { anyOf: [contentSchema(true), { type: "null" }] },
+              comment: { anyOf: [contentSchema(false), { type: "null" }] },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const staff = await guard.authorize(request, reply, CONTENT_STAFF);
+      if (!staff) return reply;
+      const rows = await guard.run(request, reply, staff, async (client) =>
+        (await client.query<PreviewRow>("SELECT * FROM spark.staff_report_preview($1)", [request.params.id])).rows);
+      if (reply.sent || !rows) return reply;
+      const row = rows[0];
+      if (!row) return problem(request, reply, 404, "Not Found", "report_not_found", "Report does not exist.");
+      const author = (id: string | null, name: string | null) => (id ? { id, displayName: name ?? "Unknown member" } : null);
+      return {
+        post: row.post_id
+          ? {
+              id: row.post_id,
+              title: row.post_title,
+              body: row.post_body ?? "",
+              moderationStatus: row.post_status,
+              deleted: row.post_deleted,
+              createdAt: row.post_created_at?.toISOString(),
+              author: author(row.post_author_id, row.post_author_name),
+              commentCount: Number(row.post_comment_count ?? 0),
+            }
+          : null,
+        comment: row.comment_id
+          ? {
+              id: row.comment_id,
+              title: null,
+              body: row.comment_body ?? "",
+              moderationStatus: row.comment_status,
+              deleted: row.comment_deleted,
+              createdAt: row.comment_created_at?.toISOString(),
+              author: author(row.comment_author_id, row.comment_author_name),
+            }
+          : null,
       };
     },
   );

@@ -92,6 +92,13 @@
       "when": 1792260000000,
       "tag": "0012_admin_insights",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792270000000,
+      "tag": "0013_report_preview",
+      "breakpoints": true
     }
   ]
 }

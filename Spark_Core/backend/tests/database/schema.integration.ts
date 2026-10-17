@@ -118,7 +118,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(13);
+    expect(result.rows[0].count).toBe(14);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -630,7 +630,7 @@ describe("Local PostgreSQL schema", () => {
       "is_workspace_member", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
       "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_health", "staff_community_series", "staff_engagement_heatmap", "staff_grant_role",
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
-      "staff_report_context", "staff_report_stats", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
+      "staff_report_context", "staff_report_preview", "staff_report_stats", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
       "staff_user_sessions",
     ]);
@@ -812,6 +812,17 @@ describe("Local PostgreSQL schema", () => {
     const [context] = await call(moderatorToken, `SELECT * FROM ${fn("staff_report_context")}($1)`, [report]);
     expect(context).toMatchObject({ author_id: member, author_name: "Insight member", author_reports: "1", author_hidden: "1" });
     expect(await call(moderatorToken, `SELECT * FROM ${fn("staff_report_context")}($1)`, [randomUUID()])).toEqual([]);
+    // Preview: a post report shows the post and its author; a comment report also shows the parent post.
+    const [postPreview] = await call(moderatorToken, `SELECT * FROM ${fn("staff_report_preview")}($1)`, [report]);
+    expect(postPreview).toMatchObject({ post_id: post, post_title: "Insight post", post_status: "hidden", post_author_name: "Insight member", post_comment_count: "1", comment_id: null });
+    const commentReport = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("content_reports")} (id,tenant_id,community_id,reporter_user_id,comment_id,reason_code) VALUES ($1,$2,$3,$4,$5,'harassment')`, [commentReport, tenant, community, admin, comment]);
+    const [commentPreview] = await call(moderatorToken, `SELECT * FROM ${fn("staff_report_preview")}($1)`, [commentReport]);
+    expect(commentPreview).toMatchObject({ post_id: post, post_title: "Insight post", comment_id: comment, comment_body: "Insight comment", comment_author_name: "Insight member" });
+    expect(await call(moderatorToken, `SELECT * FROM ${fn("staff_report_preview")}($1)`, [randomUUID()])).toEqual([]);
+    await expect(call(adminToken, `SELECT * FROM ${fn("staff_report_preview")}($1)`, [report])).resolves.toHaveLength(1);
+    await expect(call(null, `SELECT * FROM ${fn("staff_report_preview")}($1)`, [report])).rejects.toMatchObject({ code: "28000" });
     const [stats] = await call(moderatorToken, `SELECT * FROM ${fn("staff_report_stats")}(30)`);
     expect(Number(stats.closed)).toBeGreaterThanOrEqual(1);
     expect(stats.median_hours_to_close).not.toBeNull();

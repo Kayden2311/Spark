@@ -5,12 +5,13 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
 import { KeyboardIcon } from "../_components/icons";
+import { PostPreview } from "../_components/post-preview";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, NoAccess, PageHeader, SkeletonRows, Tag } from "../_components/ui";
 import { adminApi, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
 import { REPORT_STATUS, formatCount, formatDate, formatDateTime, formatRelative, humanize } from "../_lib/format";
-import type { Report, ReportContext, ReportStats, ReportStatus } from "../_lib/types";
+import type { Report, ReportContext, ReportPreview, ReportStats, ReportStatus } from "../_lib/types";
 import { useAdminData } from "../_lib/use-admin-data";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useQueryState } from "../_lib/use-query-state";
@@ -94,6 +95,20 @@ function ContextPanel({ report }: { report: Report }) {
         <div><dt>Reports by this reporter</dt><dd>{formatCount(reporterReportsFiled)}</dd></div>
       </dl>
     </div>
+  );
+}
+
+function ReportContent({ report }: { report: Report }) {
+  const preview = useAdminData<ReportPreview>(`/reports/${report.id}/preview`);
+  return (
+    <PostPreview
+      community={report.community.name}
+      error={preview.error}
+      fallback={{ title: report.target.title, body: report.target.body }}
+      loading={preview.loading}
+      onRetry={preview.reload}
+      preview={preview.data}
+    />
   );
 }
 
@@ -247,26 +262,23 @@ function TriageDesk() {
               <div className="admTriageHead">
                 <div>
                   <p className="admTriageEyebrow">{selected.target.kind === "comment" ? "Reported comment" : "Reported post"} · {selected.community.name}</p>
-                  <h2>{selected.target.title ?? "Comment"}</h2>
+                  <h2>Reported for {humanize(selected.reasonCode).toLowerCase()}</h2>
                   <div className="admBadgeRow">
                     <Badge tone={REPORT_STATUS[selected.status].tone}>{REPORT_STATUS[selected.status].label}</Badge>
                     <Badge tone={selected.target.moderationStatus === "hidden" ? "red" : "green"}>{selected.target.moderationStatus === "hidden" ? "Content hidden" : "Content visible"}</Badge>
-                    <Tag>{humanize(selected.reasonCode)}</Tag>
                   </div>
                 </div>
                 <span className="admTriagePosition">{index + 1} of {items.length}{list.hasMore ? "+" : ""}</span>
               </div>
               <div className="admTriageBody">
-                <article className="admContentPreview">
-                  <p>{selected.target.body}</p>
-                </article>
+                <ReportContent key={`content-${selected.id}`} report={selected} />
                 {selected.details && (
                   <div className="admTriageNote">
                     <span>Reporter&apos;s note</span>
                     <p>{selected.details}</p>
                   </div>
                 )}
-                <ContextPanel key={selected.id} report={selected} />
+                <ContextPanel key={`context-${selected.id}`} report={selected} />
                 <KeyValue
                   items={[
                     ["Reporter", <span className="admInline" key="reporter"><Avatar name={selected.reporter.displayName} size="sm" />{selected.reporter.displayName}</span>],
