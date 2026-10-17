@@ -707,7 +707,7 @@ export default function AdminPage() {
             {dataLoading ? (
               <p style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>Loading moderation queue...</p>
             ) : reports.length === 0 ? (
-              <p style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>No reports found in '{reportFilter}' status.</p>
+              <p style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>No reports found in &apos;{reportFilter}&apos; status.</p>
             ) : (
               <div style={{ overflowX: "auto" }}>
                 <table className="adminTable">
@@ -1114,7 +1114,7 @@ export default function AdminPage() {
             {dataLoading ? (
               <p style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>Loading promotion campaigns...</p>
             ) : campaignsList.length === 0 ? (
-              <p style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>No campaigns found in '{campaignFilter}' filter.</p>
+              <p style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>No campaigns found in &apos;{campaignFilter}&apos; filter.</p>
             ) : (
               <div style={{ overflowX: "auto" }}>
                 <table className="adminTable">
