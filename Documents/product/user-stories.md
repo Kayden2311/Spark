@@ -319,7 +319,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Content Moderator
 - **Priority**: Must
-- **Status**: Implemented as UI in `/admin` (Reports); backend queue not verified
+- **Status**: Implemented: `/admin/reports` and `/api/v1/admin/reports` (`0009_platform_governance`). Authorized scope is platform-wide, because platform roles are global; per-community moderator scopes are not modelled yet.
 - **Story**: As a Content Moderator, I want to see and resolve reports within my authorized scope so that harmful content is handled.
 - **Acceptance criteria**:
   - Given reports outside my scope, then they are not listed and cannot be fetched by id.
@@ -330,7 +330,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Content Moderator, Community Moderator, Campaign Moderator, Platform Admin
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented for platform staff actions: every action in `/admin` writes one row to the append-only `spark.platform_audit_events` in the same transaction, shown in `/admin/audit`. Community-owner moderation does not exist yet.
 - **Story**: As a moderator, I want every action recorded so that decisions are accountable.
 - **Acceptance criteria**:
   - Each moderation action stores actor, target, reason, and timestamp in the same transaction as the action.
@@ -343,7 +343,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Community Moderator, Platform Admin
 - **Priority**: Should
-- **Status**: Implemented as UI in `/admin` (Communities); backend not verified
+- **Status**: Implemented: `/admin/communities` and `POST /api/v1/admin/communities/{id}/actions` (feature, unfeature, freeze, unfreeze, archive, restore). A database trigger rejects new posts and comments in frozen or archived communities.
 - **Story**: As a Community Moderator, I want to feature, freeze, or archive a community so that platform quality is maintained.
 - **Acceptance criteria**:
   - Given I hold the role, then I can change community status and must supply a reason.
@@ -354,7 +354,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Campaign Moderator
 - **Priority**: Could
-- **Status**: Implemented as UI in `/admin` (Campaigns); backend not verified
+- **Status**: Implemented: `/admin/campaigns` and `POST /api/v1/admin/campaigns/{id}/review`. No reopen action exists, so decisions are final.
 - **Story**: As a Campaign Moderator, I want to approve or reject sponsored startup promotions so that only appropriate promotions run.
 - **Acceptance criteria**:
   - Given a pending campaign, then I can approve or reject with a reason.
@@ -364,7 +364,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Platform Admin
 - **Priority**: Should
-- **Status**: Implemented as UI in `/admin` (Users); backend not verified
+- **Status**: Implemented: `/admin/users`, `/admin/users/{id}` and `PATCH /api/v1/admin/users/{id}/status`.
 - **Story**: As a Platform Admin, I want to suspend or reactivate users so that abusive accounts are contained.
 - **Acceptance criteria**:
   - Given a suspension, then the user's sessions are revoked and sign-in is refused.
@@ -375,7 +375,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Super Admin
 - **Priority**: Should
-- **Status**: Implemented schema (`0005_platform_roles`); UI in `/admin`; API not verified
+- **Status**: Implemented: role management on `/admin/users/{id}`, `POST` and `DELETE /api/v1/admin/users/{id}/roles`.
 - **Story**: As a Super Admin, I want to view and assign platform roles so that privileges are least-privilege and reviewable.
 - **Acceptance criteria**:
   - Only `super_admin` can grant or revoke platform roles.

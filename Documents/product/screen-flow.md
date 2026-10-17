@@ -62,11 +62,14 @@ Filters at step 2: keyword, topic, location, and startup stage. The eventual API
 
 | Step | Route | Goal | Primary action | Mockup state |
 | --- | --- | --- | --- | --- |
-| 1 | `/admin` | Global platform administration | Select governance domain (Communities, Reports, Campaigns, Users) | Implemented (Platform Admin Console) |
-| 2 | `/admin` (Communities) | Moderate communities across platform | Feature, freeze, or archive community | Implemented |
-| 3 | `/admin` (Reports) | Resolve flagged content & violations | Dismiss or take action | Implemented |
-| 4 | `/admin` (Campaigns) | Review sponsored startup promotions | Approve or reject campaign | Implemented |
-| 5 | `/admin` (Users) | Manage platform user status | Suspend, reactivate, or audit roles | Implemented |
+| 1 | `/admin` | See what needs a decision (open reports, flagged communities, pending campaigns), recent activity and API health | Open a queue | Implemented |
+| 2 | `/admin/reports` | Resolve reported posts and comments | Hide content, keep content, or dismiss, with a reason | Implemented |
+| 3 | `/admin/communities` | Moderate communities across the platform | Feature, freeze, archive or restore, with a reason | Implemented |
+| 4 | `/admin/campaigns` | Review sponsored startup promotions | Approve or reject, with a reason | Implemented |
+| 5 | `/admin/users`, `/admin/users/{id}` | Manage accounts and platform roles | Suspend or reactivate; grant or revoke roles (super admin only) | Implemented |
+| 6 | `/admin/audit` | Review every governance action | Filter by action, target and date | Implemented |
+
+The sidebar shows only the sections the signed-in staff member's roles allow, and the API enforces the same rules. Every action asks for a reason and is recorded in the audit log.
 
 ## Delivery order
 

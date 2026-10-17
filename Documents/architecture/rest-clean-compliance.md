@@ -16,6 +16,8 @@ This document is the backend contract for `Spark_Core/backend`. Apply each rule 
 - Retry-sensitive mutations use an actor-scoped `Idempotency-Key`. Reusing the key with a different payload returns `409`.
 - Concurrent edits use `ETag`/`If-Match` or an explicit version contract.
 - OpenAPI describes every implemented status, media type, header, authentication rule, and limit.
+- State-changing requests with an `Origin` that is not an allowed frontend origin, or marked `Sec-Fetch-Site: cross-site`, are refused with `403 origin_not_allowed` (`src/routes/origin-guard.ts`).
+- Platform governance writes (`/api/v1/admin/*`) require a `reason` of 3 to 500 characters and are recorded in the platform audit log in the same transaction.
 - Credential operations (`POST /api/v1/auth/password/sign-up` and `/sign-in`) are served by the private auth process (`src/auth-server.ts`) under the same paths. The public API forwards them unchanged with the client address in `X-Forwarded-For` and relays status, body and `Set-Cookie`. If the auth process is unreachable the API returns `503` with `code: auth_unavailable`. No other route may move into the auth process without a matching security reason.
 
 ## Clean Architecture

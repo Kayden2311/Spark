@@ -27,7 +27,7 @@ pnpm dev
 - Platform Admin Console: `http://127.0.0.1:3000/admin`
 - Backend health: `http://127.0.0.1:4000/health`
 - Auth process health (private, loopback only): `http://127.0.0.1:4100/health`. `pnpm dev` starts both backend processes; the API forwards sign-up and sign-in to it.
-- OpenAPI Swagger docs: `http://127.0.0.1:4000/documentation`
+- OpenAPI: generated in-process by `@fastify/swagger` (`app.swagger()`); no documentation page is served yet.
 
 ### Running the auth process in production
 
@@ -56,6 +56,9 @@ The step-by-step deployment checklist lives in [Documents/deployment/hosting-che
  
 - **Standard User**: `user1@spark.app` / `UserPassword123!` (Workspace `spark-lab` owner)
 - **Platform Admin**: `admin@spark.app` / `AdminPassword123!` (`super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`)
+- **Moderator**: `moderator@spark.app` / `ModeratorPassword123!` (`content_moderator`, `community_moderator`; useful for checking role-gated sections)
+
+`pnpm --filter @spark/backend db:seed` also creates two pending sponsored campaigns when none exist.
  
 ## Verification
  

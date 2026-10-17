@@ -69,11 +69,11 @@ Role hierarchy notes: a Community Member and a Workspace Member are Users with e
 | UC-15 | Manage tasks | Workspace Member | US-E4, US-E5 | Mockup |
 | UC-16 | Read and clear notifications | User | US-F1, US-F2 | Mockup |
 | UC-17 | Report content | Reporter | US-G1 | Planned |
-| UC-18 | Resolve report | Content Moderator | US-G2, US-G3 | UI implemented, backend not verified |
-| UC-19 | Moderate community | Community Moderator | US-H1, US-G3 | UI implemented, backend not verified |
-| UC-20 | Review sponsored campaign | Campaign Moderator | US-H2, US-G3 | UI implemented, backend not verified |
-| UC-21 | Manage user status | Platform Admin | US-H3, US-G3 | UI implemented, backend not verified |
-| UC-22 | Assign platform roles | Super Admin | US-H4 | Schema implemented, API not verified |
+| UC-18 | Resolve report | Content Moderator | US-G2, US-G3 | Implemented (`/admin/reports`) |
+| UC-19 | Moderate community | Community Moderator | US-H1, US-G3 | Implemented (`/admin/communities`) |
+| UC-20 | Review sponsored campaign | Campaign Moderator | US-H2, US-G3 | Implemented (`/admin/campaigns`) |
+| UC-21 | Manage user status | Platform Admin | US-H3, US-G3 | Implemented (`/admin/users`) |
+| UC-22 | Assign platform roles | Super Admin | US-H4, US-G3 | Implemented (`/admin/users/{id}`) |
 | UC-23 | Dispatch notifications | System | US-F1 | Planned |
 
 Common rule for every authenticated use case: the session is validated first; authorization is checked per resource in the application use case; failures return a safe error that does not reveal hidden resources.
@@ -399,6 +399,7 @@ Common rule for every authenticated use case: the session is validated first; au
   - F1: Report outside scope. `404`.
   - F2: Already resolved. Conflict.
 - **Postconditions**: A moderation record exists for every action.
+- **Implementation notes**: Platform roles are global, so a content moderator's scope is every community and F1 does not occur yet. Each resolution also writes a `spark.platform_audit_events` row. Step 4 (UC-23 event) is not built because notifications do not exist yet.
 
 ### UC-19: Moderate community
 
@@ -411,8 +412,9 @@ Common rule for every authenticated use case: the session is validated first; au
   3. The system updates status and writes the moderation record in one transaction.
 - **Failure flows**:
   - F1: Missing role. `403`.
-  - F2: Invalid transition. Validation error.
+  - F2: Invalid transition. `409` with `code: invalid_transition`.
 - **Business rules**: Frozen communities reject new posts and comments; archived communities are read-only.
+- **Implementation notes**: Allowed transitions are feature (active only), unfeature, freeze (also removes featured), unfreeze, archive (clears both flags) and restore (archived only). A database trigger enforces the posting rule.
 
 ### UC-20: Review sponsored campaign
 
@@ -437,7 +439,9 @@ Common rule for every authenticated use case: the session is validated first; au
   2. On suspend, the system revokes all of the user's sessions and blocks sign-in.
   3. The system writes the moderation record.
 - **Failure flows**:
-  - F1: Target is a `super_admin`. The system refuses unless the actor is also `super_admin`.
+  - F1: Target is a `super_admin` or `platform_admin`. The system refuses (`403`) unless the actor is a `super_admin`.
+  - F2: Suspending the last active `super_admin`, or yourself. Refused (`409` or `400`).
+  - F3: The user already has the requested status. `409` with `code: status_unchanged`; nothing is recorded.
 - **Postconditions**: Suspension takes effect on the next request.
 
 ### UC-22: Assign platform roles
@@ -452,6 +456,7 @@ Common rule for every authenticated use case: the session is validated first; au
 - **Failure flows**:
   - F1: Revoking the last `super_admin`. Refused.
   - F2: Non-super-admin actor. `403`.
+- **Implementation notes**: Revoking a role the user does not hold returns `204` and records nothing, because the final state is the same.
 
 ---
 

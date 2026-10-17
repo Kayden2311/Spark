@@ -9,7 +9,7 @@ Application code is split into two deployable parts under [`Spark_Core`](Spark_C
 - `frontend`: Next.js 16, React 19, and TypeScript with UI/UX Pro Max design system (clean light SaaS theme, responsive navigation, production-ready login with OAuth suite, interactive Platform Governance Console at `/admin`, and landing page showcases).
 - `backend`: Fastify and TypeScript as a pragmatic Clean Architecture modular monolith.
 
-PostgreSQL is the source of truth, managed through Drizzle ORM migrations (`0000_product_tables.sql` to `0008_login_role.sql`) with row-level security (RLS) enforcement. Authentication uses Argon2id password hashing with SHA-256 bytea opaque session tokens. Redis supports distributed rate limiting and caching.
+PostgreSQL is the source of truth, managed through Drizzle ORM migrations (`0000_product_tables.sql` to `0011_campaign_review_lock.sql`) with row-level security (RLS) enforcement. Authentication uses Argon2id password hashing with SHA-256 bytea opaque session tokens. Redis supports distributed rate limiting and caching.
 
 ## Requirements
 
@@ -41,6 +41,7 @@ pnpm --filter @spark/backend exec node --env-file=../.env --import tsx scripts/s
 
 - **Standard User**: `user1@spark.app` / `UserPassword123!` (Owner of workspace `spark-lab`)
 - **Platform Admin**: `admin@spark.app` / `AdminPassword123!` (Platform staff: `super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`)
+- **Moderator**: `moderator@spark.app` / `ModeratorPassword123!` (`content_moderator`, `community_moderator`)
 
 ### Endpoints and pages
 
@@ -48,7 +49,7 @@ pnpm --filter @spark/backend exec node --env-file=../.env --import tsx scripts/s
 - **Sign In**: `http://127.0.0.1:3000/login`
 - **Platform Admin Console**: `http://127.0.0.1:3000/admin`
 - **Backend Health**: `http://127.0.0.1:4000/health`
-- **OpenAPI Documentation**: `http://127.0.0.1:4000/documentation`
+- **OpenAPI**: the spec is generated in-process by `@fastify/swagger` (`app.swagger()`); no documentation page is served yet.
 
 ## Quality checks
 

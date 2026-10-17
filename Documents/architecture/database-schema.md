@@ -1,6 +1,6 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0008_login_role.sql`), baseline constraints, FORCE RLS, read-only runtime grants, and authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) are implemented and verified. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0011_campaign_review_lock.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
 
@@ -25,6 +25,35 @@ Migrations `0006_scoped_runtime_access.sql`, `0007_governance_corrections.sql`, 
   - The API waits up to 15 s for the auth process. A sign-up that commits after that is reported as `503 auth_unavailable`; retrying returns `409 email_already_exists` and the user signs in normally.
 - Accepted low-severity edge cases: lock contention beyond `lock_timeout` (2 s) on governance writes surfaces as HTTP 500; a super-admin grant committed between the status check and the update of a concurrent suspension is not covered by the row lock (it requires three simultaneous administrative operations).
 - Open product decision: sign-up returns `409 email_already_exists`, which reveals registered emails. A neutral response needs an email-delivery flow first.
+
+## Platform governance and audit (`0009_platform_governance.sql` to `0011_campaign_review_lock.sql`)
+
+- **Audit log.** `spark.platform_audit_events` records every staff action in `/admin`: actor, action, target (type, id, and a label captured at the time), reason (3 to 500 characters) and non-sensitive metadata such as the role or the previous state.
+  - Actions are a closed set: `report.*`, `community.*`, `user.suspend`/`user.reactivate`, `role.grant`/`role.revoke` and `campaign.approve`/`campaign.reject`.
+  - The table is append-only (`reject_history_change`) and FORCE RLS.
+  - `spark_app` may only SELECT it, and the `staff_read` policy limits rows to `super_admin` and `platform_admin` sessions.
+  - Rows are written only by the definer helper `record_platform_audit`, which `spark_app` cannot execute. Each staff function calls it in the same transaction as the change, so a rolled-back change leaves no audit row and a refused or no-op action records nothing.
+- **Community states.** `communities.featured_at` and `frozen_at` sit next to `archived_at`. CHECK constraints keep archived communities unflagged, and frozen communities never featured.
+  - `staff_moderate_community` applies the transitions: feature, unfeature, freeze, unfreeze, archive and restore.
+  - The definer trigger `check_community_open` rejects new posts and comments in frozen or archived communities. It takes a share lock on the community row so an insert cannot race a concurrent freeze.
+- **Reasons everywhere.** `staff_resolve_report`, `staff_review_campaign`, `staff_moderate_community`, `staff_set_user_status`, `staff_grant_role` and `staff_revoke_role` all require a reason through `require_reason`.
+  - `staff_set_user_status` returns `unchanged`, and records nothing, when the user already has the requested status.
+- **Keyset paging.** Staff lists are ordered by `(created_at DESC, id DESC)` and supporting indexes were added.
+  - `staff_list_reports` takes the cursor directly. Other lists page through RLS-filtered reads in the API.
+  - API cursors carry PostgreSQL's own `created_at::text`, so microsecond timestamps never lose precision.
+- **Role filters.** Passing NULL to `staff_user_roles` or `staff_open_report_counts` returns every row, which backs the role and "flagged" filters.
+- **Other guards.**
+  - A pending campaign cannot be approved while its community is frozen or archived (`community_unavailable`); it can still be rejected. Approval share-locks the community row, so it cannot race a concurrent freeze or archive.
+  - `staff_set_user_status` locks the target user row before the admin-tier check, so a concurrent role grant cannot slip in between.
+  - The audit table also rejects `TRUNCATE`.
+  - The API refuses state-changing `/api/v1/*` requests whose `Origin` is not an allowed frontend origin, or that the browser marks `Sec-Fetch-Site: cross-site` (`src/routes/origin-guard.ts`). This adds to the `SameSite=Lax` session cookie.
+
+Known limits, accepted for the MVP:
+
+- **No outbox events yet.** Governance actions write no outbox event, so UC-18 step 4 and the "state change, moderation record and outbox event in one transaction" rule are not yet met. Add the event to the same functions when notifications (UC-23) are built.
+- **Read-only covers new content only.** "Archived communities are read-only" is enforced for new posts and comments. Edits and soft-deletes of existing content are not blocked at the database level; there is no write API for them yet.
+- **Audit entries are permanent.** They keep the target's display name at the time and the staff member's free-text reason. There is no redaction path, so staff should keep reasons factual and free of personal data. A retention and erasure policy must be decided before production.
+- **Rate limits are not tested end to end.** The 30-per-minute limit on admin mutations is configured per route but only tested against mocks.
 
 ## Scope and assumptions
 
