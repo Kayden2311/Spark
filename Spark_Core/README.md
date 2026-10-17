@@ -59,6 +59,23 @@ The step-by-step deployment checklist lives in [Documents/deployment/hosting-che
 - **Moderator**: `moderator@spark.app` / `ModeratorPassword123!` (`content_moderator`, `community_moderator`; useful for checking role-gated sections)
 
 `pnpm --filter @spark/backend db:seed` also creates two pending sponsored campaigns when none exist.
+
+### Demo data for the admin console
+
+```powershell
+pnpm --filter @spark/backend db:seed:demo
+```
+
+Adds about 240 members with six months of sign-ins, posts and comments, 14 communities, reports in every state, campaigns, Free/Starter/Pro/Business plans with subscriptions and invoices, and staff history, so the charts in `/admin` have something to show. Run it after `db:seed`. It only works against a local database and runs once; paid subscriptions use the provider `demo`, and no real payments are involved.
+
+To start over (this deletes all local Spark data):
+
+```powershell
+pnpm --filter @spark/backend db:reset:local --yes
+pnpm --filter @spark/backend db:migrate
+pnpm --filter @spark/backend db:seed
+pnpm --filter @spark/backend db:seed:demo
+```
  
 ## Verification
  

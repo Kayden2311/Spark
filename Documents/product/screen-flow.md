@@ -62,12 +62,16 @@ Filters at step 2: keyword, topic, location, and startup stage. The eventual API
 
 | Step | Route | Goal | Primary action | Mockup state |
 | --- | --- | --- | --- | --- |
-| 1 | `/admin` | See what needs a decision (open reports, flagged communities, pending campaigns), recent activity and API health | Open a queue | Implemented |
-| 2 | `/admin/reports` | Resolve reported posts and comments | Hide content, keep content, or dismiss, with a reason | Implemented |
-| 3 | `/admin/communities` | Moderate communities across the platform | Feature, freeze, archive or restore, with a reason | Implemented |
-| 4 | `/admin/campaigns` | Review sponsored startup promotions | Approve or reject, with a reason | Implemented |
-| 5 | `/admin/users`, `/admin/users/{id}` | Manage accounts and platform roles | Suspend or reactivate; grant or revoke roles (super admin only) | Implemented |
-| 6 | `/admin/audit` | Review every governance action | Filter by action, target and date | Implemented |
+| 1 | `/admin` | Command center: how Spark is trending (active users, sign-ups, content, MRR with change against the previous period), what is waiting, moderation flow, recent staff decisions, revenue snapshot and API health. Moderators see only their queues and stats. | Open a queue; change the range (7/30/90/180 days) | Implemented |
+| 2 | `/admin/analytics` | Understand engagement and growth: today/week/month active users, stickiness, daily activity and sign-ups, a weekday × hour heatmap, weekly retention cohorts, and the communities driving activity | Change the range; rank communities by activity or new members; open a community | Implemented (admins) |
+| 3 | `/admin/reports` | Triage desk: a queue beside the selected report, with the author's report and hidden-content history, the community's open reports and queue health (backlog, median time to a decision) | Hide, keep or dismiss with a reason (templates offered); keyboard shortcuts J/K, H, E, D and ? | Implemented |
+| 4 | `/admin/communities`, `/admin/communities/{id}` | Health monitor: a health signal per community (needs review, growing, steady, slowing, quiet), 8-week activity trend, members and new members, open reports. The detail page shows activity and member growth over time and the staff history. | Feature, freeze, archive or restore, with a reason | Implemented |
+| 5 | `/admin/campaigns` | Review pipeline as a board (pending, approved, rejected, draft) with waiting time and approval rate, or as a list | Approve or reject, with a reason | Implemented |
+| 6 | `/admin/users`, `/admin/users/{id}` | Directory and safety: membership growth, risk signals (reports against a member's content, hidden content); per user, 90-day activity, recent sign-ins (never session tokens), roles and history | Suspend or reactivate; grant or revoke roles (super admin only) | Implemented |
+| 7 | `/admin/billing` | Revenue health from Spark's own records: MRR and ARR, paying and trialing workspaces, ARPA, cancellations, plan mix, monthly movement, collections, and paged subscriptions and invoices. No payment provider is connected; the page says so. | Filter subscriptions (paid/free, status) and invoices (status) | Implemented (admins, read-only) |
+| 8 | `/admin/audit` | Investigation: entries grouped by day, actions by staff member and by target type | Filter by action, target and date; export the loaded entries to CSV | Implemented |
+
+The console shell has a navy sidebar that collapses to a 64px icon rail (button or the `[` key; the choice is remembered in the browser). Every chart has a legend, a tooltip, and a "View as table" switch; chart colors come from a palette checked for color-blind separation (`src/app/admin/_lib/palette.ts`).
 
 The sidebar shows only the sections the signed-in staff member's roles allow, and the API enforces the same rules. Every action asks for a reason and is recorded in the audit log.
 

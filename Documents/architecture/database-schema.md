@@ -1,6 +1,6 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0011_campaign_review_lock.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0012_admin_insights.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
 
@@ -54,6 +54,26 @@ Known limits, accepted for the MVP:
 - **Read-only covers new content only.** "Archived communities are read-only" is enforced for new posts and comments. Edits and soft-deletes of existing content are not blocked at the database level; there is no write API for them yet.
 - **Audit entries are permanent.** They keep the target's display name at the time and the staff member's free-text reason. There is no redaction path, so staff should keep reasons factual and free of personal data. A retention and erasure policy must be decided before production.
 - **Rate limits are not tested end to end.** The 30-per-minute limit on admin mutations is configured per route but only tested against mocks.
+
+## Admin insights (`0012_admin_insights.sql`)
+
+Read-only reporting functions behind `/admin/analytics`, `/admin/billing` and the richer moderation pages. Like the governance functions they are `SECURITY DEFINER` with `search_path = ''`, revoked from PUBLIC, granted to `spark_app`, and start with `require_platform_role`.
+
+- **Who can call what.**
+  - Admins (`super_admin`, `platform_admin`): `staff_activity_series`, `staff_active_user_totals`, `staff_engagement_heatmap`, `staff_retention_cohorts`, `staff_user_activity`, `staff_user_sessions`, `staff_user_risk` and every `staff_billing_*`, `staff_list_subscriptions` and `staff_list_invoices` function.
+  - Admins and community moderators: `staff_top_communities`, `staff_community_health`, `staff_community_series`.
+  - Admins and content moderators: `staff_report_context`, `staff_report_stats`.
+- **Bounds.** Ranges are limited (days 7 to 365, weeks 4 to 26, months 3 to 24), array arguments to 100 ids and page sizes to 101 rows; out-of-range input raises `22023`, which the API maps to 400.
+- **Definitions.**
+  - Days are UTC. An active user signed in, posted or commented that day.
+  - Retention: share of a weekly sign-up cohort with any activity in each following week.
+  - MRR: active and past-due paid subscriptions at their price per month (a yearly price counts as one twelfth). Trialing subscriptions are not counted. Historical months use today's price, because price changes are not versioned yet.
+  - Known limits of the MRR history: it is rebuilt from current rows, so a paid subscription that is now paused drops out of past months, an expired subscription without `cancelled_at` counts as churn in the chart but not in "cancelled, last 30 days", and an active subscription whose trial end date lies after this month is in the headline MRR but not yet in this month's chart point. Versioned subscription history would remove these gaps.
+- **Visible content only.** Community rankings, health and the community activity chart ignore hidden and deleted posts and comments. The platform activity series counts all activity as it happened.
+- **Privacy.** `staff_user_sessions` returns when and how someone signed in and whether the session is active, expired or revoked; it never returns the token hash. Reporter identity stays limited to report handlers.
+- **Indexes** on `created_at` for posts, comments and sessions, `joined_at` for memberships, `issued_at` for invoices, subscription status and payment event time keep the series queries off full scans.
+
+Local demo data: `pnpm --filter @spark/backend db:seed:demo` (after `db:seed`) creates about 240 members with six months of history, 14 communities, content, reports, campaigns, plans, subscriptions, invoices and staff actions. It refuses to run twice; `db:reset:local --yes` drops the local schema so it can be rebuilt. Paid rows use the provider `demo`.
 
 ## Scope and assumptions
 
