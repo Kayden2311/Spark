@@ -215,16 +215,9 @@ function LoginForm() {
               <label htmlFor="auth-password" className="authLabel">
                 Password
               </label>
-              <a
-                href="#reset"
-                className="authForgotLink"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setError("Password reset instructions will be sent to your work email.");
-                }}
-              >
+              <Link href="/forgot-password" className="authForgotLink">
                 Forgot password?
-              </a>
+              </Link>
             </div>
             <div className="authInputWrapper">
               <LockIcon />
