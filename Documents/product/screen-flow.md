@@ -71,7 +71,7 @@ Filters at step 2: keyword, topic, location, and startup stage. The eventual API
 ## Delivery order
 
 1. [Implemented] Landing page showcase with interactive live previews and responsive navigation.
-2. [Implemented] Production-ready `/login` page with dark glassmorphism, OAuth suite, and Fastify REST auth backend.
+2. [Implemented] Production-ready `/login` page with the light SaaS theme, OAuth suite, and Fastify REST auth backend.
 3. [Implemented] Platform Governance Console at `/admin` for multi-role platform moderation (`super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`).
 4. Discovery list and community detail mockups (`/communities`, `/communities/[slug]`).
 5. Membership request and pending-state mockups.

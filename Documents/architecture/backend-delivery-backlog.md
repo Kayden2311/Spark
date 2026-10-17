@@ -2,7 +2,7 @@
 
 ## Current state
 
-The database entity model is defined in `Spark_Core/backend/src/infrastructure/database/schema.ts` and managed via Drizzle ORM migrations (`0000_init.sql` through `0005_platform_roles.sql`). It mirrors the `spark` schema and exposes `DatabaseRow<TTable>` and `DatabaseInsert<TTable>` for infrastructure adapters.
+The database entity model is defined in `Spark_Core/backend/src/infrastructure/database/schema.ts` and managed via Drizzle ORM migrations (`0000_product_tables.sql` through `0008_login_role.sql`). It mirrors the `spark` schema and exposes `DatabaseRow<TTable>` and `DatabaseInsert<TTable>` for infrastructure adapters.
 
 The backend currently exposes process health (`GET /health`), clean REST authentication (`POST /api/v1/auth/password/sign-in`, `GET /api/v1/me`, `POST /api/v1/auth/sign-out`), session lookup with Argon2id password verification, SHA-256 bytea session tokens, and multi-role platform governance (`super_admin`, `platform_admin`, `community_moderator`, `content_moderator`, `campaign_moderator`). Product routes (workspaces, communities, Kanban, notifications, billing, promotions) are in the delivery backlog below.
 
@@ -18,7 +18,7 @@ The backend currently exposes process health (`GET /health`), clean REST authent
 
 ## 1. Runtime foundation
 
-1. [Implemented] PostgreSQL Drizzle client, connection pool, and migrations (0000–0005).
+1. [Implemented] PostgreSQL Drizzle client, connection pool, and migrations (0000–0008).
 2. [Implemented] Request authentication context and session resolution with platform role query.
 3. Add a reusable cursor codec for ordered public collection endpoints; reject invalid cursors and clamp page limits.
 4. Add an idempotency store adapter over `idempotency_requests` for mutation flows that can be retried.

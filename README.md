@@ -6,10 +6,10 @@ Spark is a lightweight platform for startup communities to discover each other, 
 
 Application code is split into two deployable parts under [`Spark_Core`](Spark_Core/):
 
-- `frontend`: Next.js 16, React 19, and TypeScript with UI/UX Pro Max design system (dark glassmorphism, responsive navigation, production-ready login with OAuth suite, interactive Platform Governance Console at `/admin`, and landing page showcases).
+- `frontend`: Next.js 16, React 19, and TypeScript with UI/UX Pro Max design system (clean light SaaS theme, responsive navigation, production-ready login with OAuth suite, interactive Platform Governance Console at `/admin`, and landing page showcases).
 - `backend`: Fastify and TypeScript as a pragmatic Clean Architecture modular monolith.
 
-PostgreSQL is the source of truth, managed through Drizzle ORM migrations (`0000_init.sql` to `0005_platform_roles.sql`) with row-level security (RLS) enforcement. Authentication uses Argon2id password hashing with SHA-256 bytea opaque session tokens. Redis supports distributed rate limiting and caching.
+PostgreSQL is the source of truth, managed through Drizzle ORM migrations (`0000_product_tables.sql` to `0008_login_role.sql`) with row-level security (RLS) enforcement. Authentication uses Argon2id password hashing with SHA-256 bytea opaque session tokens. Redis supports distributed rate limiting and caching.
 
 ## Requirements
 
