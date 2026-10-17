@@ -10,7 +10,9 @@ export function localConnection(name: string): string {
       ? "postgresql://spark_migrator:spark_migrate_local_only@127.0.0.1:5432/spark"
       : name === "DATABASE_URL"
         ? "postgresql://spark_app:spark_app_local_only@127.0.0.1:5432/spark"
-        : undefined);
+        : name === "AUTH_DATABASE_URL"
+          ? "postgresql://spark_auth:spark_auth_local_only@127.0.0.1:5432/spark"
+          : undefined);
   if (!raw) throw new Error(`${name} is required`);
   const url = new URL(raw);
   if (!["postgres:", "postgresql:"].includes(url.protocol) || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
@@ -51,7 +53,7 @@ export async function applyMigrations(client: Client, folder: string, namespace 
       if (occupied.rowCount) throw new Error("Refusing to adopt an existing unmanaged application schema");
     }
     await migrate(drizzle(client), { migrationsFolder: folder, migrationsSchema: journal });
-    await client.query(`REVOKE ALL ON SCHEMA "${journal}" FROM PUBLIC, spark_app`);
+    await client.query(`REVOKE ALL ON SCHEMA "${journal}" FROM PUBLIC, spark_app, spark_auth`);
   } finally {
     await client.query("SELECT pg_advisory_unlock(hashtext($1),0)", [`${namespace}:migrations`]);
     await client.query("RESET ROLE");

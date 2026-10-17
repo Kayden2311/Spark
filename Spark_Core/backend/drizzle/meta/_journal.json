@@ -43,6 +43,27 @@
       "when": 1789726500000,
       "tag": "0005_platform_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792200000000,
+      "tag": "0006_scoped_runtime_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792210000000,
+      "tag": "0007_governance_corrections",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792220000000,
+      "tag": "0008_login_role",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,6 +12,7 @@ const namespace = `spark_test_${randomUUID().replaceAll("-", "")}`;
 const journal = `${namespace}_journal`;
 const owner = new pg.Client({ connectionString: localConnection("MIGRATION_DATABASE_URL"), connectionTimeoutMillis: 5000 });
 const runtime = new pg.Pool({ connectionString: localConnection("DATABASE_URL"), max: 1, connectionTimeoutMillis: 5000 });
+const authRuntime = new pg.Pool({ connectionString: localConnection("AUTH_DATABASE_URL"), max: 1, connectionTimeoutMillis: 5000 });
 let folder: string;
 const userA = randomUUID(), userB = randomUUID(), visitor = randomUUID();
 const tenantA = randomUUID(), tenantB = randomUUID(), projectA = randomUUID(), projectB = randomUUID(), projectOther = randomUUID();
@@ -29,6 +30,25 @@ async function reject(sql: string, values: unknown[], code: string) {
   await rollback(async () => { await expect(owner.query(sql, values)).rejects.toMatchObject({ code }); });
 }
 
+const fn = (name: string) => `"${namespace}".${name}`;
+const future = () => new Date(Date.now() + 60 * 60 * 1000);
+const newTokenHash = () => randomBytes(32);
+
+// Runs one statement as spark_app inside a transaction bound to a session token hash.
+async function asSession(tokenHash: Buffer | null, sql: string, values: unknown[] = []) {
+  const client = await runtime.connect();
+  try {
+    await client.query("BEGIN");
+    if (tokenHash) await client.query("SELECT set_config('spark.session_token_hash',$1,true)", [tokenHash.toString("hex")]);
+    const result = await client.query(sql, values);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally { client.release(); }
+}
+
 beforeAll(async () => {
   await owner.connect();
   const runtimeDatabase = await runtime.query("SELECT current_database() AS name,current_user AS role");
@@ -39,7 +59,8 @@ beforeAll(async () => {
   await writeFile(join(folder, "meta", "_journal.json"), await readFile(resolve("drizzle/meta/_journal.json")));
   for (const file of (await readdir(resolve("drizzle"))).filter((name) => name.endsWith(".sql"))) {
     const sql = (await readFile(resolve("drizzle", file), "utf8")).replace(/\bspark\b/gu, namespace)
-      .replaceAll(`${namespace}.user_id`, "spark.user_id").replaceAll(`${namespace}.tenant_id`, "spark.tenant_id");
+      .replaceAll(`${namespace}.user_id`, "spark.user_id").replaceAll(`${namespace}.tenant_id`, "spark.tenant_id")
+      .replaceAll(`${namespace}.session_token_hash`, "spark.session_token_hash");
     await writeFile(join(folder, file), sql);
   }
   await applyMigrations(owner, folder, namespace, journal);
@@ -68,6 +89,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await runtime.end();
+  await authRuntime.end();
   try {
     await owner.query("ROLLBACK");
     await owner.query("SET ROLE spark_owner");
@@ -96,11 +118,11 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(5);
+    expect(result.rows[0].count).toBe(9);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
-      await expect(applyMigrations(owner,folder,namespace,journal)).rejects.toThrow("Migration history differs");
+      await expect(applyMigrations(owner,folder,namespace,journal)).rejects.toThrow("Migration history mismatch");
     } finally { await writeFile(file,original); await owner.query("SET ROLE spark_owner"); }
   });
   it("stores a real Argon2id hash and rejects plaintext", async () => {
@@ -269,5 +291,193 @@ describe("Local PostgreSQL schema", () => {
     }
     await expect(withDatabaseContext(runtime,actorA,c=>c.query(`UPDATE ${table("workspace_memberships")} SET role='owner'`))).rejects.toMatchObject({code:"42501"});
     await expect(runtime.query("SET ROLE spark_owner")).rejects.toMatchObject({code:"42501"});
+  });
+  it("authenticates only through the login role", async () => {
+    const password = await hashPassword("correct horse battery staple");
+    const token = newTokenHash();
+    const registered = await authRuntime.query(`SELECT * FROM ${fn("auth_register_password")}($1,$2,$3,$4,$5)`, ["Reg User", "Reg.User@Example.com", password, token, future()]);
+    const newUser = registered.rows[0].user_id;
+    expect(registered.rows[0].workspace_name).toBe("Reg User's Space");
+    await expect(authRuntime.query(`SELECT * FROM ${fn("auth_register_password")}($1,$2,$3,$4,$5)`, ["Dup", "reg.user@example.com", password, newTokenHash(), future()])).rejects.toMatchObject({ code: "23505" });
+    const login = await authRuntime.query(`SELECT * FROM ${fn("auth_password_login")}($1)`, ["  REG.USER@example.com "]);
+    expect(login.rows).toEqual([{ user_id: newUser, password_hash: password, status: "active" }]);
+    expect((await authRuntime.query(`SELECT * FROM ${fn("auth_password_login")}($1)`, ["nobody@example.com"])).rows).toEqual([]);
+    const principal = await authRuntime.query(`SELECT * FROM ${fn("auth_session_principal")}($1)`, [token]);
+    expect(principal.rows[0]).toMatchObject({ user_id: newUser, email: "Reg.User@Example.com", platform_roles: [] });
+    expect(principal.rows[0].workspaces).toHaveLength(1);
+    expect((await owner.query(`SELECT verified_at FROM ${table("user_emails")} WHERE user_id=$1`, [newUser])).rows).toEqual([{ verified_at: null }]);
+    await authRuntime.query(`SELECT ${fn("auth_revoke_session")}($1)`, [token]);
+    expect((await authRuntime.query(`SELECT * FROM ${fn("auth_session_principal")}($1)`, [token])).rows).toEqual([]);
+    const second = newTokenHash();
+    const started = await authRuntime.query(`SELECT * FROM ${fn("auth_start_session")}($1,$2,$3)`, [newUser, second, future()]);
+    expect(started.rows).toHaveLength(1);
+    expect(started.rows[0]).toMatchObject({ user_id: newUser, email: "Reg.User@Example.com" });
+    const noPassword = newTokenHash();
+    expect((await authRuntime.query(`SELECT * FROM ${fn("auth_start_session")}($1,$2,$3)`, [userA, noPassword, future()])).rows).toEqual([]);
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("sessions")} WHERE token_hash=$1`, [noPassword])).rows[0].total).toBe(0);
+    await expect(authRuntime.query(`SELECT * FROM ${fn("auth_start_session")}($1,$2,$3)`, [newUser, newTokenHash(), new Date(Date.now() - 1000)])).rejects.toMatchObject({ code: "22023" });
+    // The general runtime role cannot reach credentials or mint sessions; the login role cannot reach data.
+    await expect(runtime.query(`SELECT * FROM ${fn("auth_password_login")}($1)`, ["reg.user@example.com"])).rejects.toMatchObject({ code: "42501" });
+    await expect(runtime.query(`SELECT * FROM ${fn("auth_start_session")}($1,$2,$3)`, [newUser, newTokenHash(), future()])).rejects.toMatchObject({ code: "42501" });
+    await expect(runtime.query(`SELECT * FROM ${fn("auth_register_password")}($1,$2,$3,$4,$5)`, ["X", "x@example.com", password, newTokenHash(), future()])).rejects.toMatchObject({ code: "42501" });
+    expect((await runtime.query(`SELECT * FROM ${fn("auth_session_principal")}($1)`, [second])).rows).toHaveLength(1);
+    await expect(authRuntime.query(`SELECT id FROM ${table("users")}`)).rejects.toMatchObject({ code: "42501" });
+    await expect(authRuntime.query(`SELECT * FROM ${fn("staff_overview")}()`)).rejects.toMatchObject({ code: "42501" });
+  });
+  it("binds platform staff access to a live session holding the required role", async () => {
+    const moderatorToken = newTokenHash(), memberToken = newTokenHash(), superToken = newTokenHash();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$4),($3,$5,'password',$4)`, [userA, moderatorToken, userB, future(), memberToken]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'content_moderator',$1)`, [userA]);
+    const overview = `SELECT * FROM ${fn("staff_overview")}()`;
+    expect((await asSession(moderatorToken, overview)).rows).toHaveLength(1);
+    expect((await asSession(moderatorToken, `SELECT * FROM ${fn("staff_list_reports")}('open',10)`)).rows).toEqual([]);
+    expect((await asSession(moderatorToken, `SELECT id FROM ${table("users")}`)).rows.length).toBeGreaterThanOrEqual(3);
+    expect((await asSession(moderatorToken, `SELECT id FROM ${table("user_emails")}`)).rows).toEqual([]);
+    await expect(asSession(moderatorToken, `SELECT * FROM ${fn("staff_user_roles")}($1::uuid[])`, [[userA]])).rejects.toMatchObject({ code: "42501" });
+    await expect(asSession(moderatorToken, `SELECT ${fn("staff_grant_role")}($1,'super_admin')`, [userA])).rejects.toMatchObject({ code: "42501" });
+    await expect(asSession(memberToken, overview)).rejects.toMatchObject({ code: "42501" });
+    for (const token of [newTokenHash(), null]) {
+      await expect(asSession(token, overview)).rejects.toMatchObject({ code: "28000" });
+    }
+    await expect(withDatabaseContext(runtime, actorA, (client) => client.query(overview))).rejects.toMatchObject({ code: "28000" });
+    await runtime.query(`SELECT ${fn("auth_revoke_session")}($1)`, [moderatorToken]);
+    await expect(asSession(moderatorToken, overview)).rejects.toMatchObject({ code: "28000" });
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$3)`, [visitor, superToken, future()]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'super_admin',$1)`, [visitor]);
+    expect((await asSession(superToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended') AS outcome`, [visitor])).rows[0].outcome).toBe("self");
+    expect((await asSession(superToken, `SELECT ${fn("staff_revoke_role")}($1,'super_admin') AS outcome`, [visitor])).rows[0].outcome).toBe("last_super_admin");
+    expect((await asSession(superToken, `SELECT ${fn("staff_grant_role")}($1,'platform_admin') AS outcome`, [userB])).rows[0].outcome).toBe("granted");
+    expect((await asSession(superToken, `SELECT ${fn("staff_grant_role")}($1,'platform_admin') AS outcome`, [userB])).rows[0].outcome).toBe("exists");
+    expect((await asSession(memberToken, overview)).rows).toHaveLength(1);
+    expect((await asSession(memberToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended') AS outcome`, [visitor])).rows[0].outcome).toBe("forbidden");
+    expect((await asSession(superToken, `SELECT ${fn("staff_set_user_status")}($1,'suspended') AS outcome`, [userB])).rows[0].outcome).toBe("ok");
+    await expect(asSession(memberToken, overview)).rejects.toMatchObject({ code: "28000" });
+  });
+  it("applies governance writes with version bumps, state guards and audit records", async () => {
+    const adminUser = randomUUID(), contentUser = randomUUID(), suspendedUser = randomUUID();
+    const adminToken = newTokenHash(), contentToken = newTokenHash(), expiredToken = newTokenHash(), suspendedToken = newTokenHash();
+    const comment = randomUUID(), postReport = randomUUID(), commentReport = randomUUID();
+    const placement = randomUUID(), approveCampaign = randomUUID(), rejectCampaign = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name,status) VALUES ($1,'Gov admin','active'),($2,'Content staff','active'),($3,'Suspended staff','suspended')`, [adminUser, contentUser, suspendedUser]);
+    await owner.query(`INSERT INTO ${table("user_emails")} (user_id,email,normalized_email,is_primary) VALUES ($1,'gov@example.com','gov@example.com',true)`, [adminUser]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'platform_admin',$1),($2,'content_moderator',$2),($3,'content_moderator',$3)`, [adminUser, contentUser, suspendedUser]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$5),($3,$4,'password',$5),($6,$7,'password',$5)`, [adminUser, adminToken, contentUser, contentToken, future(), suspendedUser, suspendedToken]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,created_at,expires_at) VALUES ($1,$2,'password',now()-interval '2 hours',now()-interval '1 hour')`, [adminUser, expiredToken]);
+    await owner.query(`INSERT INTO ${table("post_comments")} (id,tenant_id,community_id,post_id,author_user_id,body) VALUES ($1,$2,$3,$4,$5,'Reported comment')`, [comment, tenantA, communityA, privatePost, userA]);
+    await owner.query(`INSERT INTO ${table("content_reports")} (id,tenant_id,community_id,reporter_user_id,post_id,comment_id,reason_code) VALUES ($1,$3,$4,$5,$6,NULL,'spam'),($2,$3,$4,$5,NULL,$7,'abuse')`, [postReport, commentReport, tenantA, communityA, visitor, privatePost, comment]);
+    await owner.query(`INSERT INTO ${table("promotion_placements")} (id,code,name,description) VALUES ($1,$2,'Placement','Test placement')`, [placement, `placement-${placement}`]);
+    await owner.query(`INSERT INTO ${table("promotion_campaigns")} (id,tenant_id,community_id,name,headline,description,placement_id,submitted_by_user_id,review_status,requested_start_at) VALUES ($1,$3,$4,'Approve me','Headline','Body',$5,$6,'pending',$7),($2,$3,$4,'Reject me','Headline','Body',$5,$6,'pending',$7)`, [approveCampaign, rejectCampaign, tenantA, communityA, placement, userA, future()]);
+
+    for (const token of [expiredToken, suspendedToken]) {
+      await expect(asSession(token, `SELECT * FROM ${fn("staff_overview")}()`)).rejects.toMatchObject({ code: "28000" });
+    }
+    expect((await asSession(contentToken, `SELECT user_id FROM ${table("user_emails")}`)).rows).toEqual([]);
+    expect((await asSession(adminToken, `SELECT user_id FROM ${table("user_emails")} WHERE user_id=$1`, [adminUser])).rows).toEqual([{ user_id: adminUser }]);
+    expect((await asSession(adminToken, `SELECT role FROM ${fn("staff_user_roles")}($1::uuid[])`, [[adminUser]])).rows).toEqual([{ role: "platform_admin" }]);
+    expect(Number((await asSession(adminToken, `SELECT ${fn("staff_active_session_count")}() AS total`)).rows[0].total)).toBeGreaterThanOrEqual(3);
+    const counts = await asSession(contentToken, `SELECT * FROM ${fn("staff_open_report_counts")}($1::uuid[])`, [[communityA]]);
+    expect(counts.rows).toEqual([{ community_id: communityA, open_reports: "2" }]);
+
+    const resolve = `SELECT ${fn("staff_resolve_report")}($1,$2,'Policy violation') AS outcome`;
+    expect((await asSession(contentToken, resolve, [postReport, "hide"])).rows[0].outcome).toBe("ok");
+    expect((await asSession(contentToken, resolve, [postReport, "restore"])).rows[0].outcome).toBe("already_closed");
+    expect((await asSession(contentToken, resolve, [commentReport, "hide"])).rows[0].outcome).toBe("ok");
+    expect((await asSession(contentToken, resolve, [randomUUID(), "hide"])).rows[0].outcome).toBe("not_found");
+    expect((await owner.query(`SELECT moderation_status,version FROM ${table("posts")} WHERE id=$1`, [privatePost])).rows[0]).toEqual({ moderation_status: "hidden", version: 2 });
+    expect((await owner.query(`SELECT moderation_status,version FROM ${table("post_comments")} WHERE id=$1`, [comment])).rows[0]).toEqual({ moderation_status: "hidden", version: 2 });
+    expect((await owner.query(`SELECT status FROM ${table("content_reports")} WHERE id = ANY($1::uuid[]) ORDER BY status`, [[postReport, commentReport]])).rows).toEqual([{ status: "resolved" }, { status: "resolved" }]);
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("moderation_actions")} WHERE actor_user_id=$1`, [contentUser])).rows[0].total).toBe(2);
+    await owner.query(`UPDATE ${table("posts")} SET moderation_status='visible',version=version+1 WHERE id=$1`, [privatePost]);
+
+    const review = `SELECT ${fn("staff_review_campaign")}($1,$2,'Meets placement policy') AS outcome`;
+    await expect(asSession(contentToken, review, [approveCampaign, "approve"])).rejects.toMatchObject({ code: "42501" });
+    expect((await asSession(adminToken, review, [approveCampaign, "approve"])).rows[0].outcome).toBe("ok");
+    expect((await asSession(adminToken, review, [approveCampaign, "reject"])).rows[0].outcome).toBe("not_pending");
+    expect((await asSession(adminToken, review, [rejectCampaign, "reject"])).rows[0].outcome).toBe("ok");
+    const campaigns = await owner.query(`SELECT id,review_status,version,approved_version FROM ${table("promotion_campaigns")} WHERE id = ANY($1::uuid[])`, [[approveCampaign, rejectCampaign]]);
+    expect(campaigns.rows).toEqual(expect.arrayContaining([
+      { id: approveCampaign, review_status: "approved", version: 2, approved_version: 2 },
+      { id: rejectCampaign, review_status: "rejected", version: 2, approved_version: null },
+    ]));
+    expect((await owner.query(`SELECT campaign_version,decision,reviewer_user_id FROM ${table("promotion_reviews")} WHERE campaign_id=$1`, [approveCampaign])).rows).toEqual([{ campaign_version: 2, decision: "approve", reviewer_user_id: adminUser }]);
+
+    const archive = `SELECT ${fn("staff_set_community_archived")}($1,$2) AS updated`;
+    expect((await asSession(adminToken, archive, [publicCommunity, true])).rows[0].updated).toBe(true);
+    expect((await owner.query(`SELECT archived_at IS NOT NULL AS archived FROM ${table("communities")} WHERE id=$1`, [publicCommunity])).rows[0].archived).toBe(true);
+    expect((await asSession(adminToken, archive, [publicCommunity, false])).rows[0].updated).toBe(true);
+    expect((await asSession(adminToken, archive, [randomUUID(), true])).rows[0].updated).toBe(false);
+    await expect(asSession(contentToken, archive, [publicCommunity, true])).rejects.toMatchObject({ code: "42501" });
+    await expect(owner.query(`INSERT INTO ${table("moderation_actions")} (tenant_id,community_id,actor_user_id,action,reason) VALUES ($1,$2,$3,'hide','Not a moderator')`, [tenantA, communityA, visitor])).rejects.toMatchObject({ code: "23514" });
+  });
+  it("keeps the runtime role read-only and every definer function pinned", async () => {
+    for (const name of ["users","user_emails","posts","post_comments","communities","platform_role_assignments","sessions","content_reports","moderation_actions","promotion_campaigns","promotion_reviews","password_credentials","workspaces","workspace_memberships"]) {
+      for (const privilege of ["INSERT","UPDATE","DELETE"]) {
+        const result = await owner.query("SELECT has_table_privilege('spark_app',$1,$2) AS allowed", [`"${namespace}"."${name}"`, privilege]);
+        expect({ name, privilege, allowed: result.rows[0].allowed }).toEqual({ name, privilege, allowed: false });
+      }
+    }
+    const authTables = await owner.query(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname=$1 AND c.relkind='r' AND (has_table_privilege('spark_auth',c.oid,'SELECT') OR has_table_privilege('spark_auth',c.oid,'INSERT')
+        OR has_table_privilege('spark_auth',c.oid,'UPDATE') OR has_table_privilege('spark_auth',c.oid,'DELETE'))`, [namespace]);
+    expect(authTables.rows).toEqual([]);
+    const authFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname=$1 AND has_function_privilege('spark_auth',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
+    expect(authFunctions.rows.map((row) => row.proname)).toEqual(["auth_password_login","auth_register_password","auth_revoke_session","auth_session_principal","auth_start_session"]);
+    const publicExecute = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+      WHERE n.nspname=$1 AND acl.grantee=0 AND acl.privilege_type='EXECUTE'`, [namespace]);
+    expect(publicExecute.rows).toEqual([]);
+    const authRole = await owner.query(`SELECT rolsuper,rolbypassrls,rolinherit,rolcanlogin,rolcreaterole,rolcreatedb,
+      (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member=r.oid OR m.roleid=r.oid) AS memberships,
+      has_database_privilege('spark_auth',current_database(),'TEMPORARY') AS temp, has_schema_privilege('spark_auth',$1,'CREATE') AS create_in_schema
+      FROM pg_roles r WHERE rolname='spark_auth'`, [namespace]);
+    expect(authRole.rows).toEqual([{ rolsuper: false, rolbypassrls: false, rolinherit: false, rolcanlogin: true, rolcreaterole: false, rolcreatedb: false, memberships: 0, temp: false, create_in_schema: false }]);
+    for (const signature of ["session_actor()", "require_platform_role(text[])"]) {
+      const result = await owner.query("SELECT has_function_privilege('spark_app',$1,'EXECUTE') AS allowed", [`"${namespace}".${signature}`]);
+      expect({ signature, allowed: result.rows[0].allowed }).toEqual({ signature, allowed: false });
+    }
+    const definers = await owner.query(`SELECT p.proname, p.proconfig FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.prosecdef`, [namespace]);
+    expect(definers.rows.length).toBeGreaterThan(20);
+    for (const row of definers.rows) expect({ name: row.proname, config: row.proconfig }).toEqual({ name: row.proname, config: ['search_path=""'] });
+  });
+  it("serializes super-admin suspension with role revocation", async () => {
+    const superA = randomUUID(), superB = randomUUID(), tokenA = newTokenHash(), tokenB = newTokenHash();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("platform_role_assignments")} SET revoked_at=now() WHERE role='super_admin' AND revoked_at IS NULL`);
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Super A'),($2,'Super B')`, [superA, superB]);
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'super_admin',$1),($2,'super_admin',$2)`, [superA, superB]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$5),($3,$4,'password',$5)`, [superA, tokenA, superB, tokenB, future()]);
+    const first = new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 });
+    const second = new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 });
+    await Promise.all([first.connect(), second.connect()]);
+    // Generous lock timeout so a slow host cannot turn the expected wait into a 55P03 failure.
+    await second.query("SET lock_timeout = '15s'");
+    try {
+      // A revokes B's super_admin role and holds its locks while B tries to suspend A.
+      await first.query("BEGIN");
+      await first.query("SELECT set_config('spark.session_token_hash',$1,true)", [tokenA.toString("hex")]);
+      expect((await first.query(`SELECT ${fn("staff_revoke_role")}($1,'super_admin') AS outcome`, [superB])).rows[0].outcome).toBe("revoked");
+      await second.query("BEGIN");
+      await second.query("SELECT set_config('spark.session_token_hash',$1,true)", [tokenB.toString("hex")]);
+      const secondPid = (await second.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      const suspension = second.query(`SELECT ${fn("staff_set_user_status")}($1,'suspended') AS outcome`, [superA]);
+      // Commit only once the suspension is provably blocked on the super-admin row locks.
+      for (let attempt = 0; ; attempt++) {
+        // pg_locks is readable by any role, unlike other sessions' wait state in pg_stat_activity.
+        const waiting = await owner.query("SELECT 1 FROM pg_locks WHERE pid=$1 AND NOT granted", [secondPid]);
+        if (waiting.rowCount) break;
+        if (attempt > 200) throw new Error("Suspension never waited on the lock");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await first.query("COMMIT");
+      expect((await suspension).rows[0].outcome).toBe("last_super_admin");
+      await second.query("COMMIT");
+    } finally {
+      await Promise.allSettled([first.query("ROLLBACK"), second.query("ROLLBACK")]);
+      await Promise.allSettled([first.end(), second.end()]);
+    }
+    const remaining = await owner.query(`SELECT u.id FROM ${table("platform_role_assignments")} r JOIN ${table("users")} u ON u.id=r.user_id WHERE r.role='super_admin' AND r.revoked_at IS NULL AND u.status='active'`);
+    expect(remaining.rows).toEqual([{ id: superA }]);
   });
 });
