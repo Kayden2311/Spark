@@ -66,12 +66,12 @@ describe("onboarding", () => {
     expect(screen.getByLabelText("Workspace name")).toHaveAttribute("maxLength", "80");
   });
 
-  it("creates the workspace, refreshes the session and opens it", async () => {
+  it("creates the workspace, refreshes the session and starts the first project", async () => {
     stubCreate(() => new Response(JSON.stringify(created), { status: 201, headers: { "content-type": "application/json", ETag: "\"v1\"" } }));
     render(<OnboardingPage />);
     await userEvent.type(screen.getByLabelText("Workspace name"), "Northstar Labs!");
     await userEvent.click(screen.getByRole("button", { name: "Create workspace" }));
-    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/w/northstar-labs"));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/w/northstar-labs/projects/new?first=1"));
     expect(posts).toEqual([{ url: "/api/v1/workspaces", body: { name: "Northstar Labs!", slug: "northstar-labs" } }]);
     expect(auth.refreshSession).toHaveBeenCalledTimes(1);
   });

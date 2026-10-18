@@ -76,7 +76,7 @@ export default function OnboardingPage() {
     try {
       const { data } = await workspaceApi<Workspace>("/workspaces", { method: "POST", body: { name: trimmed, slug: nextSlug } });
       await refreshSession();
-      router.push(`/w/${data.slug}`);
+      router.push(`/w/${data.slug}/projects/new?first=1`);
     } catch (error) {
       setSubmitting(false);
       if (error instanceof ApiError && error.code === "slug_taken") setSlugError("That address is taken. Try another.");
