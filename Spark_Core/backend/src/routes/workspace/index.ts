@@ -4,6 +4,7 @@ import type { Pool } from "pg";
 import { createMemberGuard } from "./guard.js";
 import { registerInvitationRoutes } from "./invitations.js";
 import { registerMemberRoutes } from "./members.js";
+import { registerMethodologyRoutes } from "./methodologies.js";
 import { registerWorkspaceCrudRoutes } from "./workspaces.js";
 
 export interface WorkspacePluginOptions {
@@ -15,5 +16,6 @@ export function registerWorkspaceRoutes(app: FastifyInstance, options: Workspace
   const guard = createMemberGuard(options.pool);
   registerWorkspaceCrudRoutes(app, guard);
   registerMemberRoutes(app, guard);
+  registerMethodologyRoutes(app);
   registerInvitationRoutes(app, guard, options.pool);
 }
