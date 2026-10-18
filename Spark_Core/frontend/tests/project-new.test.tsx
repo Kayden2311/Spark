@@ -200,6 +200,44 @@ describe("new project page", () => {
     expect(screen.getByRole("button", { name: "Create project" })).toBeEnabled();
   });
 
+  it("keeps hand-edited phase dates until the user re-spreads them", async () => {
+    mockApi(routes());
+    await choose("Waterfall");
+    await userEvent.type(screen.getByLabelText("Project name"), "Launch");
+    fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "2026-11-02" } });
+    fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2026-12-11" } });
+    fireEvent.change(screen.getByLabelText("Phase 2 end"), { target: { value: "2026-11-20" } });
+
+    // A later target date no longer overwrites the edited dates.
+    fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2026-12-16" } });
+    expect(screen.getByLabelText("Phase 1 end")).toHaveValue("2026-11-09");
+    expect(screen.getByLabelText("Phase 2 end")).toHaveValue("2026-11-20");
+    expect(screen.getByLabelText("Phase 5 end")).toHaveValue("2026-12-11");
+
+    // A new phase runs from the day after the last one to the target date; removing it keeps the rest.
+    await userEvent.click(screen.getByRole("button", { name: "Add phase" }));
+    expect(screen.getByLabelText("Phase 6 start")).toHaveValue("2026-12-12");
+    expect(screen.getByLabelText("Phase 6 end")).toHaveValue("2026-12-16");
+    expect(screen.getByLabelText("Phase 2 end")).toHaveValue("2026-11-20");
+    await userEvent.click(screen.getByRole("button", { name: "Remove phase 6" }));
+    expect(screen.getByLabelText("Phase 2 end")).toHaveValue("2026-11-20");
+
+    // Phase 2 now overlaps phase 3: validation flags it instead of posting.
+    await userEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(await screen.findByText("Each phase needs a name and dates inside the project dates, in order and without overlapping.")).toBeInTheDocument();
+    expect(posted()).toEqual([]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Re-spread dates evenly" }));
+    expect(screen.getByLabelText("Phase 1 end")).toHaveValue("2026-11-10");
+    expect(screen.getByLabelText("Phase 2 end")).toHaveValue("2026-11-19");
+    expect(screen.getByLabelText("Phase 5 end")).toHaveValue("2026-12-16");
+    expect(screen.queryByText(/without overlapping/)).not.toBeInTheDocument();
+
+    // Back in automatic mode, date changes re-spread again.
+    fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2026-12-11" } });
+    expect(screen.getByLabelText("Phase 1 end")).toHaveValue("2026-11-09");
+  });
+
   it("caps the phase list at twelve rows", async () => {
     mockApi(routes());
     await choose("Waterfall");

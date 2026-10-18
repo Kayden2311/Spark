@@ -4163,7 +4163,6 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsPicker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
 .wsPickerCard { position: relative; display: grid; align-content: start; gap: .8rem; padding: 1.5rem 1.35rem 1.35rem; overflow: hidden; border: 1.5px solid var(--line); border-radius: 1.1rem; background: #fff; box-shadow: 0 4px 15px rgba(15, 23, 42, .04); cursor: pointer; outline: none; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
 .wsPickerCard:hover { border-color: color-mix(in srgb, var(--method-accent) 45%, var(--line)); box-shadow: 0 14px 30px -16px rgba(15, 36, 87, .25); transform: translateY(-2px); }
-.wsPickerCard:focus-visible { box-shadow: 0 0 0 4px color-mix(in srgb, var(--method-accent) 25%, transparent); }
 .wsPickerCard[aria-checked="true"] { border-color: var(--method-accent); background: linear-gradient(180deg, color-mix(in srgb, var(--method-accent) 6%, #fff) 0, #fff 9rem); box-shadow: 0 18px 36px -18px color-mix(in srgb, var(--method-accent) 55%, transparent); }
 .wsPickerAccent { position: absolute; top: 0; right: 0; left: 0; height: 4px; background: var(--method-accent); }
 .wsPickerHead { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
@@ -4172,6 +4171,8 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsPickerCheck svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
 .wsPickerCard[aria-checked="true"] .wsPickerCheck { border-color: var(--method-accent); background: var(--method-accent); }
 .wsPickerCard[aria-checked="true"] .wsPickerCheck svg { opacity: 1; }
+/* An outline, not a box-shadow, so the focus ring never competes with the selected card's shadow. */
+.wsPickerCard:focus-visible { outline: 3px solid var(--method-accent); outline-offset: 3px; }
 .wsPickerTagline { color: var(--ink-secondary); font-size: .98rem; font-weight: 600; line-height: 1.45; }
 .wsPickerBestFor, .wsPickerPlanning { color: var(--muted); font-size: .84rem; line-height: 1.55; }
 .wsPickerColumns { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0; padding: 0; list-style: none; }
@@ -4203,7 +4204,8 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsProjectPhase input { width: 100%; min-width: 0; padding: .6rem .7rem; border: 1.5px solid #dce5f1; border-radius: .6rem; color: var(--ink); background: #fff; font: inherit; font-size: .88rem; outline: none; }
 .wsProjectPhase input:focus { border-color: var(--blue); box-shadow: 0 0 0 3.5px rgba(37, 99, 235, .14); }
 .wsProjectPhaseNumber { display: grid; width: 1.7rem; height: 1.7rem; place-items: center; border-radius: 50%; color: #925d00; background: #fff0c6; font-size: .75rem; font-weight: 800; }
-.wsProjectAddPhase { justify-self: start; min-height: 2.4rem; padding: .45rem 1rem; border-radius: .6rem; font: inherit; font-size: .86rem; font-weight: 700; }
+.wsProjectPhaseActions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.wsProjectAddPhase { min-height: 2.4rem; padding: .45rem 1rem; border-radius: .6rem; font: inherit; font-size: .86rem; font-weight: 700; }
 .wsProjectAddPhase:disabled { cursor: default; opacity: .55; transform: none; }
 .wsProjectPractices { padding: .9rem 1rem; border: 1px solid var(--line); border-radius: .75rem; background: #fbfcfe; }
 .wsProjectPractices summary { color: var(--ink); font-size: .9rem; font-weight: 650; cursor: pointer; }

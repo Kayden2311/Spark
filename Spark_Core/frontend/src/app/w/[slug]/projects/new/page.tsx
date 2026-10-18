@@ -89,6 +89,20 @@ function respread(rows: PhaseRow[], startDate: string, targetDate: string): Phas
   }
 }
 
+/** The ISO day after `day`, computed in UTC. */
+function nextDay(day: string): string {
+  const ms = Date.parse(`${day}T00:00:00Z`);
+  return Number.isNaN(ms) ? "" : new Date(ms + 86_400_000).toISOString().slice(0, 10);
+}
+
+/** A row added after hand-edited dates runs from the day after the previous phase to the target date, when that fits. */
+function appendedDates(rows: PhaseRow[], startDate: string, targetDate: string): Pick<PhaseRow, "plannedStart" | "plannedEnd"> {
+  const previousEnd = rows.at(-1)?.plannedEnd ?? "";
+  const plannedStart = previousEnd ? nextDay(previousEnd) : startDate;
+  if (!plannedStart || !targetDate || plannedStart > targetDate) return { plannedStart: "", plannedEnd: "" };
+  return { plannedStart, plannedEnd: targetDate };
+}
+
 function phasesValid(rows: PhaseRow[], startDate: string, targetDate: string): boolean {
   let previousEnd = "";
   for (const row of rows) {
@@ -118,6 +132,8 @@ function ProjectCreator({ workspace, first }: { workspace: Workspace; first: boo
   const [targetDate, setTargetDate] = useState("");
   const [phases, setPhases] = useState<PhaseRow[] | null>(null);
   const [nextPhaseId, setNextPhaseId] = useState(0);
+  // Once someone sets a phase date by hand, date and row changes stop re-spreading so their work is kept.
+  const [phaseDatesEdited, setPhaseDatesEdited] = useState(false);
 
   const [nameError, setNameError] = useState<string | null>(null);
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -174,25 +190,34 @@ function ProjectCreator({ workspace, first }: { workspace: Workspace; first: boo
     setStartError(null);
     setTargetError(null);
     setPhasesError(null);
-    setPhases((current) => (current ? respread(current, nextStart, nextTarget) : current));
+    if (!phaseDatesEdited) setPhases((current) => (current ? respread(current, nextStart, nextTarget) : current));
   };
 
   const updatePhase = (id: number, patch: Partial<PhaseRow>) => {
     setPhasesError(null);
+    if (patch.plannedStart !== undefined || patch.plannedEnd !== undefined) setPhaseDatesEdited(true);
     setPhases((current) => (current ?? []).map((row) => (row.id === id ? { ...row, ...patch } : row)));
   };
 
   const addPhase = () => {
     if (rows.length >= PHASES_MAX) return;
     setPhasesError(null);
-    setPhases(respread([...rows, { id: nextPhaseId, name: `Phase ${rows.length + 1}`, plannedStart: "", plannedEnd: "" }], startDate, targetDate));
+    const added = { id: nextPhaseId, name: `Phase ${rows.length + 1}`, plannedStart: "", plannedEnd: "" };
+    setPhases(phaseDatesEdited ? [...rows, { ...added, ...appendedDates(rows, startDate, targetDate) }] : respread([...rows, added], startDate, targetDate));
     setNextPhaseId((value) => value + 1);
   };
 
   const removePhase = (id: number) => {
     if (rows.length <= 1) return;
     setPhasesError(null);
-    setPhases(respread(rows.filter((row) => row.id !== id), startDate, targetDate));
+    const kept = rows.filter((row) => row.id !== id);
+    setPhases(phaseDatesEdited ? kept : respread(kept, startDate, targetDate));
+  };
+
+  const spreadEvenly = () => {
+    setPhasesError(null);
+    setPhaseDatesEdited(false);
+    setPhases(respread(rows, startDate, targetDate));
   };
 
   const onSubmit = async (event: FormEvent) => {
@@ -392,7 +417,11 @@ function ProjectCreator({ workspace, first }: { workspace: Workspace; first: boo
 
               <fieldset aria-describedby={phasesError ? "project-phases-error" : "project-phases-hint"} className="wsProjectPhases">
                 <legend>Phases</legend>
-                <p className="wsFieldHint" id="project-phases-hint">Spread evenly over the project dates. Rename them or adjust the dates — up to {PHASES_MAX} phases.</p>
+                <p className="wsFieldHint" id="project-phases-hint">
+                  {phaseDatesEdited
+                    ? "You've set phase dates by hand, so they stay as they are when the project dates or phases change."
+                    : `Spread evenly over the project dates. Rename them or adjust the dates — up to ${PHASES_MAX} phases.`}
+                </p>
                 <ol className="wsProjectPhaseList">
                   {rows.map((row, index) => {
                     const number = index + 1;
@@ -436,7 +465,10 @@ function ProjectCreator({ workspace, first }: { workspace: Workspace; first: boo
                   })}
                 </ol>
                 {phasesError && <p className="wsFieldError" id="project-phases-error" role="alert">{phasesError}</p>}
-                <button className="sparkSecondary wsProjectAddPhase" disabled={rows.length >= PHASES_MAX} onClick={addPhase} type="button">Add phase</button>
+                <div className="wsProjectPhaseActions">
+                  <button className="sparkSecondary wsProjectAddPhase" disabled={rows.length >= PHASES_MAX} onClick={addPhase} type="button">Add phase</button>
+                  <button className="wsGhostButton" disabled={!startDate || !targetDate || Boolean(range)} onClick={spreadEvenly} type="button">Re-spread dates evenly</button>
+                </div>
               </fieldset>
             </>
           )}
