@@ -1,6 +1,6 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0016_email_worker.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`), the platform governance API (`/api/v1/admin/*`), the workspace, member and invitation API (`/api/v1/workspaces/*`, `/api/v1/invitations/*`) and the outbox email worker for invitation emails are implemented and verified locally. Other product write use cases, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0017_project_methodology.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`), the platform governance API (`/api/v1/admin/*`), the workspace, member and invitation API (`/api/v1/workspaces/*`, `/api/v1/invitations/*`) and the outbox email worker for invitation emails are implemented and verified locally. Other product write use cases, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
 
@@ -76,6 +76,19 @@ Changes to the `0015` write functions:
 - `ws_accept_invitation` looks the token up, locks the workspace, then re-locks the invitation by id and re-checks the hash under the lock, so a token the worker rotated in between is invalid. The inviter is notified only while still an active workspace member.
 - `ws_create_workspace`: archived workspaces no longer count toward the owned-workspace cap.
 - The `issue_change_set` constraint trigger on `outbox_events` now fires on insert, delete, and updates of `tenant_id`, `aggregate_type`, `aggregate_id` or `aggregate_version` only, so delivery bookkeeping (lease, attempts, errors) on older issue events is not mistaken for an issue change set.
+
+## Project methodology schema (`0017_project_methodology.sql`)
+
+Schema only: the project write functions (`ws_create_project`, `ws_update_project`) arrive in a later migration. The runtime role reads the new tables through the session-bound `workspace_read` policy (`tenant_id = ANY(session_workspace_ids())`) and has no write grants; each new table has FORCE RLS, `owner_maintenance` for `spark_owner` and composite `(tenant_id, project_id)` foreign keys with `ON DELETE RESTRICT`.
+
+- `projects` adds `methodology` (`scrum`/`kanban`/`waterfall`, default `kanban`), `start_date`, `target_date` (`target_date >= start_date`), `sprint_length_days` (7 to 28, Scrum only, otherwise NULL), `settings_version` (positive, default 1) and `baselined_at`. `projects` has no `version` column on purpose: `maintain_record` would force every update, including issue number allocation, to bump it. `settings_version` is advanced explicitly by the settings write function.
+- `issues` adds `started_at` and `phase_id` (FK `(tenant_id, project_id, phase_id)` to `project_phases`, so an issue cannot reference another project's phase). `guard_issue` stamps `started_at` the first time the issue enters an `in_progress` status and keeps it afterwards, also when the issue moves back; all earlier checks are unchanged.
+- `sprints` adds `version` (now enforced by `maintain_record`: every sprint update advances it by one), `started_at`, `completed_at` and the non-negative commitment metrics `committed_points`, `committed_count`, `completed_points`, `completed_count`.
+- `project_phases`: name stored trimmed (1 to 60), `position >= 1` unique per project, `planned_end >= planned_start`, baseline dates both NULL or both set with end >= start, status `planned`/`active`/`completed`, `version` maintained by `maintain_record`. UNIQUE `(tenant_id, project_id, id)` is the target of the phase foreign keys.
+- `project_milestones`: optional `phase_id` (same-project FK), name stored trimmed (1 to 80), `due_date`, `baseline_due_date`, `completed_at`, `version` maintained by `maintain_record`.
+- `sprint_commitments` (PK `tenant_id, sprint_id, issue_id`, `story_points`): the snapshot taken when a sprint starts. Append-only through `reject_history_change()` (`23514`).
+- `project_methodology_periods`: methodology, `started_at`, `ended_at` (> `started_at`), `changed_by_user_id`, `reason` (1 to 200). At most one open period (`ended_at IS NULL`) per project (partial unique index, `23505`). The `period_close_only` trigger allows only one update that sets `ended_at` from NULL; any other update or a delete raises `23514`.
+- Backfill: every project that existed before `0017` gets one open `kanban` period starting at the project's `created_at`, attributed to the workspace's `created_by_user_id` with reason `Backfilled at migration 0017`.
 
 ## Platform governance and audit (`0009_platform_governance.sql` to `0011_campaign_review_lock.sql`)
 

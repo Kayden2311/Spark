@@ -90,6 +90,45 @@ async function accept(who: Account, tokenHash: Buffer) {
   return (await asSession(who.token, `SELECT * FROM ${fn("ws_accept_invitation")}($1)`, [tokenHash])).rows[0];
 }
 const outcome = async (who: Account, call: string, values: unknown[]) => (await asSession(who.token, `SELECT ${fn(call)} AS outcome`, values)).rows[0].outcome as string;
+type ProjectFixture = { workspace: string; project: string; todo: string; progress: string };
+// A committed project with a board, a todo and an in-progress status and its open methodology period.
+async function projectFixture(who: Account, workspace?: string): Promise<ProjectFixture> {
+  const tenant = workspace ?? (await createWorkspace(who)).workspace_id!;
+  const project = randomUUID(), todo = randomUUID(), progress = randomUUID();
+  const key = `P${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+  await owner.query("SET ROLE spark_owner");
+  await owner.query("BEGIN");
+  try {
+    await owner.query(`INSERT INTO ${table("projects")} (id,tenant_id,key,name) VALUES ($1,$2,$3,'Project')`, [project, tenant, key]);
+    await owner.query(`INSERT INTO ${table("boards")} (tenant_id,project_id,name) VALUES ($1,$2,'Board')`, [tenant, project]);
+    await owner.query(`INSERT INTO ${table("issue_statuses")} (id,tenant_id,project_id,name,category,position) VALUES ($1,$3,$4,'To do','todo',1),($2,$3,$4,'Doing','in_progress',2)`, [todo, progress, tenant, project]);
+    await owner.query(`INSERT INTO ${table("project_methodology_periods")} (tenant_id,project_id,methodology,changed_by_user_id,reason) VALUES ($1,$2,'kanban',$3,'Created by test')`, [tenant, project, who.id]);
+    await owner.query("COMMIT");
+  } catch (error) { await owner.query("ROLLBACK"); throw error; }
+  return { workspace: tenant, project, todo, progress };
+}
+// Inserts an issue with its creation event and outbox row inside the caller's transaction.
+async function insertIssue(fixture: ProjectFixture, reporter: string, number: number) {
+  const id = randomUUID();
+  await owner.query(`INSERT INTO ${table("issues")} (id,tenant_id,project_id,number,title,status_id,reporter_user_id) VALUES ($1,$2,$3,$4,'Task',$5,$6)`, [id, fixture.workspace, fixture.project, number, fixture.todo, reporter]);
+  await owner.query(`INSERT INTO ${table("issue_events")} (tenant_id,project_id,issue_id,actor_user_id,event_type,from_version,to_version,changes) VALUES ($1,$2,$3,$4,'created',0,1,'{}')`, [fixture.workspace, fixture.project, id, reporter]);
+  await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload) VALUES ($1,'issue.created','issue',$2,1,'{}')`, [fixture.workspace, id]);
+  return id;
+}
+// Moves an issue to a status as one complete change set (issue, event, outbox) and checks it at once.
+async function moveIssue(fixture: ProjectFixture, issue: string, actor: string, status: string, toVersion: number) {
+  await owner.query("SET CONSTRAINTS ALL DEFERRED");
+  await owner.query(`UPDATE ${table("issues")} SET status_id=$2,version=$3 WHERE id=$1`, [issue, status, toVersion]);
+  await owner.query(`INSERT INTO ${table("issue_events")} (tenant_id,project_id,issue_id,actor_user_id,event_type,from_version,to_version,changes) VALUES ($1,$2,$3,$4,'updated',$5,$6,'{}')`, [fixture.workspace, fixture.project, issue, actor, toVersion - 1, toVersion]);
+  await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload) VALUES ($1,'issue.updated','issue',$2,$3,'{}')`, [fixture.workspace, issue, toVersion]);
+  await owner.query("SET CONSTRAINTS ALL IMMEDIATE");
+}
+// Expects one statement to fail without aborting the surrounding transaction.
+async function rejectInside(sql: string, values: unknown[], code: string) {
+  await owner.query("SAVEPOINT probe");
+  await expect(owner.query(sql, values)).rejects.toMatchObject({ code });
+  await owner.query("ROLLBACK TO SAVEPOINT probe");
+}
 const auditRows = async (resource: string) => (await owner.query(`SELECT action,actor_user_id,resource_type,metadata FROM ${table("audit_events")} WHERE resource_id=$1 ORDER BY created_at,id`, [resource])).rows;
 
 beforeAll(async () => {
@@ -99,13 +138,17 @@ beforeAll(async () => {
   if (runtimeDatabase.rows[0].name !== ownerDatabase.rows[0].name || runtimeDatabase.rows[0].role !== "spark_app" || ownerDatabase.rows[0].role !== "spark_migrator") throw new Error("Tests require matching local database and dedicated migration/runtime roles");
   folder = await mkdtemp(join(tmpdir(), "spark-migration-test-"));
   await mkdir(join(folder, "meta"));
-  await writeFile(join(folder, "meta", "_journal.json"), await readFile(resolve("drizzle/meta/_journal.json")));
+  const fullJournal = await readFile(resolve("drizzle/meta/_journal.json"), "utf8");
   for (const file of (await readdir(resolve("drizzle"))).filter((name) => name.endsWith(".sql"))) {
     const sql = (await readFile(resolve("drizzle", file), "utf8")).replace(/\bspark\b/gu, namespace)
       .replaceAll(`${namespace}.user_id`, "spark.user_id").replaceAll(`${namespace}.tenant_id`, "spark.tenant_id")
       .replaceAll(`${namespace}.session_token_hash`, "spark.session_token_hash");
     await writeFile(join(folder, file), sql);
   }
+  // The fixtures are written at the pre-M2 schema (through 0016) so the later migrations run over existing data.
+  const preM2 = JSON.parse(fullJournal) as { entries: { idx: number }[] };
+  preM2.entries = preM2.entries.filter((entry) => entry.idx <= 16);
+  await writeFile(join(folder, "meta", "_journal.json"), JSON.stringify(preM2));
   await applyMigrations(owner, folder, namespace, journal);
   await owner.query("SET ROLE spark_owner");
   await owner.query("BEGIN");
@@ -129,6 +172,9 @@ beforeAll(async () => {
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$5),($3,$4,'password',$5)`, [userA,sessionA,userB,sessionB,new Date(Date.now()+60*60*1000)]);
     await owner.query("COMMIT");
   } catch (error) { await owner.query("ROLLBACK"); throw error; }
+  await writeFile(join(folder, "meta", "_journal.json"), fullJournal);
+  await applyMigrations(owner, folder, namespace, journal);
+  await owner.query("SET ROLE spark_owner");
 });
 
 afterAll(async () => {
@@ -149,9 +195,9 @@ afterAll(async () => {
 });
 
 describe("Local PostgreSQL schema", () => {
-  it("migrates 61 tables with FORCE RLS and a non-login owner", async () => {
+  it("migrates 65 tables with FORCE RLS and a non-login owner", async () => {
     const result = await owner.query("SELECT count(*)::integer AS count,bool_and(c.relrowsecurity AND c.relforcerowsecurity AND pg_get_userbyid(c.relowner)='spark_owner') AS secured FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relkind='r'", [namespace]);
-    expect(result.rows[0]).toEqual({ count:61, secured:true });
+    expect(result.rows[0]).toEqual({ count:65, secured:true });
     const roles = await owner.query("SELECT rolname,rolsuper,rolbypassrls,rolcanlogin FROM pg_roles WHERE rolname IN ('spark_owner','spark_app') ORDER BY rolname");
     expect(roles.rows).toEqual([{rolname:"spark_app",rolsuper:false,rolbypassrls:false,rolcanlogin:true},{rolname:"spark_owner",rolsuper:false,rolbypassrls:false,rolcanlogin:false}]);
   });
@@ -163,7 +209,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(17);
+    expect(result.rows[0].count).toBe(18);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -534,7 +580,7 @@ describe("Local PostgreSQL schema", () => {
     await expect(owner.query(`INSERT INTO ${table("moderation_actions")} (tenant_id,community_id,actor_user_id,action,reason) VALUES ($1,$2,$3,'hide','Not a moderator')`, [tenantA, communityA, visitor])).rejects.toMatchObject({ code: "23514" });
   });
   it("keeps the runtime role read-only and every definer function pinned", async () => {
-    for (const name of ["users","user_emails","posts","post_comments","communities","platform_role_assignments","sessions","content_reports","moderation_actions","promotion_campaigns","promotion_reviews","password_credentials","workspaces","workspace_memberships","workspace_invitations","notifications","outbox_events","audit_events"]) {
+    for (const name of ["users","user_emails","posts","post_comments","communities","platform_role_assignments","sessions","content_reports","moderation_actions","promotion_campaigns","promotion_reviews","password_credentials","workspaces","workspace_memberships","workspace_invitations","notifications","outbox_events","audit_events","projects","issues","sprints","project_phases","project_milestones","sprint_commitments","project_methodology_periods"]) {
       for (const privilege of ["INSERT","UPDATE","DELETE"]) {
         const result = await owner.query("SELECT has_table_privilege('spark_app',$1,$2) AS allowed", [`"${namespace}"."${name}"`, privilege]);
         expect({ name, privilege, allowed: result.rows[0].allowed }).toEqual({ name, privilege, allowed: false });
@@ -1300,7 +1346,7 @@ describe("Local PostgreSQL schema", () => {
     }
   });
   it("keeps an exact inventory of workspace row policies", async () => {
-    const tenantTables = ["startup_profiles","teams","team_memberships","projects","boards","issue_statuses","workflow_transitions","sprints","issues","issue_labels","issue_label_links","issue_comments","issue_links","issue_events","calendar_events","event_attendees"];
+    const tenantTables = ["startup_profiles","teams","team_memberships","projects","boards","issue_statuses","workflow_transitions","sprints","issues","issue_labels","issue_label_links","issue_comments","issue_links","issue_events","calendar_events","event_attendees","project_phases","project_milestones","sprint_commitments","project_methodology_periods"];
     const ownerPolicy = ["owner_maintenance", "ALL", ["spark_owner"], "PERMISSIVE"];
     const appRead = (name: string) => [name, "SELECT", ["spark_app"], "PERMISSIVE"];
     const expected: Record<string, unknown[][]> = {
@@ -1445,6 +1491,132 @@ describe("Local PostgreSQL schema", () => {
       await owner.query(`UPDATE ${table("outbox_events")} SET locked_until=NULL,lock_token=NULL,processed_at=now() WHERE aggregate_id=$1 AND aggregate_version=1`, [issue]);
       await owner.query("SET CONSTRAINTS ALL IMMEDIATE");
       await expect(owner.query(`UPDATE ${table("outbox_events")} SET aggregate_version=3 WHERE aggregate_id=$1 AND aggregate_version=1`, [issue])).rejects.toMatchObject({ code: "23514" });
+    });
+  });
+  it("seeds methodology defaults on existing projects", async () => {
+    await owner.query("SET ROLE spark_owner");
+    // projectA, projectB and projectOther were created before 0017 ran.
+    const projects = await owner.query(`SELECT id,methodology,settings_version,sprint_length_days,start_date,target_date,baselined_at FROM ${table("projects")} WHERE id = ANY($1::uuid[]) ORDER BY id`, [[projectA, projectB, projectOther]]);
+    expect(projects.rows).toEqual([projectA, projectB, projectOther].sort().map((id) => ({ id, methodology: "kanban", settings_version: 1, sprint_length_days: null, start_date: null, target_date: null, baselined_at: null })));
+    for (const [project, tenant, creator] of [[projectA, tenantA, userA], [projectB, tenantB, userB], [projectOther, tenantA, userA]]) {
+      const periods = await owner.query(`SELECT tenant_id,methodology,ended_at,changed_by_user_id,reason FROM ${table("project_methodology_periods")} WHERE project_id=$1`, [project]);
+      expect(periods.rows).toEqual([{ tenant_id: tenant, methodology: "kanban", ended_at: null, changed_by_user_id: creator, reason: "Backfilled at migration 0017" }]);
+    }
+  });
+  it("isolates the new project tables by session", async () => {
+    const alice = await account("Phase Owner A"), bob = await account("Phase Owner B");
+    const fixtures = [await projectFixture(alice), await projectFixture(bob)];
+    for (const [fixture, who] of [[fixtures[0], alice], [fixtures[1], bob]] as const) {
+      await owner.query("SET ROLE spark_owner");
+      await owner.query("BEGIN");
+      try {
+        const phase = (await owner.query(`INSERT INTO ${table("project_phases")} (tenant_id,project_id,name,position,planned_start,planned_end) VALUES ($1,$2,'Design',1,'2026-11-01','2026-11-30') RETURNING id`, [fixture.workspace, fixture.project])).rows[0].id;
+        await owner.query(`INSERT INTO ${table("project_milestones")} (tenant_id,project_id,phase_id,name,due_date) VALUES ($1,$2,$3,'Design sign-off','2026-11-30')`, [fixture.workspace, fixture.project, phase]);
+        const sprint = (await owner.query(`INSERT INTO ${table("sprints")} (tenant_id,project_id,name) VALUES ($1,$2,'Sprint 1') RETURNING id`, [fixture.workspace, fixture.project])).rows[0].id;
+        const issue = await insertIssue(fixture, who.id, 1);
+        await owner.query(`INSERT INTO ${table("sprint_commitments")} (tenant_id,sprint_id,issue_id,story_points) VALUES ($1,$2,$3,3)`, [fixture.workspace, sprint, issue]);
+        await owner.query("COMMIT");
+      } catch (error) { await owner.query("ROLLBACK"); throw error; }
+    }
+    for (const name of ["project_phases", "project_milestones", "sprint_commitments", "project_methodology_periods"]) {
+      const tenants = async (token: Buffer | null) => [...new Set((await asSession(token, `SELECT tenant_id FROM ${table(name)}`)).rows.map((row) => row.tenant_id))];
+      expect({ name, tenants: await tenants(alice.token) }).toEqual({ name, tenants: [fixtures[0].workspace] });
+      expect({ name, tenants: await tenants(bob.token) }).toEqual({ name, tenants: [fixtures[1].workspace] });
+      expect({ name, tenants: await tenants(null) }).toEqual({ name, tenants: [] });
+      expect({ name, tenants: await tenants(newTokenHash()) }).toEqual({ name, tenants: [] });
+    }
+    await expect(asSession(alice.token, `INSERT INTO ${table("project_phases")} (tenant_id,project_id,name,position,planned_start,planned_end) VALUES ($1,$2,'Sneaky',2,'2026-12-01','2026-12-02')`, [fixtures[0].workspace, fixtures[0].project])).rejects.toMatchObject({ code: "42501" });
+  });
+  it("rejects cross-project phase links", async () => {
+    const alice = await account("Phase Linker");
+    const first = await projectFixture(alice);
+    const second = await projectFixture(alice, first.workspace);
+    await rollback(async () => {
+      const phase = (await owner.query(`INSERT INTO ${table("project_phases")} (tenant_id,project_id,name,position,planned_start,planned_end) VALUES ($1,$2,'Build',1,'2026-11-01','2026-11-30') RETURNING id`, [second.workspace, second.project])).rows[0].id;
+      await rejectInside(`INSERT INTO ${table("issues")} (tenant_id,project_id,number,title,status_id,reporter_user_id,phase_id) VALUES ($1,$2,1,'Task',$3,$4,$5)`, [first.workspace, first.project, first.todo, alice.id, phase], "23503");
+      await rejectInside(`INSERT INTO ${table("project_milestones")} (tenant_id,project_id,phase_id,name,due_date) VALUES ($1,$2,$3,'Launch','2026-11-30')`, [first.workspace, first.project, phase], "23503");
+    });
+  });
+  it("keeps commitments and periods append-only", async () => {
+    const alice = await account("Commitment Owner");
+    const fixture = await projectFixture(alice);
+    await rollback(async () => {
+      const sprint = (await owner.query(`INSERT INTO ${table("sprints")} (tenant_id,project_id,name) VALUES ($1,$2,'Sprint 1') RETURNING id`, [fixture.workspace, fixture.project])).rows[0].id;
+      const issue = await insertIssue(fixture, alice.id, 1);
+      await owner.query(`INSERT INTO ${table("sprint_commitments")} (tenant_id,sprint_id,issue_id,story_points) VALUES ($1,$2,$3,5)`, [fixture.workspace, sprint, issue]);
+      await rejectInside(`UPDATE ${table("sprint_commitments")} SET story_points=8 WHERE sprint_id=$1`, [sprint], "23514");
+      await rejectInside(`DELETE FROM ${table("sprint_commitments")} WHERE sprint_id=$1`, [sprint], "23514");
+      const periods = table("project_methodology_periods");
+      const open = (await owner.query(`SELECT id FROM ${periods} WHERE project_id=$1`, [fixture.project])).rows[0].id;
+      await rejectInside(`UPDATE ${periods} SET methodology='scrum' WHERE id=$1`, [open], "23514");
+      await rejectInside(`UPDATE ${periods} SET reason='Rewritten' WHERE id=$1`, [open], "23514");
+      await rejectInside(`DELETE FROM ${periods} WHERE id=$1`, [open], "23514");
+      await rejectInside(`INSERT INTO ${periods} (tenant_id,project_id,methodology,changed_by_user_id,reason) VALUES ($1,$2,'scrum',$3,'Second open period')`, [fixture.workspace, fixture.project, alice.id], "23505");
+      await owner.query(`UPDATE ${periods} SET ended_at=clock_timestamp() WHERE id=$1`, [open]);
+      await rejectInside(`UPDATE ${periods} SET ended_at=clock_timestamp() WHERE id=$1`, [open], "23514");
+      await rejectInside(`UPDATE ${periods} SET ended_at=NULL WHERE id=$1`, [open], "23514");
+      await owner.query(`INSERT INTO ${periods} (tenant_id,project_id,methodology,changed_by_user_id,reason,started_at) VALUES ($1,$2,'scrum',$3,'Switched to Scrum',clock_timestamp())`, [fixture.workspace, fixture.project, alice.id]);
+      await rejectInside(`INSERT INTO ${periods} (tenant_id,project_id,methodology,changed_by_user_id,reason) VALUES ($1,$2,'waterfall',$3,'Third open period')`, [fixture.workspace, fixture.project, alice.id], "23505");
+    });
+  });
+  it("stamps started_at on first in-progress move", async () => {
+    const alice = await account("Starter");
+    const fixture = await projectFixture(alice);
+    await rollback(async () => {
+      const issue = await insertIssue(fixture, alice.id, 1);
+      await owner.query("SET CONSTRAINTS ALL IMMEDIATE");
+      const startedAt = async () => (await owner.query(`SELECT started_at FROM ${table("issues")} WHERE id=$1`, [issue])).rows[0].started_at as Date | null;
+      expect(await startedAt()).toBeNull();
+      await moveIssue(fixture, issue, alice.id, fixture.progress, 2);
+      const first = await startedAt();
+      expect(first).toBeInstanceOf(Date);
+      await moveIssue(fixture, issue, alice.id, fixture.todo, 3);
+      expect(await startedAt()).toEqual(first);
+      await moveIssue(fixture, issue, alice.id, fixture.progress, 4);
+      expect(await startedAt()).toEqual(first);
+    });
+  });
+  it("enforces methodology-specific project fields", async () => {
+    const projects = table("projects");
+    await reject(`UPDATE ${projects} SET sprint_length_days=14 WHERE id=$1`, [projectA], "23514");
+    await reject(`UPDATE ${projects} SET methodology='scrum',sprint_length_days=30 WHERE id=$1`, [projectA], "23514");
+    await reject(`UPDATE ${projects} SET methodology='scrum',sprint_length_days=6 WHERE id=$1`, [projectA], "23514");
+    await reject(`UPDATE ${projects} SET methodology='agile' WHERE id=$1`, [projectA], "23514");
+    await reject(`UPDATE ${projects} SET start_date='2026-12-01',target_date='2026-11-01' WHERE id=$1`, [projectA], "23514");
+    await reject(`UPDATE ${projects} SET settings_version=0 WHERE id=$1`, [projectA], "23514");
+    await rollback(async () => {
+      await owner.query(`UPDATE ${projects} SET methodology='scrum',sprint_length_days=14 WHERE id=$1`, [projectA]);
+      await owner.query(`UPDATE ${projects} SET methodology='waterfall',sprint_length_days=NULL,start_date='2026-11-01',target_date='2026-11-01',settings_version=settings_version+1 WHERE id=$1`, [projectA]);
+    });
+  });
+  it("validates phase, milestone and sprint metric shapes", async () => {
+    const alice = await account("Shape Owner");
+    const fixture = await projectFixture(alice);
+    const phases = table("project_phases"), milestones = table("project_milestones");
+    const insertPhase = `INSERT INTO ${phases} (tenant_id,project_id,name,position,planned_start,planned_end,baseline_start,baseline_end) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`;
+    const phaseRow = (name: string, position: number, start: string, end: string, baselineStart: string | null = null, baselineEnd: string | null = null) => [fixture.workspace, fixture.project, name, position, start, end, baselineStart, baselineEnd];
+    await rollback(async () => {
+      await owner.query(insertPhase, phaseRow("Design", 1, "2026-11-01", "2026-11-10", "2026-11-01", "2026-11-10"));
+      await rejectInside(insertPhase, phaseRow("Duplicate position", 1, "2026-11-11", "2026-11-20"), "23505");
+      await rejectInside(insertPhase, phaseRow("Backwards", 2, "2026-11-20", "2026-11-11"), "23514");
+      await rejectInside(insertPhase, phaseRow("Half baseline", 2, "2026-11-11", "2026-11-20", "2026-11-11"), "23514");
+      await rejectInside(insertPhase, phaseRow("Zero", 0, "2026-11-11", "2026-11-20"), "23514");
+      await rejectInside(insertPhase, phaseRow("   ", 2, "2026-11-11", "2026-11-20"), "23514");
+      await rejectInside(insertPhase, phaseRow(" Padded ", 2, "2026-11-11", "2026-11-20"), "23514");
+      await rejectInside(insertPhase, phaseRow("x".repeat(61), 2, "2026-11-11", "2026-11-20"), "23514");
+      await rejectInside(`UPDATE ${phases} SET status='done' WHERE project_id=$1`, [fixture.project], "23514");
+      // maintain_record: every phase and milestone update advances the version by exactly one.
+      await rejectInside(`UPDATE ${phases} SET name='Stale' WHERE project_id=$1`, [fixture.project], "23514");
+      await owner.query(`UPDATE ${phases} SET name='Design v2',version=version+1 WHERE project_id=$1`, [fixture.project]);
+      await owner.query(`INSERT INTO ${milestones} (tenant_id,project_id,name,due_date) VALUES ($1,$2,'Kickoff','2026-11-01')`, [fixture.workspace, fixture.project]);
+      await rejectInside(`UPDATE ${milestones} SET name='Stale' WHERE project_id=$1`, [fixture.project], "23514");
+      await rejectInside(`INSERT INTO ${milestones} (tenant_id,project_id,name,due_date) VALUES ($1,$2,$3,'2026-11-01')`, [fixture.workspace, fixture.project, "x".repeat(81)], "23514");
+      const sprints = table("sprints");
+      await rejectInside(`INSERT INTO ${sprints} (tenant_id,project_id,name,committed_points) VALUES ($1,$2,'Negative',-1)`, [fixture.workspace, fixture.project], "23514");
+      await rejectInside(`INSERT INTO ${sprints} (tenant_id,project_id,name,completed_count) VALUES ($1,$2,'Negative',-1)`, [fixture.workspace, fixture.project], "23514");
+      const sprint = (await owner.query(`INSERT INTO ${sprints} (tenant_id,project_id,name) VALUES ($1,$2,'Sprint') RETURNING id`, [fixture.workspace, fixture.project])).rows[0].id;
+      await rejectInside(`UPDATE ${sprints} SET goal='Stale' WHERE id=$1`, [sprint], "23514");
+      await owner.query(`UPDATE ${sprints} SET goal='Ship',version=version+1 WHERE id=$1`, [sprint]);
     });
   });
 });
