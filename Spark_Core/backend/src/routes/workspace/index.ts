@@ -5,6 +5,7 @@ import { createMemberGuard } from "./guard.js";
 import { registerInvitationRoutes } from "./invitations.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerMethodologyRoutes } from "./methodologies.js";
+import { registerProjectRoutes } from "./projects.js";
 import { registerWorkspaceCrudRoutes } from "./workspaces.js";
 
 export interface WorkspacePluginOptions {
@@ -18,4 +19,5 @@ export function registerWorkspaceRoutes(app: FastifyInstance, options: Workspace
   registerMemberRoutes(app, guard);
   registerMethodologyRoutes(app);
   registerInvitationRoutes(app, guard, options.pool);
+  registerProjectRoutes(app, guard);
 }

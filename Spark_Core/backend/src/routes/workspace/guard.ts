@@ -18,6 +18,14 @@ const KNOWN_INPUT_ERRORS: ReadonlySet<string> = new Set([
   "Invalid invitation role",
   "Invalid invitation expiry",
   "Invalid member role",
+  "Invalid project key",
+  "Invalid project name",
+  "Invalid project description",
+  "Invalid methodology",
+  "Invalid project dates",
+  "Invalid sprint length",
+  "Invalid project statuses",
+  "Invalid project phases",
 ]);
 
 export interface MemberGuard {
