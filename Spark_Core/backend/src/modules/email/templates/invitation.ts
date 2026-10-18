@@ -7,7 +7,6 @@ export interface InvitationEmailInput {
   role: string;
   acceptUrl: string;
   expiresAt: Date;
-  appBaseUrl: string;
 }
 
 /** Collapses whitespace, including CR/LF, so names are safe in a subject line and in prose. */
@@ -30,8 +29,8 @@ export function invitationEmail(input: InvitationEmailInput): Omit<EmailMessage,
       `This invitation expires on ${expires}. If you were not expecting it, you can ignore this email.`,
     ],
     action: { label: "Accept invitation", url: input.acceptUrl },
+    // No settings link: the recipient may have no account yet.
     footerNote: "You received this email because someone invited this address to a Spark workspace.",
-    appBaseUrl: input.appBaseUrl,
   });
   return { subject: `${inviter} invited you to ${workspace} on Spark`, html, text };
 }

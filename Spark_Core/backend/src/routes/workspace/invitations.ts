@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from "pg";
 
 import { hashSessionToken } from "../../infrastructure/database/session.js";
 import { problem } from "../responses.js";
-import { expectOutcome } from "../session-guard.js";
+import { MUTATION_RATE_LIMIT, expectOutcome } from "../session-guard.js";
 import type { MemberGuard } from "./guard.js";
 import { readWorkspace } from "./workspaces.js";
 
@@ -11,7 +11,8 @@ const STATUSES = ["pending", "accepted", "revoked", "expired"] as const;
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TOKEN_PATTERN = "^[0-9a-f]{64}$";
 
-// Create and resend: 20 per 10 minutes. Preview and accept are token guessing surfaces: 10 per minute.
+// Create and resend send email: 20 per 10 minutes. Revoke sends nothing and uses the general mutation limit.
+// Preview and accept are token guessing surfaces: 10 per minute.
 const INVITE_RATE_LIMIT = { rateLimit: { max: 20, timeWindow: 10 * 60 * 1000 } } as const;
 const TOKEN_RATE_LIMIT = { rateLimit: { max: 10, timeWindow: 60 * 1000 } } as const;
 
@@ -246,7 +247,7 @@ export function registerInvitationRoutes(app: FastifyInstance, guard: MemberGuar
 
   app.delete<{ Params: { workspaceId: string; invitationId: string } }>(
     "/api/v1/workspaces/:workspaceId/invitations/:invitationId",
-    { config: INVITE_RATE_LIMIT, schema: { params: invitationParams } },
+    { config: MUTATION_RATE_LIMIT, schema: { params: invitationParams } },
     async (request, reply) => {
       const member = await guard.authenticate(request, reply);
       if (!member) return reply;

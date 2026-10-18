@@ -5,8 +5,11 @@ export interface EmailLayoutInput {
   paragraphs: string[];
   action?: { label: string; url: string };
   footerNote: string;
-  /** Base URL of the web app; the footer links to its notification settings. */
-  appBaseUrl: string;
+  /**
+   * Absolute URL of the recipient's email settings, linked from the footer. Omit it when the recipient may
+   * have no account (for example an invitation).
+   */
+  settingsUrl?: string;
 }
 
 const INK = "#17233d";
@@ -32,7 +35,7 @@ function linkUrl(raw: string): string {
 
 /** Renders the shared Spark email frame. Every interpolated value is HTML-escaped. */
 export function renderEmail(input: EmailLayoutInput): { html: string; text: string } {
-  const settingsUrl = linkUrl(`${input.appBaseUrl.replace(/\/+$/u, "")}/settings/notifications`);
+  const settingsUrl = input.settingsUrl === undefined ? undefined : linkUrl(input.settingsUrl);
   const action = input.action ? { label: input.action.label, url: linkUrl(input.action.url) } : undefined;
   const paragraphs = input.paragraphs
     .map((paragraph) => `<p style="margin:0 0 16px;font-size:16px;line-height:24px;color:${INK};">${escapeHtml(paragraph)}</p>`)
@@ -58,7 +61,7 @@ export function renderEmail(input: EmailLayoutInput): { html: string; text: stri
 ${paragraphs}${button}
 </td></tr>
 <tr><td style="padding:16px 28px 24px;border-top:1px solid ${LINE};font-family:${FONT};font-size:12px;line-height:18px;color:${MUTED};">
-${escapeHtml(input.footerNote)}<br>Manage email settings: <a href="${escapeHtml(settingsUrl)}" style="color:${MUTED};">${escapeHtml(settingsUrl)}</a>
+${escapeHtml(input.footerNote)}${settingsUrl ? `<br>Manage email settings: <a href="${escapeHtml(settingsUrl)}" style="color:${MUTED};">${escapeHtml(settingsUrl)}</a>` : ""}
 </td></tr>
 </table>
 </td></tr>
@@ -70,7 +73,7 @@ ${escapeHtml(input.footerNote)}<br>Manage email settings: <a href="${escapeHtml(
     input.heading,
     ...input.paragraphs,
     ...(action ? [`${action.label}: ${action.url}`] : []),
-    `--\n${input.footerNote}\nManage email settings: ${settingsUrl}`,
+    `--\n${input.footerNote}${settingsUrl ? `\nManage email settings: ${settingsUrl}` : ""}`,
   ].join("\n\n");
 
   return { html, text: `${text}\n` };

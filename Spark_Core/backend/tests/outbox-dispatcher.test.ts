@@ -42,12 +42,12 @@ describe("outbox dispatcher", () => {
     const { pool, calls } = setup([event("issue.created")]);
     const sender = createMemorySender();
     const result = await createDispatcher({ pool, sender, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => now }).runOnce();
-    expect(result).toEqual({ claimed: 1, sent: 0, failed: 0 });
+    expect(result).toEqual({ claimed: 1, sent: 0, failed: 0, leaseLost: 0 });
     expect(sender.sent).toEqual([]);
     expect(callsTo(calls, "worker_complete_outbox")).toHaveLength(1);
     expect(callsTo(calls, "worker_fail_outbox")).toHaveLength(0);
     const claim = callsTo(calls, "worker_claim_outbox")[0]!;
-    expect(claim.params.slice(1)).toEqual([20, 120]);
+    expect(claim.params.slice(1)).toEqual([5, 300]);
     expect(callsTo(calls, "worker_complete_outbox")[0]!.params).toEqual([event("issue.created").id, claim.params[0]]);
   });
 
@@ -55,7 +55,7 @@ describe("outbox dispatcher", () => {
     const { pool, calls } = setup([event("invitation.created")]);
     const sender = createMemorySender();
     const result = await createDispatcher({ pool, sender, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => now }).runOnce();
-    expect(result).toEqual({ claimed: 1, sent: 1, failed: 0 });
+    expect(result).toEqual({ claimed: 1, sent: 1, failed: 0, leaseLost: 0 });
     expect(sender.sent).toHaveLength(1);
     const message = sender.sent[0]!;
     expect(message.to).toBe("bob@example.com");
@@ -81,7 +81,7 @@ describe("outbox dispatcher", () => {
       const { pool, calls } = setup([event("invitation.resent")], overrides);
       const sender = createMemorySender();
       expect(await createDispatcher({ pool, sender, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => now }).runOnce())
-        .toEqual({ claimed: 1, sent: 0, failed: 0 });
+        .toEqual({ claimed: 1, sent: 0, failed: 0, leaseLost: 0 });
       expect(sender.sent).toEqual([]);
       expect(callsTo(calls, "worker_complete_outbox")).toHaveLength(1);
     }
@@ -91,7 +91,7 @@ describe("outbox dispatcher", () => {
     const { pool, calls } = setup([event("invitation.created", 3)]);
     const failing: EmailSender = { send: async () => { throw new Error("connect ECONNREFUSED bob@example.com"); } };
     const result = await createDispatcher({ pool, sender: failing, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => now }).runOnce();
-    expect(result).toEqual({ claimed: 1, sent: 0, failed: 1 });
+    expect(result).toEqual({ claimed: 1, sent: 0, failed: 1, leaseLost: 0 });
     const failed = callsTo(calls, "worker_fail_outbox");
     expect(failed).toHaveLength(1);
     const lock = callsTo(calls, "worker_claim_outbox")[0]!.params[0];
@@ -104,5 +104,44 @@ describe("outbox dispatcher", () => {
     await createDispatcher({ pool, sender: createMemorySender(), handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => now }).runOnce();
     const failed = callsTo(calls, "worker_fail_outbox")[0]!;
     expect(failed.params.slice(2)).toEqual(["not_found", new Date(now.getTime() + 6 * 60 * 60_000)]);
+  });
+
+  it("does not count an event whose lease was lost as sent or failed", async () => {
+    const { pool, calls } = setup([event("invitation.created")], [["worker_complete_outbox", () => [{ done: false }]]]);
+    const sender = createMemorySender();
+    const result = await createDispatcher({ pool, sender, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => now }).runOnce();
+    expect(result).toEqual({ claimed: 1, sent: 0, failed: 0, leaseLost: 1 });
+    expect(callsTo(calls, "worker_complete_outbox")).toHaveLength(1);
+
+    const failing: EmailSender = { send: async () => { throw new Error("down"); } };
+    const lost = setup([event("invitation.created")], [["worker_fail_outbox", () => [{ done: false }]]]);
+    expect(await createDispatcher({ pool: lost.pool, sender: failing, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => now }).runOnce())
+      .toEqual({ claimed: 1, sent: 0, failed: 0, leaseLost: 1 });
+  });
+
+  it("leaves the rest of the batch claimed when the lease budget is nearly used up", async () => {
+    let clock = now.getTime();
+    const slow: EmailSender = { send: async () => { clock += 120_000; return { messageId: null }; } };
+    const { pool, calls } = setup([event("invitation.created", 1), event("invitation.created", 2), event("invitation.created", 3)]);
+    const result = await createDispatcher({ pool, sender: slow, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => new Date(clock) }).runOnce();
+    // 300 s lease: two sends of 120 s each leave 60 s, which is too little to start a third event.
+    expect(result).toEqual({ claimed: 3, sent: 2, failed: 0, leaseLost: 0 });
+    expect(callsTo(calls, "worker_issue_invitation_token")).toHaveLength(2);
+    expect(callsTo(calls, "worker_complete_outbox")).toHaveLength(2);
+    expect(callsTo(calls, "worker_fail_outbox")).toHaveLength(0);
+  });
+
+  it("never issues a new invitation token with less than a minute of lease left", async () => {
+    let clock = now.getTime();
+    const { pool, calls } = setup([event("invitation.created")], [
+      ["worker_invitation_email", () => { clock += 250_000; return [pendingInvitation]; }],
+    ]);
+    const sender = createMemorySender();
+    const result = await createDispatcher({ pool, sender, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => new Date(clock) }).runOnce();
+    expect(result).toEqual({ claimed: 1, sent: 0, failed: 0, leaseLost: 0 });
+    expect(sender.sent).toEqual([]);
+    expect(callsTo(calls, "worker_issue_invitation_token")).toHaveLength(0);
+    expect(callsTo(calls, "worker_complete_outbox")).toHaveLength(0);
+    expect(callsTo(calls, "worker_fail_outbox")).toHaveLength(0);
   });
 });

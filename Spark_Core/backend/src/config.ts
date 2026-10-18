@@ -34,6 +34,8 @@ export interface WorkerConfig {
   readonly workerDatabaseUrl: string;
   readonly databaseSsl: boolean;
   readonly smtpUrl: string;
+  /** True in production: plain smtp:// must upgrade with STARTTLS (nodemailer requireTLS); smtps:// is TLS already. */
+  readonly smtpRequireTls: boolean;
   readonly emailFrom: string;
   /** Origin (plus optional path) of the web app that email links point to, without a trailing slash. */
   readonly appBaseUrl: string;
@@ -233,7 +235,7 @@ function appBaseUrl(raw: string, production: boolean): string {
   return `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
 }
 
-function smtpUrl(raw: string): string {
+function smtpUrl(raw: string, production: boolean): string {
   let url: URL;
   try {
     url = new URL(raw);
@@ -241,6 +243,9 @@ function smtpUrl(raw: string): string {
     throw new Error("SMTP_URL must be a valid smtp:// or smtps:// URL");
   }
   if (!["smtp:", "smtps:"].includes(url.protocol)) throw new Error("SMTP_URL must be a valid smtp:// or smtps:// URL");
+  // nodemailer reads options from the query string and lets them override explicit options, which could
+  // switch off TLS or certificate checks; production URLs carry no options.
+  if (production && url.search) throw new Error("SMTP_URL must not carry query options in production");
   return raw;
 }
 
@@ -266,7 +271,8 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     logLevel: env.LOG_LEVEL ?? "info",
     workerDatabaseUrl,
     databaseSsl,
-    smtpUrl: smtpUrl(required(env, "SMTP_URL", production ? "" : "smtp://127.0.0.1:1025")),
+    smtpUrl: smtpUrl(required(env, "SMTP_URL", production ? "" : "smtp://127.0.0.1:1025"), production),
+    smtpRequireTls: production,
     emailFrom: required(env, "EMAIL_FROM", production ? "" : "Spark <no-reply@spark.local>"),
     appBaseUrl: appBaseUrl(required(env, "APP_BASE_URL", production ? "" : "http://localhost:3000"), production),
   };

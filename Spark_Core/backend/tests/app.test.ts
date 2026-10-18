@@ -162,7 +162,12 @@ describe("Spark API", () => {
       EMAIL_FROM: "Spark <no-reply@spark.example>",
       APP_BASE_URL: "https://app.spark.example",
     };
-    expect(loadWorkerConfig(base)).toMatchObject({ appBaseUrl: "https://app.spark.example", databaseSsl: true });
+    expect(loadWorkerConfig(base)).toMatchObject({ appBaseUrl: "https://app.spark.example", databaseSsl: true, smtpRequireTls: true });
+    // Production mail is always encrypted: smtps:// (implicit TLS) or smtp:// with STARTTLS required.
+    expect(loadWorkerConfig({ ...base, SMTP_URL: "smtp://user:pass@smtp.example.com:587" }).smtpRequireTls).toBe(true);
+    expect(() => loadWorkerConfig({ ...base, SMTP_URL: "smtp://smtp.example.com:587?ignoreTLS=true" })).toThrow("SMTP_URL");
+    expect(() => loadWorkerConfig({ ...base, SMTP_URL: "smtps://smtp.example.com:465?tls.rejectUnauthorized=false" })).toThrow("SMTP_URL");
+    expect(loadWorkerConfig({ NODE_ENV: "test" }).smtpRequireTls).toBe(false);
     expect(() => loadWorkerConfig({ ...base, WORKER_DATABASE_URL: undefined })).toThrow();
     expect(() => loadWorkerConfig({ ...base, SMTP_URL: undefined })).toThrow();
     expect(() => loadWorkerConfig({ ...base, APP_BASE_URL: "http://app.spark.example" })).toThrow("HTTPS");

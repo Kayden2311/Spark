@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { hashSessionToken } from "../../infrastructure/database/session.js";
 import type { EmailMessage } from "../email/email-sender.js";
 import { invitationEmail } from "../email/templates/invitation.js";
-import { DeliveryError } from "./dispatcher.js";
+import { DeliveryError, LeaseBudgetExhausted, TOKEN_ISSUE_BUDGET_MS } from "./dispatcher.js";
 import type { Handler } from "./dispatcher.js";
 
 interface InvitationEmailRow {
@@ -28,7 +28,7 @@ function invitationId(payload: unknown): string {
  * hash is stored, which also invalidates any earlier link. The raw token lives only in this function's
  * memory and in the email itself, in the URL fragment so it never reaches a server log.
  */
-const deliverInvitation: Handler = async (event, { pool, sender, appBaseUrl }) => {
+const deliverInvitation: Handler = async (event, { pool, sender, appBaseUrl, leaseRemainingMs }) => {
   const id = invitationId(event.payload);
   const found = await pool.query<InvitationEmailRow>(
     "SELECT status, email, workspace_name, inviter_name, role, expires_at FROM spark.worker_invitation_email($1)",
@@ -47,12 +47,13 @@ const deliverInvitation: Handler = async (event, { pool, sender, appBaseUrl }) =
       role: invitation.role,
       acceptUrl: `${appBaseUrl}/invitations/accept#token=${token}`,
       expiresAt: invitation.expires_at,
-      appBaseUrl,
     });
   } catch {
     throw new DeliveryError("template_error");
   }
 
+  // Issuing a token invalidates the previous link, so only do it when the send can still finish in the lease.
+  if (leaseRemainingMs() < TOKEN_ISSUE_BUDGET_MS) throw new LeaseBudgetExhausted();
   const issued = await pool.query<{ issued: boolean }>(
     "SELECT spark.worker_issue_invitation_token($1, $2) AS issued",
     [id, hashSessionToken(token)],

@@ -42,7 +42,7 @@ pool.on("error", (error) => log("error", "PostgreSQL worker pool error", { code:
 
 const dispatcher = createDispatcher({
   pool,
-  sender: createSmtpSender(config.smtpUrl, config.emailFrom),
+  sender: createSmtpSender(config.smtpUrl, config.emailFrom, { requireTls: config.smtpRequireTls }),
   handlers: outboxHandlers,
   appBaseUrl: config.appBaseUrl,
 });
