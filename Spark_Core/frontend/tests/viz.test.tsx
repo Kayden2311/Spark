@@ -36,6 +36,19 @@ describe("shared viz module", () => {
     expect(screen.queryByText("chart")).not.toBeInTheDocument();
   });
 
+  it("ChartCard uses a custom error renderer", async () => {
+    const onRetry = vi.fn();
+    const renderError = vi.fn((message: string) => <p data-testid="custom-error">{`Custom: ${message}`}</p>);
+    render(
+      <ChartCard error="Could not load" onRetry={onRetry} renderError={renderError} title="Sign-ups">
+        <p>chart</p>
+      </ChartCard>,
+    );
+    expect(renderError).toHaveBeenCalledWith("Could not load", onRetry);
+    expect(screen.getByTestId("custom-error")).toHaveTextContent("Custom: Could not load");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("ChartCard empty state", () => {
     render(
       <ChartCard empty title="Sign-ups">

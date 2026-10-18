@@ -17,7 +17,7 @@ describe("toApiError", () => {
 
   it("hides generic 5xx detail but keeps database_unavailable", async () => {
     const generic = await toApiError(new Response(JSON.stringify({ detail: "boom" }), { status: 500 }));
-    expect(generic.message).not.toBe("boom");
+    expect(generic.message).toBe("Something went wrong on our side. Try again in a moment.");
     const database = await toApiError(new Response(JSON.stringify({ code: "database_unavailable", detail: "Database is down." }), { status: 503 }));
     expect(database.message).toBe("Database is down.");
   });

@@ -48,6 +48,11 @@ describe("admin API client", () => {
     }));
   });
 
+  it("uses the admin copy for an empty-body 403", async () => {
+    respond(403);
+    await expect(adminApi("/overview")).rejects.toMatchObject({ status: 403, message: "Your platform role does not allow this action." });
+  });
+
   it("returns undefined for 204", async () => {
     respond(204);
     await expect(adminApi("/users/1/roles/content_moderator", { method: "DELETE", body: { reason: "Done" } })).resolves.toBeUndefined();

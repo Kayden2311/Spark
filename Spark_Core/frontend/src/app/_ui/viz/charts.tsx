@@ -81,6 +81,8 @@ interface ChartCardProps {
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
+  /** Replaces the default text-only error state, e.g. so a host app can show its own banner. */
+  renderError?: (message: string, onRetry?: () => void) => ReactNode;
   empty?: boolean;
   emptyText?: string;
   height?: number;
@@ -103,7 +105,7 @@ function ChartError({ message, onRetry }: { message: string; onRetry?: () => voi
 }
 
 /** A titled chart with loading, error and empty states, and a switch to view the numbers as a table. */
-export function ChartCard({ title, subtitle, legend, actions, table, loading, error, onRetry, empty, emptyText = "No activity in this period yet.", height = 260, className, children }: ChartCardProps) {
+export function ChartCard({ title, subtitle, legend, actions, table, loading, error, onRetry, renderError, empty, emptyText = "No activity in this period yet.", height = 260, className, children }: ChartCardProps) {
   const [asTable, setAsTable] = useState(false);
   const headingId = useId();
   const ready = !loading && !error && !empty;
@@ -126,7 +128,7 @@ export function ChartCard({ title, subtitle, legend, actions, table, loading, er
       {legend && ready && !asTable && <div className="vizChartLegendRow">{legend}</div>}
       <div className="vizChartBody" style={{ minHeight: height }}>
         {error ? (
-          <ChartError message={error} onRetry={onRetry} />
+          renderError ? renderError(error, onRetry) : <ChartError message={error} onRetry={onRetry} />
         ) : loading ? (
           <span aria-busy="true" aria-label="Loading chart" className="vizSkeleton vizChartSkeleton" role="status" style={{ height }} />
         ) : empty ? (
