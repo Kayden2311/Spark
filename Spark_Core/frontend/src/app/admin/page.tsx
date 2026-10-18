@@ -123,11 +123,12 @@ function CommandCenter() {
             subtitle={`Distinct members who signed in, posted or commented each day · last ${range} days (UTC)`}
             table={{ columns: ["Day", "Active users", "Sign-ups"], rows: series.map((point) => [shortDate(point.day), point.activeUsers, point.signups]) }}
             title="Platform activity"
+            tone="blue"
           >
             <TrendChart data={series as unknown as Array<Record<string, unknown>>} series={[{ key: "activeUsers", ...SERIES.activeUsers }, { key: "signups", ...SERIES.signups }]} />
           </ChartCard>
         ) : (
-          <Card subtitle="Your moderation queues and how fast they are moving." title="Moderation summary">
+          <Card subtitle="Your moderation queues and how fast they are moving." title="Moderation summary" tone="violet">
             {reportStats.data ? (
               <ul className="admStatList">
                 <li><span>Reports opened ({range}d)</span><strong>{formatCount(reportStats.data.opened)}</strong></li>
@@ -139,7 +140,7 @@ function CommandCenter() {
           </Card>
         )}
 
-        <Card subtitle={overview ? (waiting === 0 ? "All queues are clear." : `${waiting} ${waiting === 1 ? "item is" : "items are"} waiting.`) : "Loading your queues…"} title="Needs attention">
+        <Card subtitle={overview ? (waiting === 0 ? "All queues are clear." : `${waiting} ${waiting === 1 ? "item is" : "items are"} waiting.`) : "Loading your queues…"} title="Needs attention" tone="amber">
           <ul className="admQueueList">
             {queues.map((queue) => (
               <li key={queue.section}>
@@ -159,7 +160,7 @@ function CommandCenter() {
       </div>
 
       {watchesCommunities && (
-        <Card subtitle={`Posts and comments in the last ${range} days`} title="Most active communities">
+        <Card subtitle={`Posts and comments in the last ${range} days`} title="Most active communities" tone="green">
           {top.error && <div className="admCardInset"><ErrorBanner message={top.error} onRetry={top.reload} /></div>}
           {!top.data && !top.error && <div className="admCardInset"><SkeletonRows rows={4} /></div>}
           {top.data && (
@@ -184,6 +185,7 @@ function CommandCenter() {
             subtitle="What members published each day"
             table={{ columns: ["Day", "Posts", "Comments"], rows: series.map((point) => [shortDate(point.day), point.posts, point.comments]) }}
             title="Content created"
+            tone="blue"
           >
             <TrendChart data={series as unknown as Array<Record<string, unknown>>} height={220} kind="bar" series={[{ key: "posts", ...SERIES.posts }, { key: "comments", ...SERIES.comments }]} stacked />
           </ChartCard>
@@ -195,6 +197,7 @@ function CommandCenter() {
             subtitle={reportStats.data ? `${formatCount(reportStats.data.backlog)} open now · median ${reportStats.data.medianHoursToClose === null ? "–" : `${reportStats.data.medianHoursToClose.toFixed(1)} h`} to a decision` : "Reports filed and closed each day"}
             table={{ columns: ["Day", "Opened", "Closed"], rows: series.map((point) => [shortDate(point.day), point.reportsOpened, point.reportsClosed]) }}
             title="Moderation flow"
+            tone="violet"
           >
             <TrendChart data={series as unknown as Array<Record<string, unknown>>} height={220} kind="line" series={[{ key: "reportsOpened", ...SERIES.reportsOpened }, { key: "reportsClosed", ...SERIES.reportsClosed }]} />
           </ChartCard>
@@ -203,7 +206,7 @@ function CommandCenter() {
 
       {isAdmin && (
         <div className="admGrid3">
-          <Card actions={<Link className="admBtn admBtnSecondary admBtnSm" href="/admin/audit">View audit log</Link>} flush subtitle="The latest decisions by staff, with their reasons." title="Recent staff activity">
+          <Card actions={<Link className="admBtn admBtnSecondary admBtnSm" href="/admin/audit">View audit log</Link>} flush subtitle="The latest decisions by staff, with their reasons." title="Recent staff activity" tone="navy">
             {feed.error && <div className="admCardInset"><ErrorBanner message={feed.error} onRetry={feed.reload} /></div>}
             {!feed.data && !feed.error && <div className="admCardInset"><SkeletonRows rows={4} /></div>}
             {feed.data && feed.data.items.length === 0 && <p className="admCardEmpty">No governance actions yet. Every action you take will appear here.</p>}
@@ -224,7 +227,7 @@ function CommandCenter() {
             )}
           </Card>
           <div className="admStack">
-          <Card actions={<Link className="admBtn admBtnSecondary admBtnSm" href="/admin/billing">Open billing</Link>} subtitle="Subscription health right now." title="Revenue snapshot">
+          <Card actions={<Link className="admBtn admBtnSecondary admBtnSm" href="/admin/billing">Open billing</Link>} subtitle="Subscription health right now." title="Revenue snapshot" tone="green">
             {billing.error && <div className="admCardInset"><ErrorBanner message={billing.error} onRetry={billing.reload} /></div>}
             {!billing.data && !billing.error && <div className="admCardInset"><SkeletonRows rows={4} /></div>}
             {billing.data && (
@@ -237,7 +240,7 @@ function CommandCenter() {
               </ul>
             )}
           </Card>
-          <Card actions={system.data ? <Badge tone="green">Operational</Badge> : undefined} subtitle={system.data ? `Checked ${formatRelative(system.data.checkedAt)}` : "Checking…"} title="API health">
+          <Card actions={system.data ? <Badge tone="green">Operational</Badge> : undefined} subtitle={system.data ? `Checked ${formatRelative(system.data.checkedAt)}` : "Checking…"} title="API health" tone="blue">
             {system.error && <div className="admCardInset"><ErrorBanner message={system.error} onRetry={system.reload} /></div>}
             {system.data ? (
               <ul className="admStatList">

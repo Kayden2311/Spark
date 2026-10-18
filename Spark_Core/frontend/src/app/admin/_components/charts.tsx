@@ -1,9 +1,9 @@
 "use client";
 
-import { useId, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useId, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { formatCount, shortDate } from "../_lib/format";
+import { formatCount, shortDate, type Tone } from "../_lib/format";
 import { CHART_INK, sequential } from "../_lib/palette";
 import { ErrorBanner } from "./ui";
 
@@ -86,16 +86,18 @@ interface ChartCardProps {
   emptyText?: string;
   height?: number;
   className?: string;
+  /** Colored left edge for a chart that owns a clear category elsewhere (its series color, a status). */
+  tone?: Tone;
   children: ReactNode;
 }
 
 /** A titled chart with loading, error and empty states, and a switch to view the numbers as a table. */
-export function ChartCard({ title, subtitle, legend, actions, table, loading, error, onRetry, empty, emptyText = "No activity in this period yet.", height = 260, className, children }: ChartCardProps) {
+export function ChartCard({ title, subtitle, legend, actions, table, loading, error, onRetry, empty, emptyText = "No activity in this period yet.", height = 260, className, tone, children }: ChartCardProps) {
   const [asTable, setAsTable] = useState(false);
   const headingId = useId();
   const ready = !loading && !error && !empty;
   return (
-    <section aria-labelledby={headingId} className={`admCard admChartCard${className ? ` ${className}` : ""}`}>
+    <section aria-labelledby={headingId} className={`admCard admChartCard${tone ? ` admCardToned admTone-${tone}` : ""}${className ? ` ${className}` : ""}`}>
       <div className="admChartHead">
         <div className="admChartTitle">
           <h2 id={headingId}>{title}</h2>
@@ -313,7 +315,8 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
   );
 }
 
-/** Ranked magnitudes as horizontal bars, labelled with names and values (no legend needed). */
+/** Ranked magnitudes as horizontal bars, labelled with names and values (no legend needed). Bars grow
+ * in on mount and highlight on hover, with the exact value and its share of the total as a tooltip. */
 export function BarList({ items, color, valueFormat = formatCount, emptyText = "Nothing to rank yet." }: {
   items: Array<{ key: string; label: ReactNode; value: number; hint?: ReactNode }>;
   color: string;
@@ -321,30 +324,37 @@ export function BarList({ items, color, valueFormat = formatCount, emptyText = "
   emptyText?: string;
 }) {
   const max = Math.max(1, ...items.map((item) => item.value));
+  const total = items.reduce((sum, item) => sum + item.value, 0);
   if (items.length === 0) return <p className="admChartEmpty">{emptyText}</p>;
   return (
     <ol className="admBarList">
-      {items.map((item) => (
-        <li key={item.key}>
-          <div className="admBarListText">
-            <span className="admBarListLabel">{item.label}</span>
-            {item.hint && <span className="admBarListHint">{item.hint}</span>}
-          </div>
-          <span className="admBarListValue">{valueFormat(item.value)}</span>
-          <span aria-hidden="true" className="admBarListTrack">
-            <span style={{ width: `${Math.max(2, (item.value / max) * 100)}%`, background: color }} />
-          </span>
-        </li>
-      ))}
+      {items.map((item, index) => {
+        const share = total ? Math.round((item.value / total) * 100) : 0;
+        return (
+          <li key={item.key} title={`${valueFormat(item.value)} · ${share}% of ${valueFormat(total)}`}>
+            <div className="admBarListText">
+              <span className="admBarListLabel">{item.label}</span>
+              {item.hint && <span className="admBarListHint">{item.hint}</span>}
+            </div>
+            <span className="admBarListValue">
+              {valueFormat(item.value)}
+              <span className="admBarListPercent">{share}%</span>
+            </span>
+            <span aria-hidden="true" className="admBarListTrack">
+              <span style={{ "--adm-bar-w": `${Math.max(2, (item.value / max) * 100)}%`, "--adm-bar-delay": `${Math.min(index, 8) * 45}ms`, background: color } as CSSProperties} />
+            </span>
+          </li>
+        );
+      })}
     </ol>
   );
 }
 
 /** A thin filled track for one ratio (0–1) next to a value, e.g. "how this compares to the worst row". */
-export function InlineBar({ ratio, color, wide }: { ratio: number; color: string; wide?: boolean }) {
+export function InlineBar({ ratio, color, wide, title, className }: { ratio: number; color: string; wide?: boolean; title?: string; className?: string }) {
   return (
-    <span aria-hidden="true" className={`admInlineBarTrack${wide ? " admInlineBarTrack-wide" : ""}`}>
-      <span className="admInlineBarFill" style={{ width: `${Math.max(4, Math.min(100, ratio * 100))}%`, background: color }} />
+    <span aria-hidden="true" className={`admInlineBarTrack${wide ? " admInlineBarTrack-wide" : ""}${className ? ` ${className}` : ""}`} title={title}>
+      <span className="admInlineBarFill" style={{ "--adm-bar-w": `${Math.max(4, Math.min(100, ratio * 100))}%`, background: color } as CSSProperties} />
     </span>
   );
 }
@@ -417,6 +427,99 @@ export function Heatmap({ cells }: { cells: Array<{ dow: number; hour: number; e
         ))}
       </div>
       <div aria-hidden="true" className="admHeatmapScale">
+        <span>Less</span>
+        {[0, 0.2, 0.4, 0.6, 0.8, 1].map((step) => <span className="admHeatmapScaleCell" key={step} style={{ background: sequential(step).background }} />)}
+        <span>More</span>
+      </div>
+    </div>
+  );
+}
+
+const DOW_SHORT = ["", "Mon", "", "Wed", "", "Fri", ""];
+
+/**
+ * A GitHub-style daily activity calendar: one square per day, grouped into Monday-start week columns,
+ * shaded with the same sequential scale as the hour heatmap and cohort grid. Where the hour heatmap
+ * answers "what time of day", this answers "is this trending" at a glance over weeks or months.
+ */
+export function ContributionCalendar({ data, unit = "events" }: { data: Array<{ day: string; value: number }>; unit?: string }) {
+  const [hover, setHover] = useState<{ date: string; value: number } | null>(null);
+  const sorted = [...data].sort((a, b) => a.day.localeCompare(b.day));
+  if (sorted.length === 0) return <p className="admChartEmpty">No activity in this period yet.</p>;
+
+  const firstDay = sorted[0]!.day;
+  const lastDay = sorted[sorted.length - 1]!.day;
+  const first = new Date(`${firstDay}T00:00:00Z`);
+  const last = new Date(`${lastDay}T00:00:00Z`);
+  const gridStart = new Date(first);
+  gridStart.setUTCDate(gridStart.getUTCDate() - ((first.getUTCDay() + 6) % 7));
+  const gridEnd = new Date(last);
+  gridEnd.setUTCDate(gridEnd.getUTCDate() + (6 - ((last.getUTCDay() + 6) % 7)));
+
+  const byDay = new Map(sorted.map((point) => [point.day, point.value]));
+  const max = Math.max(1, ...sorted.map((point) => point.value));
+  const total = sorted.reduce((sum, point) => sum + point.value, 0);
+
+  type Cell = { date: string; value: number | null };
+  const weeks: Cell[][] = [];
+  for (const cursor = new Date(gridStart); cursor <= gridEnd; cursor.setUTCDate(cursor.getUTCDate() + 7)) {
+    const week: Cell[] = [];
+    for (let day = 0; day < 7; day++) {
+      const date = new Date(cursor);
+      date.setUTCDate(date.getUTCDate() + day);
+      const iso = date.toISOString().slice(0, 10);
+      week.push({ date: iso, value: iso >= firstDay && iso <= lastDay ? byDay.get(iso) ?? 0 : null });
+    }
+    weeks.push(week);
+  }
+
+  const monthLabel = (week: Cell[]): string | null => {
+    const firstOfMonth = week.find((cell) => cell.value !== null && cell.date.endsWith("-01"));
+    if (!firstOfMonth) return null;
+    return new Date(`${firstOfMonth.date}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  };
+
+  const describe = (date: string, value: number) =>
+    `${new Date(`${date}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}: ${formatCount(value)} ${unit}`;
+
+  return (
+    <div className="admContribution">
+      <p aria-live="polite" className="admContributionReadout">
+        {hover ? describe(hover.date, hover.value) : `${formatCount(total)} ${unit} over ${sorted.length} days`}
+      </p>
+      <div className="admContributionScroll">
+        <div aria-hidden="true" className="admContributionBody" onMouseLeave={() => setHover(null)}>
+          <div className="admContributionDayLabels">
+            <span />
+            {DOW_SHORT.map((label, index) => <span key={index}>{label}</span>)}
+          </div>
+          <div className="admContributionMain">
+            <div className="admContributionMonths">
+              {weeks.map((week, index) => <span key={index}>{monthLabel(week)}</span>)}
+            </div>
+            <div className="admContributionWeeks">
+              {weeks.map((week, weekIndex) => (
+                <div className="admContributionWeek" key={weekIndex}>
+                  {week.map((cell) =>
+                    cell.value === null ? (
+                      <span className="admContributionCell admContributionCell-out" key={cell.date} />
+                    ) : (
+                      <span
+                        className="admContributionCell"
+                        key={cell.date}
+                        onMouseEnter={() => setHover({ date: cell.date, value: cell.value! })}
+                        style={{ background: cell.value === 0 ? "#edf1f6" : sequential(cell.value / max).background }}
+                        title={describe(cell.date, cell.value)}
+                      />
+                    ),
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div aria-hidden="true" className="admHeatmapScale admContributionScale">
         <span>Less</span>
         {[0, 0.2, 0.4, 0.6, 0.8, 1].map((step) => <span className="admHeatmapScaleCell" key={step} style={{ background: sequential(step).background }} />)}
         <span>More</span>

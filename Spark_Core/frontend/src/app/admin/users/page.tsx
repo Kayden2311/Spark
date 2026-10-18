@@ -53,6 +53,7 @@ function RoleMix() {
       subtitle="Role grants right now; an account can hold more than one"
       table={{ columns: ["Role", "Holders"], rows: mix.map((item) => [item.label, item.value]) }}
       title="Platform roles"
+      tone="violet"
     >
       <DonutChart centerLabel="role grants" centerValue={formatCount(total)} data={mix} height={180} />
     </ChartCard>
@@ -194,6 +195,7 @@ function UsersList() {
                           <InlineBar
                             color={user.risk.reportsAgainst + user.risk.hiddenPosts + user.risk.hiddenComments > 3 ? "#ef4444" : "#f59e0b"}
                             ratio={(user.risk.reportsAgainst + user.risk.hiddenPosts + user.risk.hiddenComments) / 6}
+                            title={`${user.risk.reportsAgainst} ${user.risk.reportsAgainst === 1 ? "report" : "reports"} · ${user.risk.hiddenPosts + user.risk.hiddenComments} hidden`}
                           />
                         </div>
                       ) : <span className="admMutedCell">None</span>}

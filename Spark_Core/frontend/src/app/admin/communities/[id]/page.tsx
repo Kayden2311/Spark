@@ -99,6 +99,7 @@ function CommunityView() {
           subtitle="Posts and comments published each day"
           table={{ columns: ["Day", "Posts", "Comments", "New members", "Reports"], rows: series.map((point) => [shortDate(point.day), point.posts, point.comments, point.newMembers, point.reportsOpened]) }}
           title="Activity"
+          tone="green"
         >
           <TrendChart data={series as unknown as Array<Record<string, unknown>>} kind="bar" series={[{ key: "posts", ...SERIES.posts }, { key: "comments", ...SERIES.comments }]} stacked />
         </ChartCard>
@@ -125,10 +126,11 @@ function CommunityView() {
           subtitle={`${formatCount(totals.members)} joined in the last ${range} days`}
           table={{ columns: ["Day", "New members"], rows: series.map((point) => [shortDate(point.day), point.newMembers]) }}
           title="New members"
+          tone="amber"
         >
           <TrendChart data={series as unknown as Array<Record<string, unknown>>} height={200} kind="bar" series={[{ key: "newMembers", ...SERIES.newMembers }]} />
         </ChartCard>
-        <Card flush subtitle={isAdmin ? "Every staff decision about this community, with the reason." : "Only admins can see the staff history."} title="Staff history">
+        <Card flush subtitle={isAdmin ? "Every staff decision about this community, with the reason." : "Only admins can see the staff history."} title="Staff history" tone="navy">
           {!isAdmin ? (
             <p className="admCardEmpty">Ask a platform admin if you need the decision history.</p>
           ) : history.length === 0 ? (

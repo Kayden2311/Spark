@@ -124,6 +124,7 @@ export default function UserDetailPage() {
           subtitle={activity.data ? `${activity.data.series.reduce((sum, point) => sum + point.signIns, 0)} sign-ins · ${activity.data.series.reduce((sum, point) => sum + point.posts, 0)} posts · ${activity.data.series.reduce((sum, point) => sum + point.comments, 0)} comments in 90 days` : "Last 90 days"}
           table={{ columns: ["Day", "Sign-ins", "Posts", "Comments"], rows: (activity.data?.series ?? []).filter((point) => point.signIns + point.posts + point.comments > 0).map((point) => [shortDate(point.day), point.signIns, point.posts, point.comments]) }}
           title="Activity"
+          tone="blue"
         >
           <TrendChart data={(activity.data?.series ?? []) as unknown as Array<Record<string, unknown>>} height={220} kind="bar" series={[{ key: "signIns", ...SERIES.signIns }, { key: "posts", ...SERIES.posts }, { key: "comments", ...SERIES.comments }]} stacked />
         </ChartCard>

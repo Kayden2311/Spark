@@ -323,9 +323,10 @@ export function KpiCards({ items, label }: { items: KpiCardItem[]; label: string
             </div>
           </>
         );
+        const cardClass = `admKpiCard admTone-${item.tone ?? "blue"}`;
         return (
           <li key={item.label}>
-            {item.href ? <Link className="admKpiCard admKpiCardLink" href={item.href}>{body}</Link> : <div className="admKpiCard">{body}</div>}
+            {item.href ? <Link className={`${cardClass} admKpiCardLink`} href={item.href}>{body}</Link> : <div className={cardClass}>{body}</div>}
           </li>
         );
       })}
@@ -441,11 +442,14 @@ export function CheckboxFacet({ label, options, selected, onChange }: { label: s
   );
 }
 
-/** A card with a heading row; the building block for non-chart sections. */
-export function Card({ title, subtitle, actions, children, className, flush }: { title: string; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; flush?: boolean }) {
+/** A card with a heading row; the building block for non-chart sections. An optional `tone` adds a
+ * colored left edge, for a card whose content already has a clear category (a warning, a metric that
+ * owns a color elsewhere, money). Leave it unset for a plain structural or informational card — not
+ * every box needs a stripe, and a tone on everything reads as noise rather than signal. */
+export function Card({ title, subtitle, actions, children, className, flush, tone }: { title: string; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; flush?: boolean; tone?: Tone }) {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} className={`admCard${flush ? " admCardFlush" : ""}${className ? ` ${className}` : ""}`}>
+    <section aria-labelledby={headingId} className={`admCard${flush ? " admCardFlush" : ""}${tone ? ` admCardToned admTone-${tone}` : ""}${className ? ` ${className}` : ""}`}>
       <div className="admCardHead">
         <div>
           <h2 id={headingId}>{title}</h2>

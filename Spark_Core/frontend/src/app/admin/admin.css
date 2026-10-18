@@ -206,7 +206,9 @@
 
 /* ---------- Cards ---------- */
 .admGrid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 16px; }
-.admCard { overflow: hidden; border: 1px solid var(--adm-line); border-radius: var(--adm-radius); background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); }
+.admCard { overflow: hidden; border: 1px solid var(--adm-line); border-radius: var(--adm-radius); background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); transition: box-shadow .15s ease, border-color .15s ease; }
+.admCard:hover { box-shadow: var(--adm-shadow-md); }
+.admCardToned { border-left-width: 3px; border-left-color: var(--tone-dot); }
 .admCard > .admKeyValue { padding: 4px 20px 8px; }
 .admCardHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--adm-line-soft); }
 .admCardHead h2 { margin: 0; color: var(--adm-ink); font-size: var(--adm-text-md); font-weight: 600; letter-spacing: -.005em; }
@@ -492,7 +494,8 @@
 
 /* KPI cards */
 .admKpiCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 0 0 16px; padding: 0; list-style: none; }
-.admKpiCard { display: grid; gap: 12px; height: 100%; padding: 16px 18px; border: 1px solid var(--adm-line); border-radius: 12px; color: inherit; text-decoration: none; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); }
+.admKpiCard { display: grid; gap: 12px; height: 100%; padding: 16px 18px; border: 1px solid var(--adm-line); border-left-width: 3px; border-left-color: var(--tone-dot); border-radius: 12px; color: inherit; text-decoration: none; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); transition: box-shadow .15s ease; }
+.admKpiCard:hover { box-shadow: var(--adm-shadow-md); }
 .admKpiCardLink { transition: border-color .15s ease, box-shadow .15s ease; }
 .admKpiCardLink:hover { border-color: #c7d4ea; box-shadow: var(--adm-shadow-md); }
 .admKpiCardTop { display: flex; align-items: center; gap: 10px; }
@@ -562,16 +565,24 @@
 .admDonutShare { color: var(--adm-subtle); text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Ranked bars */
-.admBarList { display: grid; gap: 14px; margin: 0; padding: 4px 4px 4px 12px; list-style: none; }
-.admBarList li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+.admBarList { display: grid; gap: 2px; margin: 0; padding: 4px; list-style: none; }
+.admBarList li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 7px 10px; border-radius: 8px; transition: background .15s ease; }
+.admBarList li:hover { background: var(--adm-hover); }
+.admBarList li:hover .admBarListValue { color: var(--adm-blue-dark); }
+.admBarList li:hover .admBarListTrack span { filter: brightness(1.1); }
 .admBarListText { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .admBarListLabel { overflow: hidden; color: var(--adm-ink); font-size: var(--adm-text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .admBarListLabel a { color: inherit; text-decoration: none; }
 .admBarListLabel a:hover { color: var(--adm-blue-dark); text-decoration: underline; }
 .admBarListHint { flex: none; color: var(--adm-subtle); font-size: var(--adm-text-2xs); }
-.admBarListValue { color: var(--adm-ink); font-size: var(--adm-text-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
+.admBarListValue { display: flex; align-items: baseline; gap: 6px; color: var(--adm-ink); font-size: var(--adm-text-xs); font-weight: 600; font-variant-numeric: tabular-nums; transition: color .15s ease; }
+.admBarListPercent { color: var(--adm-faint); font-size: var(--adm-text-3xs); font-weight: 500; }
 .admBarListTrack { grid-column: 1 / -1; height: 8px; overflow: hidden; border-radius: 4px; background: #f1f4f9; }
-.admBarListTrack span { display: block; height: 100%; border-radius: 4px; }
+.admBarListTrack span { display: block; width: var(--adm-bar-w); height: 100%; border-radius: 4px; transition: filter .15s ease; animation: adm-bar-grow .55s var(--adm-bar-delay, 0ms) cubic-bezier(.16, 1, .3, 1) both; transform-origin: left; }
+@keyframes adm-bar-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .admBarListTrack span { animation: none; }
+}
 
 /* Heatmap */
 .admHeatmap { display: grid; gap: 10px; padding: 0 8px 0 12px; }
@@ -586,6 +597,27 @@
 .admHeatmapScale span:first-child { margin-right: 4px; }
 .admHeatmapScale span:last-child { margin-left: 4px; }
 .admHeatmapScaleCell { width: 12px; height: 12px; border-radius: 3px; }
+
+/* GitHub-style daily contribution calendar */
+.admContribution { display: grid; gap: 10px; }
+.admContributionReadout { min-height: 20px; margin: 0; color: var(--adm-muted); font-size: var(--adm-text-xs); font-weight: 500; }
+.admContributionScroll { overflow-x: auto; padding-bottom: 2px; }
+.admContributionBody { display: flex; gap: 6px; width: max-content; }
+.admContributionDayLabels { display: flex; flex-direction: column; flex: none; gap: 3px; padding-top: 18px; }
+.admContributionDayLabels span { height: 12px; color: var(--adm-faint); font-size: var(--adm-text-3xs); line-height: 12px; }
+.admContributionMain { display: flex; flex-direction: column; gap: 4px; }
+.admContributionMonths { display: flex; gap: 3px; height: 14px; }
+.admContributionMonths span { width: 12px; flex: none; color: var(--adm-subtle); font-size: var(--adm-text-3xs); font-weight: 500; white-space: nowrap; }
+.admContributionWeeks { display: flex; gap: 3px; }
+.admContributionWeek { display: flex; flex: none; flex-direction: column; gap: 3px; }
+.admContributionCell { width: 12px; height: 12px; border-radius: 3px; transition: box-shadow .1s ease, transform .1s ease; }
+.admContributionCell:not(.admContributionCell-out):hover { box-shadow: 0 0 0 2px var(--adm-ink); transform: scale(1.15); }
+.admContributionCell-out { background: transparent; }
+.admContributionScale { margin-top: -2px; }
+@media (max-width: 720px) {
+  .admContributionMonths span, .admContributionCell, .admContributionWeek { width: 10px; }
+  .admContributionCell { height: 10px; }
+}
 
 /* Retention cohorts */
 .admCohort th, .admCohort td { height: 34px; padding: 0 6px; border-bottom: 2px solid var(--adm-surface); white-space: nowrap; }
@@ -818,7 +850,10 @@
 .admRouteMetricWarn { color: var(--adm-red-dark); }
 .admInlineBarTrack { display: inline-block; width: 64px; height: 5px; overflow: hidden; border-radius: 3px; background: var(--adm-line-soft); }
 .admInlineBarTrack-wide { display: block; width: 100%; }
-.admInlineBarFill { display: block; height: 100%; border-radius: 3px; transition: width .2s ease; }
+.admInlineBarFill { display: block; width: var(--adm-bar-w); height: 100%; border-radius: 3px; animation: adm-bar-grow .5s cubic-bezier(.16, 1, .3, 1) both; transform-origin: left; }
+@media (prefers-reduced-motion: reduce) {
+  .admInlineBarFill { animation: none; }
+}
 
 @media (max-width: 720px) {
   .admMetricTiles { grid-template-columns: minmax(0, 1fr); }

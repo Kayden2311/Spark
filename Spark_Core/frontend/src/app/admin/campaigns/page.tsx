@@ -135,7 +135,7 @@ function CampaignReview() {
       ) : (
       <>
         {!list.loading && baseItems.length > 0 && (
-          <Card flush subtitle={`${filter === "all" ? "Every" : REVIEW_STATUS[filter].label} campaign loaded, by status`} title="Review pipeline by status">
+          <Card flush subtitle={`${filter === "all" ? "Every" : REVIEW_STATUS[filter].label} campaign loaded, by status`} title="Review pipeline by status" tone="blue">
             <BarList
               color={VIZ.blue}
               items={COLUMNS.filter((column) => baseItems.some((item) => item.reviewStatus === column)).map((column) => ({
@@ -198,7 +198,7 @@ function CampaignReview() {
                       <span className="admNowrap">{formatDate(campaign.requestedStartAt)}</span>
                       {campaign.reviewStatus === "pending" && (
                         <span className="admInline">
-                          <InlineBar color={waiting >= 3 ? "#ef4444" : waiting >= 1 ? "#f59e0b" : "#94a3b8"} ratio={waiting / 7} />
+                          <InlineBar color={waiting >= 3 ? "#ef4444" : waiting >= 1 ? "#f59e0b" : "#94a3b8"} ratio={waiting / 7} title={waiting === 0 ? "Submitted today" : `Waiting ${waiting} ${waiting === 1 ? "day" : "days"}`} />
                           <span className="admCellSub">{waiting === 0 ? "today" : `${waiting}d waiting`}</span>
                         </span>
                       )}

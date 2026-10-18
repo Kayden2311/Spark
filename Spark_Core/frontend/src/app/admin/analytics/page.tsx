@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { useAdmin } from "../_components/admin-context";
-import { BarList, ChartCard, ChartLegend, Heatmap, TrendChart } from "../_components/charts";
+import { BarList, ChartCard, ChartLegend, ContributionCalendar, Heatmap, TrendChart } from "../_components/charts";
 import { PulseIcon, SignupIcon, TrendIcon, UserIcon } from "../_components/icons";
 import { ErrorBanner, KpiCards, NoAccess, PageHeader, RangePicker, Segmented, SkeletonRows } from "../_components/ui";
 import { canAccess } from "../_lib/access";
@@ -83,6 +83,7 @@ function Engagement() {
           subtitle={current ? `${formatCount(Math.round(current.avgActiveUsers))} on an average day · ${formatCount(current.signIns)} sign-ins` : "Members active each day"}
           table={{ columns: ["Day", "Active users", "Sign-ins"], rows: series.map((point) => [shortDate(point.day), point.activeUsers, point.signIns]) }}
           title="Daily active users"
+          tone="blue"
         >
           <TrendChart data={series as unknown as Array<Record<string, unknown>>} series={[{ key: "activeUsers", ...SERIES.activeUsers }]} />
         </ChartCard>
@@ -93,10 +94,25 @@ function Engagement() {
           subtitle={current ? `${formatCount(current.signups)} new members in ${range} days` : "New accounts each day"}
           table={{ columns: ["Day", "Sign-ups"], rows: series.map((point) => [shortDate(point.day), point.signups]) }}
           title="Sign-ups"
+          tone="amber"
         >
           <TrendChart data={series as unknown as Array<Record<string, unknown>>} kind="bar" series={[{ key: "signups", ...SERIES.signups }]} />
         </ChartCard>
       </div>
+
+      <ChartCard
+        empty={series.every((point) => point.activeUsers === 0)}
+        error={activity.error}
+        height={series.length > 0 ? undefined : 160}
+        loading={activity.loading && !activity.data}
+        onRetry={activity.reload}
+        subtitle={`Active members per day, ${range} days · darker means busier, like a commit calendar`}
+        table={{ columns: ["Day", "Active users"], rows: series.map((point) => [shortDate(point.day), point.activeUsers]) }}
+        title="Activity calendar"
+        tone="blue"
+      >
+        <ContributionCalendar data={series.map((point) => ({ day: point.day, value: point.activeUsers }))} unit="active members" />
+      </ChartCard>
 
       <ChartCard
         empty={engagement.data?.cells.every((cell) => cell.events === 0)}
@@ -126,6 +142,7 @@ function Engagement() {
           subtitle={`The communities driving Spark over the last ${range} days`}
           table={{ columns: ["Community", "Posts", "Comments", "New members", "Contributors"], rows: ranked.map((item) => [item.name, item.posts, item.comments, item.newMembers, item.contributors]) }}
           title="Top communities"
+          tone="green"
         >
           <BarList
             color={rank === "growth" ? SERIES.newMembers.color : VIZ.aqua}
