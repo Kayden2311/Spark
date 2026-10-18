@@ -1,42 +1,10 @@
 /** Typed client for /api/v1/admin. Requests go through the Next.js proxy, so the session cookie is first-party. */
 
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
+import { ApiError, DEFAULT_FALLBACK_MESSAGES, NETWORK_ERROR_MESSAGE, SESSION_EXPIRED_EVENT, toApiError } from "../../_lib/http";
 
-export const SESSION_EXPIRED_EVENT = "spark:session-expired";
+export { ApiError, SESSION_EXPIRED_EVENT };
 
-const FALLBACK_MESSAGES: Record<number, string> = {
-  400: "Some of the details were not accepted. Check them and try again.",
-  401: "Your session has ended. Sign in again to continue.",
-  403: "Your platform role does not allow this action.",
-  404: "This item no longer exists.",
-  409: "This item changed since you loaded it. Refresh and try again.",
-  429: "Too many actions in a short time. Wait a minute and try again.",
-};
-
-async function toError(response: Response): Promise<ApiError> {
-  let code = "request_failed";
-  let detail = "";
-  try {
-    const body = (await response.json()) as { code?: unknown; detail?: unknown };
-    if (typeof body.code === "string") code = body.code;
-    if (typeof body.detail === "string") detail = body.detail;
-  } catch {
-    // Non-JSON error body: fall back to a status-based message.
-  }
-  // Server-side detail is written for people, except generic 5xx text, which we replace. The API's own
-  // "database unavailable" explanation is kept, because it says exactly what is wrong.
-  const message = (response.status >= 500 && code !== "database_unavailable") || !detail ? FALLBACK_MESSAGES[response.status] ?? "Something went wrong on our side. Try again in a moment." : detail;
-  return new ApiError(response.status, code, message);
-}
+const ADMIN_FALLBACK_MESSAGES: Record<number, string> = { ...DEFAULT_FALLBACK_MESSAGES, 403: "Your platform role does not allow this action." };
 
 export interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
@@ -56,10 +24,10 @@ export async function adminApi<T>(path: string, { method = "GET", body, signal }
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
-    throw new ApiError(0, "network_error", "Spark could not be reached. Check your connection and try again.");
+    throw new ApiError(0, "network_error", NETWORK_ERROR_MESSAGE);
   }
   if (!response.ok) {
-    const error = await toError(response);
+    const error = await toApiError(response, ADMIN_FALLBACK_MESSAGES);
     if (response.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     throw error;
   }
