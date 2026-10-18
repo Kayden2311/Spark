@@ -42,6 +42,15 @@ describe("methodology picker", () => {
     expect(cards.map((card) => card.tabIndex)).toEqual([0, -1, -1]);
   });
 
+  it("exposes best-for, columns with WIP limits, planning and metrics in the radio description", () => {
+    render(<Harness />);
+    const kanban = screen.getByRole("radio", { name: "Kanban" });
+    expect(kanban).toHaveAccessibleDescription(/Best for teams with a steady stream/);
+    expect(kanban).toHaveAccessibleDescription(/Columns: Backlog.*Ready \(WIP 8\)/);
+    expect(kanban).toHaveAccessibleDescription(/Planning: A continuous board/);
+    expect(kanban).toHaveAccessibleDescription(/You'll see: .*Weekly throughput/);
+  });
+
   it("selects by click and moves the selection with arrow keys", async () => {
     render(<Harness />);
     const scrum = screen.getByRole("radio", { name: "Scrum" });

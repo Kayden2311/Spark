@@ -47,11 +47,21 @@ export function MethodologyPicker({ templates, value, onChange, label, labelledB
       {templates.map((template, index) => {
         const nameId = `${baseId}-${template.id}-name`;
         const taglineId = `${baseId}-${template.id}-tagline`;
+        const bestForId = `${baseId}-${template.id}-best-for`;
+        const columnsId = `${baseId}-${template.id}-columns`;
+        const planningId = `${baseId}-${template.id}-planning`;
+        const metricsId = `${baseId}-${template.id}-metrics`;
+        const describedBy = [taglineId, bestForId, columnsId, planningId, metricsId].join(" ");
         const checked = template.id === value;
+        // A radio's descendants are presentational, so the decision content is exposed through the description.
+        const columnsSummary = `Columns: ${template.statuses
+          .map((status) => (status.wipLimit !== null ? `${status.name} (WIP ${status.wipLimit})` : status.name))
+          .join(", ")}`;
+        const metricsSummary = `You'll see: ${template.metrics.join(", ")}`;
         return (
           <div
             aria-checked={checked}
-            aria-describedby={taglineId}
+            aria-describedby={describedBy}
             aria-labelledby={nameId}
             className="wsPickerCard"
             data-methodology={template.id}
@@ -73,7 +83,7 @@ export function MethodologyPicker({ templates, value, onChange, label, labelledB
               </span>
             </div>
             <p className="wsPickerTagline" id={taglineId}>{template.tagline}</p>
-            <p className="wsPickerBestFor">Best for {lowerFirst(template.bestFor)}</p>
+            <p className="wsPickerBestFor" id={bestForId}>Best for {lowerFirst(template.bestFor)}</p>
             <ul className="wsPickerColumns">
               {template.statuses.map((status) => (
                 <li className="wsPickerColumn" data-category={status.category} key={status.name}>
@@ -82,7 +92,9 @@ export function MethodologyPicker({ templates, value, onChange, label, labelledB
                 </li>
               ))}
             </ul>
-            <p className="wsPickerPlanning">{`Planning: ${template.planningObject}`}</p>
+            <p className="wsPickerPlanning" id={planningId}>{`Planning: ${template.planningObject}`}</p>
+            <span hidden id={columnsId}>{columnsSummary}</span>
+            <span hidden id={metricsId}>{metricsSummary}</span>
             <div className="wsPickerMetrics">
               <p className="wsPickerMetricsTitle">You&apos;ll see</p>
               <ul>
