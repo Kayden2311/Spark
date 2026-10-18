@@ -215,8 +215,8 @@
 .admCardNote { margin: 0; padding: 10px 20px 14px; color: var(--adm-subtle); font-size: var(--adm-text-2xs); }
 .admCardInset { padding: 16px 20px; }
 .admCardEmpty { margin: 0; padding: 28px 20px; color: var(--adm-subtle); text-align: center; }
-.admCard + .admCard { margin-top: 16px; }
-.admGrid > .admCard, .admGrid + .admCard { margin-top: 0; }
+.admCard + .admCard, .admCard + .vizCard, .vizCard + .admCard, .vizCard + .vizCard { margin-top: 16px; }
+.admGrid > .admCard, .admGrid + .admCard, .admGrid > .vizCard, .admGrid + .vizCard { margin-top: 0; }
 
 /* Overview work queues */
 .admQueueList { margin: 0; padding: 0; list-style: none; }
@@ -523,126 +523,15 @@
 .admDelta[data-good="true"] { color: var(--adm-green); }
 .admDelta[data-good="false"] { color: var(--adm-red-dark); }
 .admDeltaNote { color: var(--adm-subtle); font-weight: 500; }
-.admSpark { width: 96px; height: 36px; flex: none; }
 
 /* Layout grids */
 .admGrid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
 .admGrid3 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
-.admGrid2 > .admCard, .admGrid3 > .admCard, .admGrid2 > .admStack, .admGrid3 > .admStack { margin-top: 0; }
+.admGrid2 > .admCard, .admGrid3 > .admCard, .admGrid2 > .vizCard, .admGrid3 > .vizCard, .admGrid2 > .admStack, .admGrid3 > .admStack { margin-top: 0; }
 .admStack { display: grid; gap: 16px; align-content: start; }
-.admStack > .admCard { margin-top: 0; }
-.admCard + .admGrid2, .admCard + .admGrid3 { margin-top: 16px; }
+.admStack > .admCard, .admStack > .vizCard { margin-top: 0; }
+.admCard + .admGrid2, .admCard + .admGrid3, .vizCard + .admGrid2, .vizCard + .admGrid3 { margin-top: 16px; }
 .admCardActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-
-/* Chart cards */
-.admChartCard { overflow: visible; }
-.admChartHead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; padding: 16px 20px 0; }
-.admChartTitle h2 { margin: 0; color: var(--adm-ink); font-size: var(--adm-text-md); font-weight: 600; letter-spacing: -.005em; }
-.admChartTitle p { margin: 2px 0 0; color: var(--adm-subtle); font-size: var(--adm-text-xs); }
-.admChartTools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.admChartLegendRow { padding: 10px 20px 0; }
-.admChartBody { padding: 12px 16px 16px 8px; }
-.admChartBody > .admError { margin: 0 8px; }
-.admChartSkeleton { margin-left: 8px; border-radius: 8px; }
-.admChartEmpty { display: grid; margin: 0; place-items: center; color: var(--adm-subtle); font-size: var(--adm-text-sm); text-align: center; }
-.admChartCanvas { width: 100%; min-width: 0; }
-.admChartCanvas .recharts-surface:focus, .admDonutCanvas .recharts-surface:focus, .admChartCanvas .recharts-wrapper:focus { outline: none; }
-.admLegend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; }
-.admLegend li { display: inline-flex; align-items: center; gap: 6px; color: var(--adm-muted); font-size: var(--adm-text-xs); font-weight: 500; }
-.admLegend strong { color: var(--adm-ink); font-variant-numeric: tabular-nums; }
-.admLegendSwatch { width: 10px; height: 10px; flex: none; border-radius: 3px; }
-.admTooltip { min-width: 150px; padding: 10px 12px; border: 1px solid var(--adm-line); border-radius: 8px; font-family: var(--adm-font-stack); background: var(--adm-surface); box-shadow: var(--adm-shadow-lg); }
-.admTooltipLabel { margin: 0 0 6px; color: var(--adm-ink); font-size: var(--adm-text-xs); font-weight: 700; }
-.admTooltipValue { margin: 0; color: var(--adm-muted); font-size: var(--adm-text-xs); }
-.admTooltip ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.admTooltip li { display: flex; align-items: center; gap: 8px; color: var(--adm-muted); font-size: var(--adm-text-xs); }
-.admTooltip li strong { margin-left: auto; padding-left: 12px; color: var(--adm-ink); font-variant-numeric: tabular-nums; }
-.admChartTableWrap { max-height: 360px; margin-left: 8px; overflow: auto; border: 1px solid var(--adm-line-soft); border-radius: 8px; }
-.admChartTable, .admCohort { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--adm-text-xs); }
-.admChartTable th, .admChartTable td { padding: 7px 12px; border-bottom: 1px solid var(--adm-line-soft); text-align: left; white-space: nowrap; }
-.admChartTable thead th { position: sticky; top: 0; color: var(--adm-subtle); font-size: var(--adm-text-2xs); font-weight: 600; background: var(--adm-surface-alt); }
-.admChartTable tbody th { color: var(--adm-ink); font-weight: 500; }
-.admChartTable tbody tr:last-child > * { border-bottom: 0; }
-
-/* Donut */
-.admDonut { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 28px; padding: 4px 8px 0 12px; }
-.admDonutCanvas { position: relative; z-index: 0; flex: none; }
-/* The center label sits above the ring but below the tooltip, which recharts also positions
-   absolutely inside this same canvas — without this, the label paints over the tooltip on hover. */
-.admDonutCanvas .recharts-tooltip-wrapper { z-index: 2; }
-.admDonutCenter { position: absolute; z-index: 1; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
-.admDonutCenter strong { color: var(--adm-ink); font-size: var(--adm-text-2xl); font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.admDonutCenter span { color: var(--adm-subtle); font-size: var(--adm-text-2xs); }
-.admDonutActiveSlice { filter: drop-shadow(0 2px 6px rgba(15, 23, 42, .25)); }
-.admDonutLegend { display: grid; flex: 1; gap: 2px; min-width: 200px; margin: 0; padding: 0; list-style: none; }
-.admDonutLegend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 42px; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 6px; font-size: var(--adm-text-xs); cursor: pointer; transition: background .15s ease; }
-.admDonutLegend li:hover, .admDonutLegendActive { background: var(--adm-hover); }
-.admDonutName { overflow: hidden; color: var(--adm-text); text-overflow: ellipsis; white-space: nowrap; }
-.admDonutLegend strong { color: var(--adm-ink); font-variant-numeric: tabular-nums; }
-.admDonutShare { color: var(--adm-subtle); text-align: right; font-variant-numeric: tabular-nums; }
-
-/* Ranked bars */
-.admBarList { display: grid; gap: 2px; margin: 0; padding: 4px; list-style: none; }
-.admBarList li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 7px 10px; border-radius: 8px; transition: background .15s ease; }
-.admBarList li:hover { background: var(--adm-hover); }
-.admBarList li:hover .admBarListValue { color: var(--adm-blue-dark); }
-.admBarList li:hover .admBarListTrack span { filter: brightness(1.1); }
-.admBarListText { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.admBarListLabel { overflow: hidden; color: var(--adm-ink); font-size: var(--adm-text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.admBarListLabel a { color: inherit; text-decoration: none; }
-.admBarListLabel a:hover { color: var(--adm-blue-dark); text-decoration: underline; }
-.admBarListHint { flex: none; color: var(--adm-subtle); font-size: var(--adm-text-2xs); }
-.admBarListValue { display: flex; align-items: baseline; gap: 6px; color: var(--adm-ink); font-size: var(--adm-text-xs); font-weight: 600; font-variant-numeric: tabular-nums; transition: color .15s ease; }
-.admBarListPercent { color: var(--adm-faint); font-size: var(--adm-text-3xs); font-weight: 500; }
-.admBarListTrack { grid-column: 1 / -1; height: 8px; overflow: hidden; border-radius: 4px; background: #f1f4f9; }
-.admBarListTrack span { display: block; width: var(--adm-bar-w); height: 100%; border-radius: 4px; transition: filter .15s ease; animation: adm-bar-grow .55s var(--adm-bar-delay, 0ms) cubic-bezier(.16, 1, .3, 1) both; transform-origin: left; }
-@keyframes adm-bar-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-@media (prefers-reduced-motion: reduce) {
-  .admBarListTrack span { animation: none; }
-}
-
-/* Heatmap */
-.admHeatmap { display: grid; gap: 10px; padding: 0 8px 0 12px; }
-.admHeatmapReadout { min-height: 20px; margin: 0; color: var(--adm-muted); font-size: var(--adm-text-xs); font-weight: 500; }
-.admHeatmapGrid { display: grid; grid-template-columns: 34px repeat(24, minmax(0, 1fr)); gap: 3px; }
-.admHeatmapRow { display: contents; }
-.admHeatmapHour { color: var(--adm-faint); font-size: var(--adm-text-3xs); font-variant-numeric: tabular-nums; }
-.admHeatmapDay { align-self: center; color: var(--adm-subtle); font-size: var(--adm-text-2xs); font-weight: 500; }
-.admHeatmapCell { aspect-ratio: 1 / 1; min-height: 12px; border-radius: 3px; transition: box-shadow .1s ease; }
-.admHeatmapCell:hover { box-shadow: 0 0 0 2px var(--adm-ink); }
-.admHeatmapScale { display: flex; align-items: center; justify-content: flex-end; gap: 3px; color: var(--adm-subtle); font-size: var(--adm-text-2xs); }
-.admHeatmapScale span:first-child { margin-right: 4px; }
-.admHeatmapScale span:last-child { margin-left: 4px; }
-.admHeatmapScaleCell { width: 12px; height: 12px; border-radius: 3px; }
-
-/* GitHub-style daily contribution calendar */
-.admContribution { display: grid; gap: 10px; }
-.admContributionReadout { min-height: 20px; margin: 0; color: var(--adm-muted); font-size: var(--adm-text-xs); font-weight: 500; }
-.admContributionScroll { overflow-x: auto; padding-bottom: 2px; }
-.admContributionBody { display: flex; gap: 6px; width: max-content; }
-.admContributionDayLabels { display: flex; flex-direction: column; flex: none; gap: 3px; padding-top: 18px; }
-.admContributionDayLabels span { height: 12px; color: var(--adm-faint); font-size: var(--adm-text-3xs); line-height: 12px; }
-.admContributionMain { display: flex; flex-direction: column; gap: 4px; }
-.admContributionMonths { display: flex; gap: 3px; height: 14px; }
-.admContributionMonths span { width: 12px; flex: none; color: var(--adm-subtle); font-size: var(--adm-text-3xs); font-weight: 500; white-space: nowrap; }
-.admContributionWeeks { display: flex; gap: 3px; }
-.admContributionWeek { display: flex; flex: none; flex-direction: column; gap: 3px; }
-.admContributionCell { width: 12px; height: 12px; border-radius: 3px; transition: box-shadow .1s ease, transform .1s ease; }
-.admContributionCell:not(.admContributionCell-out):hover { box-shadow: 0 0 0 2px var(--adm-ink); transform: scale(1.15); }
-.admContributionCell-out { background: transparent; }
-.admContributionScale { margin-top: -2px; }
-@media (max-width: 720px) {
-  .admContributionMonths span, .admContributionCell, .admContributionWeek { width: 10px; }
-  .admContributionCell { height: 10px; }
-}
-
-/* Retention cohorts */
-.admCohort th, .admCohort td { height: 34px; padding: 0 6px; border-bottom: 2px solid var(--adm-surface); white-space: nowrap; }
-.admCohort thead th { position: sticky; top: 0; z-index: 1; color: var(--adm-subtle); font-size: var(--adm-text-2xs); font-weight: 600; text-align: left; background: var(--adm-surface-alt); }
-.admCohort tbody th { padding-left: 12px; color: var(--adm-ink); font-weight: 500; text-align: left; }
-.admCohortCell { min-width: 46px; border-left: 2px solid var(--adm-surface); color: var(--adm-ink); font-size: var(--adm-text-2xs); font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
-.admCohortCell[data-dark="true"] { color: #fff; }
-.admCohortEmpty { border-left: 2px solid var(--adm-surface); background: repeating-linear-gradient(135deg, #f8fafc 0 4px, #f1f4f9 4px 8px); }
 
 /* Stat list (label and value rows inside cards) */
 .admStatList { display: grid; margin: 0; padding: 4px 20px 12px; list-style: none; }
@@ -671,11 +560,6 @@
   .admSegmented { width: 100%; }
   .admSegmented button { flex: 1; justify-content: center; height: 34px; }
   .admPageActions { width: 100%; }
-  .admChartHead { padding: 14px 16px 0; }
-  .admHeatmapGrid { grid-template-columns: 28px repeat(24, minmax(0, 1fr)); gap: 2px; }
-  .admHeatmapCell { min-height: 8px; border-radius: 2px; }
-  .admHeatmapHour { font-size: var(--adm-text-3xs); }
-  .admDonut { justify-content: center; }
 }
 
 /* ---------- Reports triage desk ---------- */
@@ -855,10 +739,8 @@
 .admMetricValue { overflow: hidden; color: var(--adm-ink); font-size: var(--adm-text-xl); font-weight: 700; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .admMetricHint { color: var(--adm-faint); font-size: var(--adm-text-2xs); }
 .admMetricFootnote { margin: 0; padding: 0 20px 16px; color: var(--adm-subtle); font-size: var(--adm-text-2xs); }
-.admMetricBarTrack { display: block; width: 72px; margin-top: 3px; }
-
-.admGauge { position: relative; display: grid; flex: none; place-items: center; }
-.admGaugeValue { position: absolute; color: var(--adm-ink); font-size: var(--adm-text-3xs); font-weight: 700; font-variant-numeric: tabular-nums; }
+/* Only the offset: the shared .vizInlineBarTrack sets the track's display and 64px width. */
+.admMetricBarTrack { margin-top: 3px; }
 
 /* Route rows: the endpoint with its traffic as a caption, one metric with a small bar beneath it. */
 .admRouteCell { display: grid; gap: 2px; }
@@ -867,13 +749,6 @@
 .admRouteMetricTop { display: flex; align-items: baseline; gap: 7px; }
 .admRouteMetricTop strong { color: var(--adm-ink); font-variant-numeric: tabular-nums; }
 .admRouteMetricWarn { color: var(--adm-red-dark); }
-.admInlineBarTrack { display: inline-block; width: 64px; height: 5px; overflow: hidden; border-radius: 3px; background: var(--adm-line-soft); }
-.admInlineBarTrack-wide { display: block; width: 100%; }
-.admInlineBarFill { display: block; width: var(--adm-bar-w); height: 100%; border-radius: 3px; animation: adm-bar-grow .5s cubic-bezier(.16, 1, .3, 1) both; transform-origin: left; }
-@media (prefers-reduced-motion: reduce) {
-  .admInlineBarFill { animation: none; }
-}
-
 @media (max-width: 720px) {
   .admMetricTiles { grid-template-columns: minmax(0, 1fr); }
 }
