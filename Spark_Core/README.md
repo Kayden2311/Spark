@@ -45,7 +45,7 @@ The backend build has two entrypoints: `pnpm --filter @spark/backend start` (pub
 | `AUTH_TRUSTED_PROXIES` | not used | required: exactly the API hosts' addresses, so rate limits key on the real client IP |
 | `WORKER_DATABASE_URL` (`spark_worker`) | must not be set | must not be set |
 
-The background worker (`pnpm --filter @spark/backend start:worker`) serves no HTTP traffic. It requires `WORKER_DATABASE_URL` (`spark_worker`), `DATABASE_SSL=true`, `SMTP_URL` (`smtp://` or `smtps://`), `EMAIL_FROM` and an HTTPS `APP_BASE_URL` for email links, and refuses to start if `DATABASE_URL`, `AUTH_DATABASE_URL` or `MIGRATION_DATABASE_URL` is set. Delivery is at least once: failed sends retry with exponential backoff (2^attempts minutes, at most six hours) and are dead-lettered after eight attempts (`processed_at` set, `last_error_code` kept).
+The background worker (`pnpm --filter @spark/backend start:worker`) serves no HTTP traffic. It requires `WORKER_DATABASE_URL` (`spark_worker`), `DATABASE_SSL=true`, `SMTP_URL` (`smtps://`, or `smtp://` which must upgrade with STARTTLS: the worker sets nodemailer `requireTLS` in production and rejects query options in the URL), `EMAIL_FROM` and an HTTPS `APP_BASE_URL` for email links, and refuses to start if `DATABASE_URL`, `AUTH_DATABASE_URL` or `MIGRATION_DATABASE_URL` is set. Delivery is at least once: failed sends retry with exponential backoff (2^attempts minutes, at most six hours) and are dead-lettered after eight attempts (`processed_at` set, `last_error_code` kept).
 
 Every API instance must be listed in `AUTH_TRUSTED_PROXIES`; an unlisted instance makes all its users share one rate-limit bucket. Allow only the API to reach the auth port.
 

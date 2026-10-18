@@ -76,9 +76,9 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Visitor
 - **Priority**: Must
-- **Status**: Planned (`/signup`)
+- **Status**: Implemented (`POST /api/v1/auth/password/sign-up`, `/signup`)
 - **Story**: As a Visitor, I want to register with an email and password so that I can request membership and join workspaces.
-- **Note**: Sign-up no longer creates a workspace; a new user creates one explicitly (US-E1) or joins through an invitation (US-E3).
+- **Note**: Sign-up creates the account and signs the user in; since migration `0014` it no longer creates a workspace. A new user creates one explicitly (US-E1) or joins through an invitation (US-E3). Email verification is not implemented yet.
 - **Acceptance criteria**:
   - Given a new email and a password meeting policy, when I submit, then the account is created with an Argon2id hash and I am signed in or asked to verify the email.
   - Given an email already registered, when I submit, then the response does not disclose that the email exists.

@@ -1,6 +1,6 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0015_workspace_membership_writes.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0016_email_worker.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`), the platform governance API (`/api/v1/admin/*`), the workspace, member and invitation API (`/api/v1/workspaces/*`, `/api/v1/invitations/*`) and the outbox email worker for invitation emails are implemented and verified locally. Other product write use cases, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
 
@@ -15,7 +15,7 @@ Migrations `0006_scoped_runtime_access.sql`, `0007_governance_corrections.sql`, 
 - Platform governance runs inside a transaction that sets `spark.session_token_hash`. Staff read policies and `staff_*` functions resolve the actor from a live, unexpired session of an active user, never from a user id argument. A missing session raises `28000` (HTTP 401); a missing role raises `42501` (HTTP 403).
 - Moderation actions may be recorded by community owners and moderators or by active platform content moderators.
 - Suspending a super admin and revoking the `super_admin` role take the same row locks, so concurrent requests cannot leave the platform without an active super admin.
-- Process boundary: the backend runs as two processes from one build. The public API (`src/server.ts`, port 4000) connects only as `spark_app` and forwards `POST /api/v1/auth/password/sign-up` and `/sign-in` to the private auth process (`src/auth-server.ts`, port 4100, loopback by default), which alone connects as `spark_auth`. `/api/v1/me` and sign-out stay in the API because they only need an existing token hash. Locally both processes read the same `.env` for convenience; in production each process refuses to start with the other's database URL or `MIGRATION_DATABASE_URL`, so secrets must be provisioned per process.
+- Process boundary: the backend runs as three processes from one build. The public API (`src/server.ts`, port 4000) connects only as `spark_app` and forwards `POST /api/v1/auth/password/sign-up` and `/sign-in` to the private auth process (`src/auth-server.ts`, port 4100, loopback by default), which alone connects as `spark_auth`. `/api/v1/me` and sign-out stay in the API because they only need an existing token hash. The background worker (`src/worker.ts`, no HTTP port) alone connects as `spark_worker` and sends outbox emails (see "Background worker and email"). Locally all processes read the same `.env` for convenience; in production each process refuses to start with another process's database URL or `MIGRATION_DATABASE_URL`, so secrets must be provisioned per process.
 - Startup probes fail closed: the API refuses a role that can execute any of the three credential functions, has role memberships, is a superuser, or bypasses RLS; the auth process refuses a role that is a superuser, bypasses RLS, has role memberships, or can read `spark.users`. In production `AUTH_SERVICE_URL` must use HTTPS unless it is a loopback address.
 - What the split guarantees: the API's database role cannot read password hashes or create a session for an existing user, so SQL injection or logic errors in the API cannot mint logins.
 - Residual risks (not solved by the split):
@@ -43,12 +43,39 @@ Workspace row access is bound to the live session, not to the transaction-local 
 The runtime role still has no INSERT, UPDATE or DELETE grant on these tables. Every write is a `spark.ws_*` SECURITY DEFINER function executable by `spark_app` that derives the actor from the live session (`28000` without one), raises `22023` with a fixed message for invalid input, returns a closed set of outcomes and writes one `audit_events` row in the same transaction. Non-members get `not_found`, members without the role get `forbidden`.
 
 - `ws_create_workspace`, `ws_update_workspace` (optimistic `version`), `ws_list_members` (active members, explicit columns, email only for owners and admins).
-- `ws_create_invitation`, `ws_resend_invitation`, `ws_revoke_invitation`, `ws_invitation_preview` (no session; masked email hint) and `ws_accept_invitation` (primary email must match; re-activates a `left` membership; outbox event and an `invitation_accepted` notification for the inviter). Owners manage all invitations, admins only `member` invitations. Invitation creation and resend enqueue `invitation.created`/`invitation.resent` outbox events; the hash passed at creation is an unusable placeholder until the worker issues the real token.
+- `ws_create_invitation`, `ws_resend_invitation`, `ws_revoke_invitation`, `ws_invitation_preview` (no session; masked email hint) and `ws_accept_invitation` (primary email must match; re-activates a `left` membership; outbox event and an `invitation_accepted` notification for the inviter). Owners manage all invitations, admins only `member` invitations. Invitation creation and resend enqueue `invitation.created`/`invitation.resent` outbox events. In `0015` the caller passed a token hash at creation; since `0016` the function generates an unknowable placeholder itself and only the worker issues real tokens.
 - `ws_set_member_role` (owners only) and `ws_remove_member` (self-leave, owners remove anyone, admins remove members). The last active owner cannot be demoted or removed (`last_owner`); the check is explicit because the deferred `workspace_owner` trigger only fires at commit.
 - Lock order in every function: workspace row, then invitation, then membership.
 - `workspace_invitations`: column-level `SELECT` for `spark_app` without `token_hash` and `accepted_by_user_id`, policy `invitation_admin_read` for owners and admins.
 - `notifications.kind` is limited to `invitation_accepted` (later milestones extend the list).
 - `is_coworker` additionally hides platform-suspended and soft-deleted coworkers.
+
+## Background worker and email (`0016_email_worker.sql`)
+
+The worker process (`src/worker.ts`) logs in as `spark_worker`. The role has no table privileges and no role memberships: it has `USAGE` on the `spark` schema and `EXECUTE` on five SECURITY DEFINER functions with a fixed `search_path`, which `spark_app` and `spark_auth` cannot execute. At startup the worker refuses a role that is a superuser, bypasses RLS, has memberships, can read `spark.users`, or cannot claim outbox events.
+
+- `worker_claim_outbox(lock_token uuid, limit integer, lease_seconds integer)` claims up to `limit` (1 to 100) due, unlocked events with `FOR UPDATE SKIP LOCKED`, sets `locked_until = now() + lease` (10 to 600 s), stores the lock token and increments `attempts`.
+- `worker_complete_outbox(id, lock_token) RETURNS boolean` marks the event processed; `false` when the lease was lost (expired and re-claimed, or already settled).
+- `worker_fail_outbox(id, lock_token, error_code, retry_at) RETURNS boolean` records a short error identifier (`^[a-z][a-z0-9_]{0,63}$`, never message text or addresses) and the retry time; after eight attempts the event is dead-lettered (`processed_at` set, `last_error_code` kept). `false` when the lease was lost.
+- `worker_invitation_email(invitation uuid)` returns only what the email needs: status (`unavailable` for an inactive or archived workspace, `expired` for a pending invitation past its expiry), recipient address, workspace name, inviter name, role and expiry.
+- `worker_issue_invitation_token(invitation uuid, token_hash bytea) RETURNS boolean` locks the workspace, then the invitation, and stores the SHA-256 hash of a freshly generated token for a pending, unexpired invitation of an active workspace, which invalidates any earlier link. The raw token never reaches the database: it exists only in worker memory and in the email, in the URL fragment.
+
+Worker behaviour (`src/modules/outbox/`):
+
+- Each batch claims at most 5 events under a 300 s lease; the worst case per event is about 45 s of database and SMTP timeouts.
+- An event is started only with at least 90 s of lease left, and a token is never issued with less than 60 s left. Unprocessed events stay claimed until the lease expires and are then claimed again.
+- A `false` from complete or fail is counted as `leaseLost`, not as sent or failed. Logs carry counts and error codes only.
+- Delivery is at least once: an event whose lease expires mid-send may be sent again by another worker. Every send issues a new token, so only the latest link works.
+- In production SMTP must be encrypted: `smtps://` (implicit TLS), or `smtp://` with STARTTLS required (nodemailer `requireTLS`). `SMTP_URL` query options are rejected in production because they could switch TLS off.
+
+Changes to the `0015` write functions:
+
+- `ws_create_invitation(uuid, text, text, timestamptz)` replaces the five-argument version: the caller no longer supplies a token hash, and the function stores an unknowable random placeholder until the worker issues the real token. A workspace may hold at most 100 unexpired pending invitations (abuse guard).
+- `ws_resend_invitation` revives an expired invitation (by status, or pending past its expiry) for another 7 days unless a newer invitation for the same address is already pending. Accepted and revoked invitations stay `not_pending`.
+- `ws_invitation_preview` minimizes settled invitations: a non-pending invitation previews its status only, without workspace or inviter details.
+- `ws_accept_invitation` looks the token up, locks the workspace, then re-locks the invitation by id and re-checks the hash under the lock, so a token the worker rotated in between is invalid. The inviter is notified only while still an active workspace member.
+- `ws_create_workspace`: archived workspaces no longer count toward the owned-workspace cap.
+- The `issue_change_set` constraint trigger on `outbox_events` now fires on insert, delete, and updates of `tenant_id`, `aggregate_type`, `aggregate_id` or `aggregate_version` only, so delivery bookkeeping (lease, attempts, errors) on older issue events is not mistaken for an issue change set.
 
 ## Platform governance and audit (`0009_platform_governance.sql` to `0011_campaign_review_lock.sql`)
 
@@ -258,7 +285,7 @@ Backend derives actor from active opaque session and sets the transaction-local 
 
 Policies use both USING and WITH CHECK with operation-specific permissions:
 
-- Workspace resources require active workspace membership and selected tenant; administrative/billing writes require owner/admin.
+- Workspace resources require active workspace membership resolved from the live session (`session_workspace_ids()`). RLS shows rows of every workspace the session may read; narrowing to the selected workspace is an application-level filter, not a security boundary. Administrative/billing writes require owner/admin.
 - Community resources require exact-community membership or explicit public visibility path; workspace membership alone is insufficient.
 - Public discovery exposes only public nonarchived community fields and opted-in startup projection. An invoker-RLS view or narrowly reviewed projection function must not bypass visibility through owner privileges.
 - Membership roles cannot be self-escalated. Workspace bootstrap uses a narrowly scoped transaction that cannot create ownership in an existing tenant.
