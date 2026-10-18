@@ -257,6 +257,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 - **Actor**: Workspace Member
 - **Priority**: Must
 - **Status**: Mockup (`/workspace` Add task)
+- **Note**: Projects now exist (US-E7): each project has a key, a methodology and its board columns, so tasks will be created inside a project's board. Task creation itself is still planned.
 - **Story**: As a Workspace Member, I want to create tasks and assign them so that ownership and progress are clear.
 - **Acceptance criteria**:
   - Given a title and optional assignee, then the task is created in the workspace's board.
@@ -281,6 +282,23 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 - **Status**: Mockup (`/schedule`)
 - **Story**: As a Workspace Member, I want to add events and delivery dates so that the team coordinates sessions.
 - **Acceptance criteria**: Persisted behavior is defined when this story is scheduled; until then the screen shows illustrative data only.
+
+### US-E7: Choose a methodology for a project
+
+- **Actor**: Workspace Owner or Admin (create); Owner, Admin or project lead (settings); any Workspace Member (read)
+- **Priority**: Must
+- **Status**: Implemented (`GET /api/v1/methodologies`, `POST /api/v1/workspaces/{workspaceId}/projects`, `GET /api/v1/workspaces/{workspaceId}/projects`, `GET /api/v1/workspaces/{workspaceId}/projects/by-key/{key}`, `GET /api/v1/projects/{projectId}`, `PATCH /api/v1/projects/{projectId}`; screens `/w/[slug]/projects/new` and `/w/[slug]/p/[key]`)
+- **Story**: As a Workspace Owner or Admin, I want to create a project with Scrum, Kanban or Waterfall so that its board, planning and reports match how the team works.
+- **Acceptance criteria**:
+  - Given the picker, when I choose a methodology, then the form shows that methodology's columns, practices and fields: sprint length (1–4 weeks) for Scrum, WIP limits for Kanban, and start/target dates with evenly spread, editable phases for Waterfall.
+  - Given a project key that is already used in this workspace, then creation fails with `409 key_taken` and the form says so; the same key in another workspace is allowed.
+  - Given Waterfall dates too short for the phases, or a target before the start, then the form shows an inline error and cannot be submitted, and the API answers `400` naming invalid dates.
+  - Given a plain member opens `/w/{slug}/projects/new`, then they see "Only owners and admins can create projects" instead of a form.
+  - The workspace home lists every project with its key, methodology pill, lead and progress (`done/total`, or "No tasks yet"); the sidebar lists up to 8 projects with a methodology-colored dot, and only owners and admins see "New project".
+  - The project overview shows the header, the board columns with WIP limits, the methodology section (Scrum sprint length; Kanban WIP summary; Waterfall phase timeline with baseline bars, milestone markers and a today marker) and the methodology's practices; an unknown key shows a not-found card.
+  - Owners, admins and the project lead can edit name, description, lead, dates and (Scrum) sprint length; saves send `If-Match`. Given a teammate saved first, then the save gets `412`, the dialog stays open with the teammate's values and says "Updated by a teammate — review the latest values and save again."
+  - Projects created before methodologies existed still list and open, shown as Kanban.
+  - The methodology cannot be changed yet; switching is planned for a later milestone.
 
 ## Epic F: Notifications (US-06)
 
@@ -410,7 +428,7 @@ Mentor matching, file uploads, rich realtime collaboration, AI summaries, and bi
 | US-02 | US-C1, US-C2, US-C3 | Journeys 1 and 2 |
 | US-03 | US-D1, US-D2, US-D3, US-D4 | Journey 2 |
 | US-04 | US-E1, US-E2, US-E3 | Journey 3 |
-| US-05 | US-E4, US-E5, US-E6 | Journey 3 |
+| US-05 | US-E4, US-E5, US-E6, US-E7 | Journey 3 |
 | US-06 | US-F1, US-F2 | Journey 3 |
 | US-07 | US-G1, US-G2, US-G3 | Journey 4 |
 | Auth and governance | US-A1 to US-A5, US-H1 to US-H4, US-I1 | Journeys 5 and 6 |

@@ -49,7 +49,7 @@ export default function NewProjectPage() {
 }
 
 function NewProject() {
-  const { workspace } = useWorkspace();
+  const { workspace, projects } = useWorkspace();
   const first = useSearchParams().get("first") === "1";
 
   if (!canManage(workspace.role)) {
@@ -63,7 +63,7 @@ function NewProject() {
       </section>
     );
   }
-  return <ProjectCreator first={first} workspace={workspace} />;
+  return <ProjectCreator first={first} onCreated={projects.reload} workspace={workspace} />;
 }
 
 /** Why the Waterfall range cannot hold the phases, or null when it fits (or is not complete yet). */
@@ -115,7 +115,7 @@ function phasesValid(rows: PhaseRow[], startDate: string, targetDate: string): b
   return rows.length > 0;
 }
 
-function ProjectCreator({ workspace, first }: { workspace: Workspace; first: boolean }) {
+function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace; first: boolean; onCreated(): void }) {
   const router = useRouter();
   const { user } = useAuth();
   const catalog = useMethodologies();
@@ -257,6 +257,8 @@ function ProjectCreator({ workspace, first }: { workspace: Workspace; first: boo
     setSubmitting(true);
     try {
       const { data } = await workspaceApi<CreatedProject>(`/workspaces/${workspace.id}/projects`, { method: "POST", body });
+      // The shell and home list the new project too.
+      onCreated();
       router.push(`/w/${workspace.slug}/p/${data.key}`);
     } catch (error) {
       setSubmitting(false);

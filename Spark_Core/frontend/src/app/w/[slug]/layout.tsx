@@ -9,12 +9,15 @@ import { WorkspaceShell } from "../../components";
 import { WorkspaceSplash } from "../_components/splash";
 import { SESSION_EXPIRED_EVENT, type Workspace } from "../_lib/api";
 import { forgetWorkspace, rememberWorkspace } from "../_lib/last-workspace";
+import type { Project } from "../_lib/projects";
 import { useWorkspaceData } from "../_lib/use-workspace-data";
 import { WorkspaceProvider } from "./workspace-context";
 
 function sectionFor(pathname: string, slug: string): string {
   const base = `/w/${slug}`;
   if (pathname === `${base}/members` || pathname.startsWith(`${base}/members/`)) return "Members";
+  // Project pages are marked in the shell's project list instead.
+  if (pathname.startsWith(`${base}/p/`) || pathname.startsWith(`${base}/projects/`)) return "";
   return "Home";
 }
 
@@ -28,7 +31,15 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   const notFound = errorStatus === 404;
   // A refresh that failed keeps the last good copy; only show it while it still belongs to this slug.
   const current = workspace && workspace.slug === slug && !notFound ? workspace : null;
-  const value = useMemo(() => (current ? { workspace: current, reload } : null), [current, reload]);
+  const projectsPath = current ? `/workspaces/${current.id}/projects` : null;
+  const projectList = useWorkspaceData<{ items: Project[] }>(projectsPath);
+  // After a workspace switch the previous workspace's list stays in the hook until the new one arrives: never show it.
+  const projectItems = projectList.dataPath === projectsPath ? projectList.data?.items ?? null : null;
+  const projects = useMemo(
+    () => ({ items: projectItems, error: projectList.error, loading: projectList.loading, reload: projectList.reload }),
+    [projectItems, projectList.error, projectList.loading, projectList.reload],
+  );
+  const value = useMemo(() => (current ? { workspace: current, reload, projects } : null), [current, reload, projects]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) router.replace(`/login?redirect=${encodeURIComponent(pathname || `/w/${slug}`)}`);
@@ -90,7 +101,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   // One wrapper tree for every state, so the shell (and its open menus) never remounts while data loads.
   return (
     <WorkspaceProvider value={value}>
-      <WorkspaceShell current={notFound ? "" : sectionFor(pathname, slug)} workspace={notFound ? undefined : current ?? undefined}>
+      <WorkspaceShell current={notFound ? "" : sectionFor(pathname, slug)} projects={current ? projectItems : null} workspace={notFound ? undefined : current ?? undefined}>
         {content}
       </WorkspaceShell>
     </WorkspaceProvider>

@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNod
 import { useAuth } from "./auth-context";
 import { SparkLogo as SparkMark } from "./brand/spark-logo";
 import { readLastWorkspace, subscribeLastWorkspace } from "./w/_lib/last-workspace";
+import { methodologyAccent, methodologyOf } from "./w/_lib/projects";
 
 const STAFF_ROLES = ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"];
 const ROLE_NAMES: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -16,6 +17,16 @@ export interface ShellWorkspace {
   name: string;
   role: string;
 }
+
+/** A project as the shell lists it. */
+export interface ShellProject {
+  key: string;
+  name: string;
+  methodology: string;
+}
+
+/** How many projects the sidebar lists before linking to the full list on the workspace home. */
+const SHELL_PROJECT_LIMIT = 8;
 
 export function initials(name: string | undefined | null, fallback = "S"): string {
   const words = (name ?? "").trim().split(/\s+/u).filter(Boolean);
@@ -36,6 +47,44 @@ const ICONS: Record<string, ReactNode> = {
   Billing: <Icon><rect height="13" rx="2.5" width="18" x="3" y="5.5" /><path d="M3 10h18M7 15h3" /></Icon>,
   Admin: <Icon><path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6z" /></Icon>,
 };
+
+function ShellProjects({ workspace, projects, pathname }: { workspace: ShellWorkspace; projects: ShellProject[] | null; pathname: string }) {
+  const base = `/w/${workspace.slug}`;
+  const manager = workspace.role === "owner" || workspace.role === "admin";
+  const shown = projects?.slice(0, SHELL_PROJECT_LIMIT) ?? [];
+  const newHref = `${base}/projects/new`;
+  return (
+    <nav aria-label="Projects" className="sideProjects">
+      <p aria-hidden="true" className="sideProjectsTitle">Projects</p>
+      {shown.length > 0 && (
+        <ul>
+          {shown.map((project) => {
+            const href = `${base}/p/${project.key}`;
+            const active = pathname === href || pathname.startsWith(`${href}/`);
+            return (
+              <li key={project.key}>
+                <Link aria-current={active ? "page" : undefined} className={active ? "sideProject active" : "sideProject"} href={href}>
+                  <span aria-hidden="true" className="sideProjectDot" data-methodology={methodologyOf(project.methodology)} style={{ background: methodologyAccent(project.methodology) }} />
+                  <span className="sideProjectName">{project.name}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {projects && projects.length > SHELL_PROJECT_LIMIT && (
+        <Link className="sideProjectMore" href={`${base}#projects`}>All {projects.length} projects</Link>
+      )}
+      {projects && projects.length === 0 && !manager && <p className="sideProjectsEmpty">No projects yet</p>}
+      {manager && (
+        <Link aria-current={pathname === newHref ? "page" : undefined} className={pathname === newHref ? "sideProject sideProjectNew active" : "sideProject sideProjectNew"} href={newHref}>
+          <span aria-hidden="true" className="sideProjectPlus">+</span>
+          <span className="sideProjectName">New project</span>
+        </Link>
+      )}
+    </nav>
+  );
+}
 
 function WorkspaceSwitcher({ active }: { active: ShellWorkspace | null }) {
   const { workspaces } = useAuth();
@@ -111,7 +160,7 @@ function WorkspaceSwitcher({ active }: { active: ShellWorkspace | null }) {
   );
 }
 
-export function WorkspaceShell({ children, current, workspace }: { children: ReactNode; current: string; workspace?: ShellWorkspace | null }) {
+export function WorkspaceShell({ children, current, workspace, projects = null }: { children: ReactNode; current: string; workspace?: ShellWorkspace | null; projects?: ShellProject[] | null }) {
   const { user, workspaces, platformRoles, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -196,6 +245,8 @@ export function WorkspaceShell({ children, current, workspace }: { children: Rea
               </Link>
             )}
           </nav>
+          {/* Only pages inside a workspace pass it, so other pages never show a stale project list. */}
+          {workspace && <ShellProjects pathname={pathname} projects={projects} workspace={workspace} />}
           <div className="sidebarFoot">
             <span className="avatar">{initials(user?.displayName, "U")}</span>
             <span className="sidebarUser">

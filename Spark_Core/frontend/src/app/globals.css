@@ -4222,7 +4222,146 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 @media (max-width: 640px) {
   .wsProjectFormGrid { grid-template-columns: minmax(0, 1fr); }
   .wsProjectPhase { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .wsProjectPhase input[type="date"] { grid-column: 2 / 3; }
+  /* Name and Remove share the first line; the two dates stack under the name at full width. */
+  .wsProjectPhase .wsProjectPhaseName { grid-column: 2; grid-row: 1; }
+  .wsProjectPhase > button { grid-column: 3; grid-row: 1; }
+  .wsProjectPhase input[type="date"] { grid-column: 2 / -1; }
   .wsProjectFormActions { flex-direction: column-reverse; align-items: stretch; }
   .wsProjectFormActions .wsSubmit { width: 100%; }
+}
+
+/* Sidebar project list */
+.sideProjects { display: grid; min-height: 0; align-content: start; gap: .2rem; overflow-y: auto; }
+.sideProjectsTitle { padding: 0 .85rem .35rem; color: #7f96c2; font-size: .68rem; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+.sideProjects ul { display: grid; gap: .1rem; margin: 0; padding: 0; list-style: none; }
+.sideProject { display: flex; min-width: 0; align-items: center; gap: .65rem; padding: .5rem .85rem; border-radius: .55rem; color: #b7c8e7; font-size: .86rem; font-weight: 500; transition: background .18s ease, color .18s ease; }
+.sideProject:hover { color: #fff; background: #17437e; }
+.sideProject.active { color: #fff; background: #17437e; font-weight: 600; }
+.sideProjectDot { width: .55rem; height: .55rem; flex: none; margin: 0 .3rem; border-radius: 50%; box-shadow: 0 0 0 3px rgba(255, 255, 255, .08); }
+.sideProjectName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sideProjectNew { color: #93c5fd; }
+.sideProjectPlus { display: grid; width: 1.15rem; height: 1.15rem; flex: none; place-items: center; border: 1.5px dashed #5f84c4; border-radius: 50%; font-size: .8rem; line-height: 1; }
+.sideProjectMore { padding: .35rem .85rem; color: #93c5fd; font-size: .78rem; font-weight: 650; }
+.sideProjectMore:hover { color: #fff; }
+.sideProjectsEmpty { padding: .25rem .85rem; color: #7f96c2; font-size: .8rem; }
+
+/* Project list on the workspace home */
+.wsProjectsNew { flex: none; min-height: 2.6rem; padding: .55rem 1rem; }
+.wsProjectsNew svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.wsProjectGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: .9rem; margin: 1.3rem 0 0; padding: 0; list-style: none; }
+.wsProjectGrid > li { display: grid; }
+.wsProjectCard { position: relative; display: grid; align-content: start; gap: .7rem; padding: 1.15rem 1.15rem 1rem; overflow: hidden; border: 1px solid var(--line); border-radius: .95rem; background: #fff; box-shadow: 0 4px 15px rgba(15, 23, 42, .04); transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.wsProjectCard::before { position: absolute; top: 0; right: 0; left: 0; height: 3px; background: var(--method-accent); content: ""; }
+.wsProjectCard:hover { border-color: color-mix(in srgb, var(--method-accent) 40%, var(--line)); box-shadow: 0 14px 30px -16px rgba(15, 36, 87, .25); transform: translateY(-2px); }
+.wsProjectCardTop { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.wsProjectCardName { overflow: hidden; color: var(--ink); font-size: 1.05rem; font-weight: 650; letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
+.wsProjectCardFoot { display: flex; min-height: 1.45rem; align-items: center; gap: .75rem; }
+.wsProjectNoLead { color: var(--muted); font-size: .75rem; font-weight: 600; }
+.wsProjectProgress { display: flex; min-width: 0; flex: 1; align-items: center; gap: .6rem; }
+.wsProgressBar { position: relative; height: .4rem; flex: 1; overflow: hidden; border-radius: 999px; background: #edf2f8; }
+.wsProgressBar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--method-accent); }
+.wsProgressText { margin-left: auto; color: var(--ink-secondary); font-size: .75rem; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wsKeyTag { padding: .18rem .45rem; border-radius: .35rem; color: var(--ink-secondary); background: #eef3fa; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .72rem; font-weight: 700; letter-spacing: .04em; }
+.wsMethodPill { display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .55rem; border-radius: 999px; color: color-mix(in srgb, var(--method-accent) 80%, #0f172a); background: color-mix(in srgb, var(--method-accent) 13%, #fff); font-size: .7rem; font-weight: 750; letter-spacing: .02em; }
+.wsMethodPill::before { width: .4rem; height: .4rem; border-radius: 50%; background: var(--method-accent); content: ""; }
+.wsProjectSkeleton { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: .9rem; margin-top: 1.3rem; }
+.wsProjectSkeleton span:not(.wsSrOnly) { display: block; height: 7.5rem; border-radius: .95rem; background: linear-gradient(90deg, #eaf0f8 0%, #f5f8fc 50%, #eaf0f8 100%); background-size: 200% 100%; animation: ws-shimmer 1.4s linear infinite; }
+.wsMethods > li { display: grid; }
+.wsMethodLink { transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.wsMethodLink:hover { border-color: #b9cfee; box-shadow: 0 12px 26px -16px rgba(15, 36, 87, .3); transform: translateY(-2px); }
+
+/* Project overview */
+.wsProject { position: relative; display: grid; gap: 1.25rem; isolation: isolate; }
+.wsProject .wsGlow { top: -9rem; right: -6rem; background: radial-gradient(circle, color-mix(in srgb, var(--method-accent) 16%, transparent), transparent 66%); }
+.wsProjectHero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 1rem 1.5rem; margin-bottom: .5rem; }
+.wsProjectHeroMain { display: grid; min-width: 0; gap: .8rem; }
+.wsProjectHeroTags { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.wsProjectHero h1 { color: var(--ink); font-size: clamp(2.1rem, 4.4vw, 3.3rem); font-weight: 650; line-height: 1.02; letter-spacing: -.06em; overflow-wrap: anywhere; }
+.wsProjectDescription { max-width: 46rem; color: var(--muted); font-size: 1rem; line-height: 1.6; }
+.wsProjectSettingsButton { min-height: 2.75rem; padding: .55rem 1rem; }
+.wsProjectSettingsButton svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.wsProjectFacts { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: .4rem 0 0; overflow: hidden; border: 1px solid var(--line); border-radius: .95rem; background: #fff; box-shadow: 0 4px 15px rgba(15, 23, 42, .04); }
+.wsProjectFacts > div { display: grid; min-width: 0; gap: .3rem; padding: .85rem 1.1rem; border-left: 1px solid #edf2f8; }
+.wsProjectFacts > div:first-child { border-left: 0; }
+.wsProjectFacts dt { color: var(--muted); font-size: .68rem; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+.wsProjectFacts dd { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: .92rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.wsProjectLead { display: inline-flex; max-width: 100%; align-items: center; gap: .45rem; }
+.wsProjectLead > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.wsProjectGridLayout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 1.25rem; }
+.wsProjectGridLayout.single { grid-template-columns: minmax(0, 1fr); }
+.wsBoardColumns { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.2rem 0 0; padding: 0; list-style: none; }
+.wsBoardColumns .wsPickerColumn { padding: .45rem .75rem; border-radius: .55rem; font-size: .78rem; }
+.wsProjectNote { display: flex; align-items: center; gap: .5rem; margin-top: 1.1rem; padding: .7rem .85rem; border: 1px dashed #d3dff0; border-radius: .7rem; color: var(--muted); background: #fbfcfe; font-size: .84rem; }
+.wsProjectNote svg { width: 1.05rem; height: 1.05rem; flex: none; fill: none; stroke: var(--method-accent); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.wsProjectBig { margin-top: 1.1rem; color: var(--ink); font-size: 1.9rem; font-weight: 650; letter-spacing: -.045em; }
+.wsProjectMuted { margin-top: .5rem; color: var(--muted); font-size: .88rem; line-height: 1.55; }
+.wsProjectMethod { border-top: 3px solid var(--method-accent); }
+.wsWipList { display: grid; gap: .35rem; margin: .9rem 0 0; padding: 0; list-style: none; }
+.wsWipList li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .5rem .75rem; border-radius: .55rem; color: var(--ink-secondary); background: #f6f9fd; font-size: .86rem; font-weight: 600; }
+.wsWipList strong { min-width: 1.8rem; padding: .1rem .45rem; border-radius: .35rem; color: #fff; background: var(--method-accent); font-size: .75rem; text-align: center; }
+.wsPracticeList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin: 1.1rem 0 0; padding: 0; list-style: none; }
+.wsPracticeList li { position: relative; padding: .7rem .85rem .7rem 2.1rem; border: 1px solid #edf2f8; border-radius: .7rem; color: var(--ink-secondary); background: #fbfcfe; font-size: .88rem; line-height: 1.45; }
+.wsPracticeList li::before { position: absolute; top: .95rem; left: .85rem; width: .55rem; height: .55rem; border-radius: 50%; background: var(--method-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--method-accent) 18%, transparent); content: ""; }
+
+/* Waterfall timeline */
+.wsProjectTimeline .wsCardHeader { flex-wrap: wrap; }
+.wsTimelineLegend { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; margin: 0; padding: 0; color: var(--muted); font-size: .76rem; font-weight: 600; list-style: none; }
+.wsTimelineLegend li { display: inline-flex; align-items: center; gap: .4rem; }
+.wsLegendBar, .wsLegendBaseline { display: inline-block; width: 1.4rem; height: .55rem; border-radius: 999px; }
+.wsLegendBar { background: var(--method-accent); }
+.wsLegendBaseline { border: 1.5px dashed color-mix(in srgb, var(--method-accent) 55%, #94a3b8); background: color-mix(in srgb, var(--method-accent) 10%, #fff); }
+.wsLegendMilestone { display: inline-block; width: .65rem; height: .65rem; flex: none; border: 2px solid #fff; background: var(--ink); box-shadow: 0 0 0 1px var(--ink); transform: rotate(45deg); }
+.wsLegendMilestone[data-done] { background: #059669; box-shadow: 0 0 0 1px #059669; }
+.wsTimeline { --label: 11rem; --gap: 1rem; position: relative; display: grid; gap: .35rem; margin-top: 1.4rem; }
+.wsTimelineScale, .wsTimelineRow { display: grid; grid-template-columns: var(--label) minmax(0, 1fr); align-items: center; gap: var(--gap); }
+.wsTimelineTrack { display: grid; grid-template-columns: repeat(var(--days), minmax(0, 1fr)); align-items: center; }
+.wsTimelineScale .wsTimelineTrack { height: 1.4rem; border-bottom: 1px solid var(--line); }
+.wsTimelineTick { grid-row: 1; padding-left: .3rem; overflow: visible; border-left: 1px solid var(--line-strong); color: var(--muted); font-size: .7rem; font-weight: 700; white-space: nowrap; }
+.wsTimelineRows { display: grid; gap: .3rem; margin: 0; padding: 0; list-style: none; }
+.wsTimelineRow { min-height: 3rem; padding: .3rem 0; border-bottom: 1px dashed #edf2f8; }
+.wsTimelineLabel { display: grid; min-width: 0; gap: .1rem; }
+.wsTimelineLabel strong { overflow: hidden; color: var(--ink); font-size: .88rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.wsTimelineLabel small { color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
+.wsTimelineRow .wsTimelineTrack { grid-template-rows: .9rem .45rem; row-gap: .2rem; }
+.wsTimelineBar { grid-row: 1; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--method-accent), color-mix(in srgb, var(--method-accent) 75%, #fff)); box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--method-accent) 70%, transparent); }
+.wsTimelineBaseline { grid-row: 2; height: 100%; border: 1.5px dashed color-mix(in srgb, var(--method-accent) 55%, #94a3b8); border-radius: 999px; background: color-mix(in srgb, var(--method-accent) 10%, #fff); }
+.wsTimelineMilestone { z-index: 1; grid-row: 1; justify-self: end; width: .8rem; height: .8rem; border: 2px solid #fff; background: var(--ink); box-shadow: 0 0 0 1px var(--ink), 0 3px 8px rgba(15, 23, 42, .25); transform: translateX(50%) rotate(45deg); }
+.wsTimelineMilestone[data-done] { background: #059669; box-shadow: 0 0 0 1px #059669; }
+.wsTimelineToday { position: absolute; top: 0; bottom: 0; left: calc(var(--label) + var(--gap) + (100% - var(--label) - var(--gap)) * var(--today)); width: 0; border-left: 2px solid #dc2626; pointer-events: none; }
+.wsTimelineToday span { position: absolute; top: -.2rem; left: 0; padding: .05rem .35rem; border-radius: .3rem; color: #fff; background: #dc2626; font-size: .62rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; transform: translateX(-50%); }
+.wsMilestonesTitle { margin-top: 1.5rem; color: var(--ink); font-size: .95rem; font-weight: 650; letter-spacing: -.02em; }
+.wsMilestoneList { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); gap: .5rem; margin: .7rem 0 0; padding: 0; list-style: none; }
+.wsMilestoneList li { display: flex; align-items: center; gap: .7rem; padding: .6rem .8rem; border: 1px solid #edf2f8; border-radius: .65rem; background: #fbfcfe; }
+.wsMilestoneName { display: grid; min-width: 0; flex: 1; color: var(--ink); font-size: .85rem; font-weight: 650; }
+.wsMilestoneName small, .wsMilestoneDue small { color: var(--muted); font-size: .72rem; font-weight: 600; }
+.wsMilestoneDue { display: grid; justify-items: end; color: var(--ink-secondary); font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Project settings dialog */
+.wsSettingsForm { display: grid; gap: 1rem; }
+.wsSettingsDates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem .9rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+.wsSettingsDates legend { margin-bottom: .45rem; padding: 0; color: var(--ink); font-size: .84rem; font-weight: 650; }
+.wsSettingsDates .wsFieldError, .wsSettingsDates .wsFieldHint { grid-column: 1 / -1; }
+.wsConflict { padding: .75rem .9rem; border: 1px solid #fde68a; border-radius: .65rem; color: #854d0e; background: #fffbeb; font-size: .86rem; font-weight: 600; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .wsProjectGridLayout { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .wsProjectHero { grid-template-columns: minmax(0, 1fr); }
+  .wsProjectSettingsButton { width: 100%; }
+  .wsProjectFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wsProjectFacts > div:nth-child(3) { border-left: 0; }
+  .wsProjectFacts > div:nth-child(n + 3) { border-top: 1px solid #edf2f8; }
+  .wsPracticeList { grid-template-columns: minmax(0, 1fr); }
+  .wsTimeline { --label: 0px; --gap: 0px; }
+  .wsTimelineScale, .wsTimelineRow { grid-template-columns: minmax(0, 1fr); }
+  .wsTimelineScale > span:first-child { display: none; }
+  .wsTimelineRow { gap: .4rem; }
+  .wsSettingsDates { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wsProjectCard, .wsMethodLink { transition: none; }
+  .wsProjectCard:hover, .wsMethodLink:hover { transform: none; }
 }

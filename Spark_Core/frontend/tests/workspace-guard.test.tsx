@@ -166,6 +166,7 @@ describe("workspace home", () => {
     mockApi({
       "GET /api/v1/workspaces/by-slug/northstar-labs": json(workspace),
       "GET /api/v1/workspaces/w1/invitations?status=pending": json({ items: [{ id: "i1" }, { id: "i2" }] }),
+      "GET /api/v1/workspaces/w1/projects": json({ items: [] }),
     });
     render(<WorkspaceLayout><WorkspaceHomePage /></WorkspaceLayout>);
     expect(await screen.findByRole("heading", { level: 1, name: "Northstar Labs" })).toBeInTheDocument();

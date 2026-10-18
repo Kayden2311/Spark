@@ -37,14 +37,16 @@ Filters at step 2: keyword, topic, location, and startup stage. The eventual API
 | Step | Route | Goal | Primary action | Mockup state |
 | --- | --- | --- | --- | --- |
 | 1 | `/signup` | Create an account | Create account | Implemented |
-| 2 | `/onboarding` | Name the first workspace and pick its address (`spark.app/w/{slug}`) | Create workspace | Implemented |
-| 3 | `/w/[slug]` | Workspace home: members, pending invitations (owners and admins), your role, the projects placeholder | Invite teammates | Implemented |
-| 4 | `/w/[slug]/members` | See who belongs, with roles and join dates. Owners change roles; owners and admins remove members, invite by email and resend or revoke pending invitations; everyone can leave. The last owner cannot be demoted or removed ("A workspace needs at least one owner.") | Invite people | Implemented |
-| 5 | `/schedule` | Coordinate member sessions and delivery dates | New event | Existing mockup |
-| 6 | `/notifications` | Review relevant activity | Mark all as read | Existing mockup |
-| 7 | `/billing` | Review workspace plan usage | Upgrade plan | Existing mockup |
+| 2 | `/onboarding` | Name the first workspace and pick its address (`spark.app/w/{slug}`) | Create workspace; continues to the methodology picker | Implemented |
+| 3 | `/w/[slug]/projects/new?first=1` | "Your first project": pick Scrum, Kanban or Waterfall, then name the project (key derived live), choose a lead and sprint length (Scrum) or dates and phases (Waterfall). Plain members see "Only owners and admins can create projects" | Create project (or "Skip for now" to the workspace home) | Implemented |
+| 4 | `/w/[slug]/p/[key]` | Project overview: key, methodology, lead and dates; board columns with WIP limits ("The board arrives in the next update"); sprint length (Scrum), WIP summary (Kanban) or phase timeline with baseline and milestones (Waterfall); the methodology's practices. Owners, admins and the project lead open Settings; a stale save shows "Updated by a teammate — review the latest values and save again." | Settings | Implemented |
+| 5 | `/w/[slug]` | Workspace home: members, pending invitations (owners and admins), your role and the project cards (key, methodology, lead, progress); without projects, the three methodology tiles link to the picker | New project (owners and admins), Invite teammates | Implemented |
+| 6 | `/w/[slug]/members` | See who belongs, with roles and join dates. Owners change roles; owners and admins remove members, invite by email and resend or revoke pending invitations; everyone can leave. The last owner cannot be demoted or removed ("A workspace needs at least one owner.") | Invite people | Implemented |
+| 7 | `/schedule` | Coordinate member sessions and delivery dates | New event | Existing mockup |
+| 8 | `/notifications` | Review relevant activity | Mark all as read | Existing mockup |
+| 9 | `/billing` | Review workspace plan usage | Upgrade plan | Existing mockup |
 
-`/workspace` opens the last workspace the person used (or the first one), and sends people without a workspace to `/onboarding`. The workspace switcher in the sidebar lists every membership and offers "Create workspace".
+`/workspace` opens the last workspace the person used (or the first one), and sends people without a workspace to `/onboarding`. The workspace switcher in the sidebar lists every membership and offers "Create workspace". Inside a workspace the sidebar also lists up to 8 projects with a methodology-colored dot, plus "New project" for owners and admins.
 
 ### Invitation journey
 

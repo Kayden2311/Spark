@@ -91,7 +91,7 @@ describe("new project page", () => {
   it("shows the picker first and reveals the form after a choice", async () => {
     mockApi(routes());
     const group = await renderPage();
-    expect(screen.getByText("New project")).toBeInTheDocument();
+    expect(screen.getByText("New project", { selector: ".sparkKicker" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "How does your team work?" })).toBeInTheDocument();
     expect(within(group).getAllByRole("radio")).toHaveLength(3);
     expect(screen.queryByLabelText("Project name")).not.toBeInTheDocument();
