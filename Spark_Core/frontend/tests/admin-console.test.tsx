@@ -329,7 +329,7 @@ describe("console v2", () => {
     render(<AdminLayout><CampaignsAdminPage /></AdminLayout>);
     const pending = await screen.findByRole("region", { name: "Pending review" });
     expect(within(pending).getByText("Launch week")).toBeInTheDocument();
-    expect(within(pending).getByText("Waiting 4 days")).toBeInTheDocument();
+    expect(within(pending).getByText("4d")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Approved" })).getByText("Demo day")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Rejected" })).getByText("Crypto")).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();

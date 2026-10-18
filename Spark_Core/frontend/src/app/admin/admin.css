@@ -298,6 +298,19 @@
 .admPerson { display: flex; align-items: center; gap: 12px; min-width: 220px; color: inherit; text-decoration: none; }
 .admPerson .admCellSub { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admPerson:hover .admCellTitle { color: var(--adm-blue-dark); }
+
+/* HR-style directory: a face and a name over a row of columns */
+.admPersonGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+.admPersonCard { position: relative; display: grid; justify-items: center; gap: 10px; padding: 26px 18px 16px; border: 1px solid var(--adm-line); border-radius: var(--adm-radius); text-align: center; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); transition: box-shadow .15s ease, border-color .15s ease; }
+.admPersonCard:hover { border-color: #c7d4ea; box-shadow: var(--adm-shadow-md); }
+.admPersonCardMenu { position: absolute; top: 10px; right: 10px; }
+.admPersonCardLink { display: grid; justify-items: center; gap: 6px; max-width: 100%; color: inherit; text-decoration: none; }
+.admPersonCardLink:hover .admPersonCardName { color: var(--adm-blue-dark); text-decoration: underline; }
+.admPersonCardName { color: var(--adm-ink); font-size: var(--adm-text-md); font-weight: 700; }
+.admPersonCardEmail { max-width: 100%; overflow: hidden; color: var(--adm-subtle); font-size: var(--adm-text-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.admPersonCardFoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; width: 100%; padding-top: 12px; border-top: 1px solid var(--adm-line-soft); }
+.admPersonCardRisk { width: 48px; }
+.admPersonCardMeta { width: 100%; color: var(--adm-faint); font-size: var(--adm-text-3xs); }
 .admCellLink { padding: 0; border: 0; color: var(--adm-ink); font: inherit; font-weight: 600; text-align: left; background: none; cursor: pointer; }
 .admCellLink:hover { color: var(--adm-blue-dark); text-decoration: underline; }
 .admReasonCell { max-width: 320px; color: var(--adm-muted); }
@@ -735,11 +748,13 @@
 .admBoardHead h2 { flex: 1; margin: 0; color: var(--adm-ink); font-size: var(--adm-text-sm); font-weight: 700; }
 .admBoardEmpty { margin: 0; padding: 18px 8px; border: 1px dashed var(--adm-line-strong); border-radius: 8px; color: var(--adm-subtle); font-size: var(--adm-text-xs); text-align: center; }
 .admBoardCards { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.admBoardCard { display: grid; width: 100%; justify-items: start; gap: 6px; padding: 12px 14px; border: 1px solid var(--adm-line); border-radius: 10px; color: inherit; font: inherit; text-align: left; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+.admBoardCard { display: grid; width: 100%; justify-items: start; gap: 8px; padding: 12px 14px; border: 1px solid var(--adm-line); border-radius: 10px; color: inherit; font: inherit; text-align: left; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
 .admBoardCard:hover { border-color: #c7d4ea; box-shadow: var(--adm-shadow-md); }
+.admBoardCardTop { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .admBoardCardTitle { color: var(--adm-ink); font-size: var(--adm-text-sm); font-weight: 600; }
-.admBoardCardText { display: -webkit-box; overflow: hidden; color: var(--adm-muted); font-size: var(--adm-text-xs); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.admBoardCardMeta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--adm-subtle); font-size: var(--adm-text-2xs); }
+.admBoardCardMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--adm-subtle); font-size: var(--adm-text-2xs); }
+.admBoardCardDate { font-variant-numeric: tabular-nums; }
+.admBoardCardOwner { display: flex; align-items: center; gap: 6px; padding-top: 2px; color: var(--adm-muted); font-size: var(--adm-text-2xs); font-weight: 500; }
 
 /* ---------- Audit: day groups ---------- */
 .admTable .admGroupRow th { position: sticky; top: 60px; z-index: 1; height: 34px; padding: 0 16px; border-bottom: 1px solid var(--adm-line); color: var(--adm-ink); font-size: var(--adm-text-xs); font-weight: 700; text-align: left; background: #f3f6fb; }

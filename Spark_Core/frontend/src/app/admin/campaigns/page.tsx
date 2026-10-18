@@ -7,7 +7,7 @@ import { BarList, InlineBar } from "../_components/charts";
 import { Drawer } from "../_components/drawer";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { BoardIcon, ClockIcon, ListIcon, MegaphoneIcon, ShieldIcon } from "../_components/icons";
-import { Badge, Card, CheckboxFacet, EmptyState, ErrorBanner, FilterTabs, KeyValue, KpiCards, LoadMore, NoAccess, PageHeader, Panel, Segmented, SkeletonRows } from "../_components/ui";
+import { Avatar, Badge, Card, CheckboxFacet, EmptyState, ErrorBanner, FilterTabs, KeyValue, KpiCards, LoadMore, NoAccess, PageHeader, Panel, Segmented, SkeletonRows, Tag } from "../_components/ui";
 import { adminApi, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
 import { REVIEW_STATUS, formatCount, formatDate, formatDateTime, formatPercent, formatRelative, humanize } from "../_lib/format";
@@ -111,15 +111,20 @@ function CampaignReview() {
                         return (
                           <li key={campaign.id}>
                             <button className="admBoardCard" onClick={() => setSelected(campaign)} type="button">
-                              <span className="admBoardCardTitle">{campaign.name}</span>
-                              <span className="admBoardCardText">{campaign.headline}</span>
-                              <span className="admBoardCardMeta">
-                                <span>{campaign.community.name}</span>
-                                <span>Starts {formatDate(campaign.requestedStartAt)}</span>
+                              <span className="admBoardCardTop">
+                                <span className="admBoardCardTitle">{campaign.name}</span>
+                                {column === "pending" && (
+                                  <Badge dot={false} tone={waiting >= 3 ? "red" : waiting >= 1 ? "amber" : "neutral"}>{waiting === 0 ? "Today" : `${waiting}d`}</Badge>
+                                )}
                               </span>
-                              {column === "pending" && (
-                                <Badge tone={waiting >= 3 ? "red" : waiting >= 1 ? "amber" : "neutral"}>{waiting === 0 ? "Submitted today" : `Waiting ${waiting} ${waiting === 1 ? "day" : "days"}`}</Badge>
-                              )}
+                              <span className="admBoardCardMeta">
+                                <Tag>{campaign.community.name}</Tag>
+                                <span className="admBoardCardDate">{formatDate(campaign.requestedStartAt)}</span>
+                              </span>
+                              <span className="admBoardCardOwner">
+                                <Avatar name={campaign.submitter.displayName} size="sm" />
+                                {campaign.submitter.displayName}
+                              </span>
                             </button>
                           </li>
                         );
@@ -181,15 +186,12 @@ function CampaignReview() {
                 return (
                 <tr key={campaign.id}>
                   <td data-label="Campaign">
-                    <div className="admCellMain">
-                      <button className="admCellLink" onClick={() => setSelected(campaign)} type="button">{campaign.name}</button>
-                      <span className="admCellSub admClamp">{campaign.headline}</span>
-                    </div>
+                    <button className="admCellLink" onClick={() => setSelected(campaign)} type="button">{campaign.name}</button>
                   </td>
                   <td data-label="Community">
                     <div className="admCellMain">
-                      <span>{campaign.community.name}</span>
-                      <span className="admCellSub">by {campaign.submitter.displayName}</span>
+                      <Tag>{campaign.community.name}</Tag>
+                      <span className="admBoardCardOwner"><Avatar name={campaign.submitter.displayName} size="sm" />{campaign.submitter.displayName}</span>
                     </div>
                   </td>
                   <td data-label="Placement">{campaign.placement ?? <span className="admMutedCell">Not set</span>}</td>

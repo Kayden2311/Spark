@@ -7,7 +7,7 @@ import { Suspense, useState } from "react";
 import { useAuth } from "../../auth-context";
 import { useAdmin } from "../_components/admin-context";
 import { ChartCard, ChartLegend, DonutChart, InlineBar } from "../_components/charts";
-import { AlertIcon, SearchIcon, SignupIcon, UserIcon } from "../_components/icons";
+import { AlertIcon, BoardIcon, ListIcon, SearchIcon, SignupIcon, UserIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RoleSummary, RowMenu, Segmented, SkeletonRows } from "../_components/ui";
 import { query } from "../_lib/api";
@@ -59,6 +59,49 @@ function RoleMix() {
   );
 }
 
+/** One person, HR-directory style: a face, a name, their roles and status — the facts you'd scan a
+ * roster for, not a row of columns. The overflow menu carries the same actions the table row did. */
+function PersonCard({ user, self, canChange, onViewDetails, onChangeStatus }: {
+  user: UserSummary;
+  self: boolean;
+  canChange: boolean;
+  onViewDetails: () => void;
+  onChangeStatus: () => void;
+}) {
+  const risk = user.risk;
+  const riskTotal = risk ? risk.reportsAgainst + risk.hiddenPosts + risk.hiddenComments : 0;
+  return (
+    <li className="admPersonCard">
+      <div className="admPersonCardMenu">
+        <RowMenu
+          actions={[
+            { label: "View details", onSelect: onViewDetails },
+            ...(canChange
+              ? [{ label: user.status === "active" ? "Suspend user" : "Reactivate user", tone: user.status === "active" ? ("danger" as const) : undefined, separated: true, onSelect: onChangeStatus }]
+              : []),
+          ]}
+          label={`Actions for ${user.displayName}`}
+        />
+      </div>
+      <Link className="admPersonCardLink" href={`/admin/users/${user.id}`}>
+        <Avatar name={user.displayName} size="lg" />
+        <span className="admPersonCardName">{user.displayName}{self && <span className="admYou">You</span>}</span>
+        <span className="admPersonCardEmail">{user.email ?? "No email"}</span>
+      </Link>
+      <RoleSummary roles={user.platformRoles} />
+      <div className="admPersonCardFoot">
+        <Badge tone={USER_STATUS[user.status].tone}>{USER_STATUS[user.status].label}</Badge>
+        {riskTotal > 0 && (
+          <span className="admPersonCardRisk">
+            <InlineBar color={riskTotal > 3 ? "#ef4444" : "#f59e0b"} ratio={riskTotal / 6} title={`${risk!.reportsAgainst} ${risk!.reportsAgainst === 1 ? "report" : "reports"} · ${risk!.hiddenPosts + risk!.hiddenComments} hidden`} />
+          </span>
+        )}
+        <span className="admPersonCardMeta">{user.lastLoginAt ? `Active ${formatRelative(user.lastLoginAt)}` : "Never signed in"}</span>
+      </div>
+    </li>
+  );
+}
+
 function UsersList() {
   const { user: me } = useAuth();
   const router = useRouter();
@@ -67,6 +110,7 @@ function UsersList() {
   const [status, setStatus] = useQueryState<StatusFilter>("status", "all", STATUS_FILTERS);
   const [role, setRole] = useQueryState<"any" | PlatformRole>("role", "any", ROLE_FILTERS);
   const [view, setView] = useQueryState<"directory" | "roles">("view", "directory", ["directory", "roles"]);
+  const [layout, setLayout] = useQueryState<"cards" | "table">("layout", "cards", ["cards", "table"]);
   const [search, setSearch] = useState("");
   const settledSearch = useDebounced(search.trim());
   const list = usePagedList<UserSummary>(
@@ -94,9 +138,11 @@ function UsersList() {
       notify(next === "suspended" ? `${user.displayName} suspended and signed out.` : `${user.displayName} reactivated.`);
     }, list.reload));
 
+  const layoutSwitch = <Segmented label="Directory layout" onChange={setLayout} options={[{ value: "cards", label: "Cards", icon: <BoardIcon /> }, { value: "table", label: "Table", icon: <ListIcon /> }]} value={layout} />;
+
   return (
     <>
-      <PageHeader actions={viewSwitch} description="See how membership is growing, find any account, and act on risky ones." title="Users" />
+      <PageHeader actions={<>{viewSwitch}{layoutSwitch}</>} description="See how membership is growing, find any account, and act on risky ones." title="Users" />
 
       <KpiCards
         items={[
@@ -153,6 +199,19 @@ function UsersList() {
           <SkeletonRows />
         ) : list.items.length === 0 && !list.error ? (
           <EmptyState title="No users match">Try a different name, email, status or role.</EmptyState>
+        ) : layout === "cards" ? (
+          <ul className="admPersonGrid">
+            {list.items.map((user) => (
+              <PersonCard
+                canChange={user.id !== me?.id && canChangeStatus(roles, user)}
+                key={user.id}
+                onChangeStatus={() => changeStatus(user)}
+                onViewDetails={() => router.push(`/admin/users/${user.id}`)}
+                self={user.id === me?.id}
+                user={user}
+              />
+            ))}
+          </ul>
         ) : (
           <table className="admTable">
             <thead>
