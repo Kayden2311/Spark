@@ -130,6 +130,34 @@ async function rejectInside(sql: string, values: unknown[], code: string) {
   await owner.query("ROLLBACK TO SAVEPOINT probe");
 }
 const auditRows = async (resource: string) => (await owner.query(`SELECT action,actor_user_id,resource_type,metadata FROM ${table("audit_events")} WHERE resource_id=$1 ORDER BY created_at,id`, [resource])).rows;
+type StatusInput = { name: string; category: string; wipLimit: number | null };
+const status = (name: string, category: string, wipLimit: number | null = null): StatusInput => ({ name, category, wipLimit });
+const templateStatuses: Record<string, StatusInput[]> = {
+  scrum: [status("Backlog", "backlog"), status("To do", "todo"), status("In progress", "in_progress"), status("In review", "in_progress"), status("Done", "done")],
+  kanban: [status("Backlog", "backlog"), status("Ready", "todo", 8), status("In progress", "in_progress", 4), status("Review", "in_progress", 3), status("Done", "done")],
+  waterfall: [status("Not started", "todo"), status("In progress", "in_progress"), status("In review", "in_progress"), status("Done", "done")],
+};
+const waterfallPhases = [
+  { name: "Requirements", plannedStart: "2026-11-02", plannedEnd: "2026-11-09" },
+  { name: "Design", plannedStart: "2026-11-10", plannedEnd: "2026-11-17" },
+  { name: "Build", plannedStart: "2026-11-18", plannedEnd: "2026-11-27" },
+  { name: "Test", plannedStart: "2026-11-28", plannedEnd: "2026-12-04" },
+  { name: "Deploy", plannedStart: "2026-12-05", plannedEnd: "2026-12-11" },
+];
+type ProjectInput = { key: string; methodology: string; name?: string; description?: string | null; lead?: string | null; start?: string | null; target?: string | null; sprint?: number | null; statuses?: unknown; phases?: unknown };
+const createProjectCall = `SELECT * FROM "${namespace}".ws_create_project($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`;
+const projectArgs = (workspace: string, input: ProjectInput) => [workspace, input.key, input.name ?? "Project", input.description ?? null, input.methodology,
+  input.lead ?? null, input.start ?? null, input.target ?? null, input.sprint ?? null,
+  JSON.stringify(input.statuses === undefined ? templateStatuses[input.methodology] ?? templateStatuses.kanban : input.statuses),
+  JSON.stringify(input.phases ?? (input.methodology === "waterfall" ? waterfallPhases : []))];
+// Creates a project through the definer function as the given session (null: no session at all).
+async function createProject(who: Account | null, workspace: string, input: ProjectInput) {
+  return (await asSession(who?.token ?? null, createProjectCall, projectArgs(workspace, input))).rows[0] as { outcome: string; project_id: string | null; settings_version: number | null };
+}
+const waterfallInput = (key: string): ProjectInput => ({ key, methodology: "waterfall", start: "2026-11-02", target: "2026-12-11" });
+async function updateProject(who: Account, project: string, version: number, patch: unknown) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_update_project")}($1,$2,$3)`, [project, version, JSON.stringify(patch)])).rows[0] as { outcome: string; settings_version: number | null };
+}
 
 beforeAll(async () => {
   await owner.connect();
@@ -209,7 +237,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(18);
+    expect(result.rows[0].count).toBe(19);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -800,8 +828,9 @@ describe("Local PostgreSQL schema", () => {
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
       "staff_report_context", "staff_report_preview", "staff_report_stats", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
-      "staff_user_sessions", "ws_accept_invitation", "ws_create_invitation", "ws_create_workspace", "ws_invitation_preview", "ws_list_members",
-      "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role", "ws_update_workspace",
+      "staff_user_sessions", "ws_accept_invitation", "ws_create_invitation", "ws_create_project", "ws_create_workspace", "ws_invitation_preview",
+      "ws_list_members", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role", "ws_update_project",
+      "ws_update_workspace",
     ]);
   });
   it("protects admin-tier accounts, drops revoked roles at once and guards promotions of closed communities", async () => {
@@ -1618,5 +1647,154 @@ describe("Local PostgreSQL schema", () => {
       await rejectInside(`UPDATE ${sprints} SET goal='Stale' WHERE id=$1`, [sprint], "23514");
       await owner.query(`UPDATE ${sprints} SET goal='Ship',version=version+1 WHERE id=$1`, [sprint]);
     });
+  });
+  it("creates projects with their methodology structure", async () => {
+    const alice = await account("Project Creator");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    const statusesOf = async (project: string) => (await owner.query(`SELECT name,category,position::integer AS position,wip_limit FROM ${table("issue_statuses")} WHERE project_id=$1 ORDER BY position`, [project])).rows;
+    const projectRow = async (project: string) => (await owner.query(`SELECT tenant_id,key,name,description,methodology,lead_user_id,start_date::text AS start_date,target_date::text AS target_date,sprint_length_days,settings_version,baselined_at FROM ${table("projects")} WHERE id=$1`, [project])).rows[0];
+    const periodsOf = async (project: string) => (await owner.query(`SELECT methodology,ended_at,changed_by_user_id,reason FROM ${table("project_methodology_periods")} WHERE project_id=$1`, [project])).rows;
+    const phasesOf = async (project: string) => (await owner.query(`SELECT name,position,planned_start::text AS planned_start,planned_end::text AS planned_end,baseline_start::text AS baseline_start,baseline_end::text AS baseline_end,status FROM ${table("project_phases")} WHERE project_id=$1 ORDER BY position`, [project])).rows;
+
+    const scrum = await createProject(alice, workspace, { key: "SCRUM", name: "  Sprint team  ", description: "  Ships in sprints  ", methodology: "scrum", lead: alice.id, sprint: 14 });
+    expect(scrum).toEqual({ outcome: "ok", project_id: expect.any(String), settings_version: 1 });
+    await owner.query("SET ROLE spark_owner");
+    expect(await projectRow(scrum.project_id!)).toEqual({ tenant_id: workspace, key: "SCRUM", name: "Sprint team", description: "Ships in sprints", methodology: "scrum", lead_user_id: alice.id, start_date: null, target_date: null, sprint_length_days: 14, settings_version: 1, baselined_at: null });
+    expect((await owner.query(`SELECT name FROM ${table("boards")} WHERE project_id=$1`, [scrum.project_id])).rows).toEqual([{ name: "Sprint team" }]);
+    expect(await statusesOf(scrum.project_id!)).toEqual(templateStatuses.scrum.map((s, index) => ({ name: s.name, category: s.category, position: 1024 * (index + 1), wip_limit: null })));
+    expect(await phasesOf(scrum.project_id!)).toEqual([]);
+
+    const kanban = await createProject(alice, workspace, { key: "FLOW", methodology: "kanban" });
+    expect(kanban.outcome).toBe("ok");
+    await owner.query("SET ROLE spark_owner");
+    expect(await statusesOf(kanban.project_id!)).toEqual([
+      { name: "Backlog", category: "backlog", position: 1024, wip_limit: null }, { name: "Ready", category: "todo", position: 2048, wip_limit: 8 },
+      { name: "In progress", category: "in_progress", position: 3072, wip_limit: 4 }, { name: "Review", category: "in_progress", position: 4096, wip_limit: 3 },
+      { name: "Done", category: "done", position: 5120, wip_limit: null },
+    ]);
+    expect(await projectRow(kanban.project_id!)).toMatchObject({ methodology: "kanban", sprint_length_days: null, lead_user_id: null, description: null });
+
+    const waterfall = await createProject(alice, workspace, waterfallInput("PLAN"));
+    expect(waterfall.outcome).toBe("ok");
+    await owner.query("SET ROLE spark_owner");
+    const plan = await projectRow(waterfall.project_id!);
+    expect(plan).toMatchObject({ methodology: "waterfall", start_date: "2026-11-02", target_date: "2026-12-11", sprint_length_days: null });
+    expect(plan.baselined_at).toBeInstanceOf(Date);
+    expect((await statusesOf(waterfall.project_id!)).map((row) => row.name)).toEqual(["Not started", "In progress", "In review", "Done"]);
+    expect(await phasesOf(waterfall.project_id!)).toEqual(waterfallPhases.map((phase, index) => ({ name: phase.name, position: index + 1, planned_start: phase.plannedStart, planned_end: phase.plannedEnd, baseline_start: phase.plannedStart, baseline_end: phase.plannedEnd, status: "planned" })));
+    const milestones = await owner.query(`SELECT m.name,ph.name AS phase,m.due_date::text AS due_date,m.baseline_due_date::text AS baseline_due_date FROM ${table("project_milestones")} m JOIN ${table("project_phases")} ph ON ph.id=m.phase_id WHERE m.project_id=$1 ORDER BY ph.position`, [waterfall.project_id]);
+    expect(milestones.rows).toEqual(waterfallPhases.map((phase) => ({ name: `${phase.name} sign-off`, phase: phase.name, due_date: phase.plannedEnd, baseline_due_date: phase.plannedEnd })));
+    expect(milestones.rows.map((row) => row.name)).toEqual(["Requirements sign-off", "Design sign-off", "Build sign-off", "Test sign-off", "Deploy sign-off"]);
+
+    for (const [created, methodology, key] of [[scrum, "scrum", "SCRUM"], [kanban, "kanban", "FLOW"], [waterfall, "waterfall", "PLAN"]] as const) {
+      expect(await periodsOf(created.project_id!)).toEqual([{ methodology, ended_at: null, changed_by_user_id: alice.id, reason: "Project created" }]);
+      expect(await auditRows(created.project_id!)).toEqual([{ action: "project.created", actor_user_id: alice.id, resource_type: "project", metadata: { methodology, key } }]);
+    }
+    expect((await asSession(alice.token, `SELECT key FROM ${table("projects")} WHERE tenant_id=$1 ORDER BY key`, [workspace])).rows.map((row) => row.key)).toEqual(["FLOW", "PLAN", "SCRUM"]);
+  });
+  it("guards project creation", async () => {
+    const alice = await account("Guard Owner"), bob = await account("Guard Member"), carol = await account("Guard Stranger");
+    const workspace = (await createWorkspace(alice)).workspace_id!, other = (await createWorkspace(carol)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    const refused = (outcome: string) => ({ outcome, project_id: null, settings_version: null });
+    expect(await createProject(bob, workspace, { key: "MEMBER", methodology: "kanban" })).toEqual(refused("forbidden"));
+    expect(await createProject(carol, workspace, { key: "STRANGE", methodology: "kanban" })).toEqual(refused("not_found"));
+    expect(await createProject(alice, randomUUID(), { key: "MISSING", methodology: "kanban" })).toEqual(refused("not_found"));
+    expect((await createProject(alice, workspace, { key: "CORE", methodology: "kanban" })).outcome).toBe("ok");
+    expect(await createProject(alice, workspace, { key: "CORE", methodology: "scrum", sprint: 14 })).toEqual(refused("key_taken"));
+    expect((await createProject(carol, other, { key: "CORE", methodology: "kanban" })).outcome).toBe("ok");
+    expect(await createProject(alice, workspace, { key: "LEAD", methodology: "kanban", lead: carol.id })).toEqual(refused("invalid_lead"));
+    expect(await createProject(alice, workspace, { key: "LEAD", methodology: "kanban", lead: randomUUID() })).toEqual(refused("invalid_lead"));
+    expect((await createProject(alice, workspace, { key: "LEAD", methodology: "kanban", lead: bob.id })).outcome).toBe("ok");
+
+    const rejects = async (input: ProjectInput, message: string) =>
+      expect(createProject(alice, workspace, input)).rejects.toMatchObject({ code: "22023", message });
+    for (const key of ["ab", "A", "1ABC", "ABCDEFGHIJK", "AB-C", " ABC"]) await rejects({ key, methodology: "kanban" }, "Invalid project key");
+    for (const name of ["   ", "x".repeat(81)]) await rejects({ key: "NAME", name, methodology: "kanban" }, "Invalid project name");
+    await rejects({ key: "DESC", description: "x".repeat(2001), methodology: "kanban" }, "Invalid project description");
+    await rejects({ key: "AGILE", methodology: "agile" }, "Invalid methodology");
+    await rejects({ ...waterfallInput("NODATE"), start: null, target: null }, "Invalid project dates");
+    await rejects({ ...waterfallInput("NOEND"), target: null }, "Invalid project dates");
+    await rejects({ key: "BACK", methodology: "kanban", start: "2026-12-01", target: "2026-11-01" }, "Invalid project dates");
+    await rejects({ key: "SPRINT", methodology: "scrum", sprint: 6 }, "Invalid sprint length");
+    await rejects({ key: "SPRINT", methodology: "scrum", sprint: 29 }, "Invalid sprint length");
+    await rejects({ key: "SPRINT", methodology: "kanban", sprint: 14 }, "Invalid sprint length");
+    const done = status("Done", "done"), todo = status("To do", "todo");
+    for (const statuses of [
+      [todo, status("Doing", "in_progress")], [done, status("Shipped", "done")], [done], Array.from({ length: 13 }, (_, i) => status(`S${i}`, i ? "todo" : "done")),
+      [todo, status(" to DO ", "in_progress"), done], [todo, status("   ", "todo"), done], [todo, status("x".repeat(41), "todo"), done],
+      [todo, status("Odd", "blocked"), done], [todo, status("Zero", "todo", 0), done], [todo, status("Many", "todo", 100), done], [todo, status("Half", "todo", 1.5), done],
+      [todo, { ...done, extra: true }], [todo, "Done"], { todo, done }, null,
+    ]) await rejects({ key: "STATUS", methodology: "kanban", statuses }, "Invalid project statuses");
+    const phase = (name: string, plannedStart: string, plannedEnd: string) => ({ name, plannedStart, plannedEnd });
+    await rejects({ key: "PHASE", methodology: "kanban", phases: [phase("Build", "2026-11-02", "2026-11-09")] }, "Invalid project phases");
+    for (const phases of [
+      [], Array.from({ length: 13 }, (_, i) => phase(`P${i}`, `2026-11-${String(i + 2).padStart(2, "0")}`, `2026-11-${String(i + 2).padStart(2, "0")}`)),
+      [phase("Early", "2026-11-01", "2026-11-09")], [phase("Late", "2026-12-01", "2026-12-12")], [phase("Backwards", "2026-11-09", "2026-11-02")],
+      [phase("First", "2026-11-02", "2026-11-10"), phase("Overlap", "2026-11-10", "2026-11-20")],
+      [phase("Second", "2026-11-11", "2026-11-20"), phase("First", "2026-11-02", "2026-11-10")],
+      [phase("   ", "2026-11-02", "2026-11-09")], [phase("x".repeat(61), "2026-11-02", "2026-11-09")],
+      [phase("Bad date", "2026-11-31", "2026-12-01")], [phase("Words", "today", "2026-12-01")], [{ ...phase("Extra", "2026-11-02", "2026-11-09"), owner: "me" }],
+    ]) await rejects({ ...waterfallInput("PHASE"), phases }, "Invalid project phases");
+    await expect(createProject(null, workspace, { key: "ANON", methodology: "kanban" })).rejects.toMatchObject({ code: "28000" });
+    await expect(asSession(newTokenHash(), createProjectCall, projectArgs(workspace, { key: "ANON", methodology: "kanban" }))).rejects.toMatchObject({ code: "28000" });
+
+    // The cap counts the workspace's non-archived projects only.
+    const busy = (await createWorkspace(alice)).workspace_id!;
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("projects")} (tenant_id,key,name) SELECT $1,'BULK'||g,'Bulk' FROM generate_series(1,50) g`, [busy]);
+    expect(await createProject(alice, busy, { key: "EXTRA", methodology: "kanban" })).toEqual(refused("too_many_projects"));
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE tenant_id=$1 AND key='BULK1'`, [busy]);
+    expect((await createProject(alice, busy, { key: "EXTRA", methodology: "kanban" })).outcome).toBe("ok");
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT count(*)::integer AS count FROM ${table("projects")} WHERE tenant_id=$1 AND key IN ('MEMBER','STRANGE','NAME','STATUS','PHASE','ANON')`, [workspace])).rows[0].count).toBe(0);
+  });
+  it("updates project settings with optimistic version", async () => {
+    const alice = await account("Settings Owner"), bob = await account("Settings Lead"), carol = await account("Settings Member"), dave = await account("Settings Stranger");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const project = (await createProject(alice, workspace, { key: "TEAM", methodology: "scrum", sprint: 14, lead: bob.id })).project_id!;
+    expect(await updateProject(bob, project, 1, { name: "  Lead rename  " })).toEqual({ outcome: "ok", settings_version: 2 });
+    expect(await updateProject(bob, project, 1, { name: "Stale" })).toEqual({ outcome: "version_mismatch", settings_version: 2 });
+    expect(await updateProject(carol, project, 2, { name: "Member rename" })).toEqual({ outcome: "forbidden", settings_version: null });
+    expect(await updateProject(dave, project, 2, { name: "Stranger rename" })).toEqual({ outcome: "not_found", settings_version: null });
+    expect(await updateProject(alice, randomUUID(), 1, { name: "Missing" })).toEqual({ outcome: "not_found", settings_version: null });
+    expect(await updateProject(alice, project, 2, { leadUserId: dave.id })).toEqual({ outcome: "invalid_lead", settings_version: null });
+    expect(await updateProject(alice, project, 2, { leadUserId: "not-a-uuid" })).toEqual({ outcome: "invalid_lead", settings_version: null });
+    expect(await updateProject(alice, project, 2, { description: "  Ships weekly  ", leadUserId: carol.id, sprintLengthDays: 21, startDate: "2026-11-02", targetDate: null })).toEqual({ outcome: "ok", settings_version: 3 });
+    // bob is no longer the lead.
+    expect(await updateProject(bob, project, 3, { name: "Former lead" })).toEqual({ outcome: "forbidden", settings_version: null });
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT name,description,lead_user_id,sprint_length_days,start_date::text AS start_date,target_date,settings_version FROM ${table("projects")} WHERE id=$1`, [project])).rows[0])
+      .toEqual({ name: "Lead rename", description: "Ships weekly", lead_user_id: carol.id, sprint_length_days: 21, start_date: "2026-11-02", target_date: null, settings_version: 3 });
+    expect((await auditRows(project)).filter((row) => row.action === "project.updated")).toEqual([
+      { action: "project.updated", actor_user_id: bob.id, resource_type: "project", metadata: { changed: ["name"] } },
+      { action: "project.updated", actor_user_id: alice.id, resource_type: "project", metadata: { changed: ["description", "leadUserId", "sprintLengthDays", "startDate", "targetDate"] } },
+    ]);
+    const rejects = async (target: string, version: number, patch: unknown, message: string) =>
+      expect(updateProject(alice, target, version, patch)).rejects.toMatchObject({ code: "22023", message });
+    await rejects(project, 3, { methodology: "kanban" }, "Invalid project name");
+    await rejects(project, 3, ["name"], "Invalid project name");
+    await rejects(project, 3, { name: " " }, "Invalid project name");
+    await rejects(project, 3, { name: 42 }, "Invalid project name");
+    await rejects(project, 3, { description: "x".repeat(2001) }, "Invalid project description");
+    await rejects(project, 3, { startDate: "2026-02-30" }, "Invalid project dates");
+    await rejects(project, 3, { targetDate: "2026-11-01" }, "Invalid project dates");
+    await rejects(project, 3, { sprintLengthDays: 30 }, "Invalid sprint length");
+    await rejects(project, 3, { sprintLengthDays: null }, "Invalid sprint length");
+
+    const plan = (await createProject(alice, workspace, waterfallInput("WATER"))).project_id!;
+    await rejects(plan, 1, { targetDate: "2026-12-10" }, "Invalid project dates");
+    await rejects(plan, 1, { startDate: "2026-11-03" }, "Invalid project dates");
+    await rejects(plan, 1, { targetDate: null }, "Invalid project dates");
+    await rejects(plan, 1, { sprintLengthDays: 14 }, "Invalid sprint length");
+    expect(await updateProject(alice, plan, 1, { startDate: "2026-11-01", targetDate: "2026-12-20" })).toEqual({ outcome: "ok", settings_version: 2 });
+
+    // Issue number allocation never touches the settings version.
+    await owner.query("SET ROLE spark_owner");
+    for (let index = 0; index < 5; index++) await owner.query(`UPDATE ${table("projects")} SET next_issue_number=next_issue_number+1 WHERE id=$1`, [plan]);
+    expect((await owner.query(`SELECT settings_version,next_issue_number::integer AS next FROM ${table("projects")} WHERE id=$1`, [plan])).rows[0]).toEqual({ settings_version: 2, next: 6 });
   });
 });
