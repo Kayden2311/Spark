@@ -99,6 +99,13 @@
       "when": 1792270000000,
       "tag": "0013_report_preview",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792280000000,
+      "tag": "0014_workspace_session_rls",
+      "breakpoints": true
     }
   ]
 }

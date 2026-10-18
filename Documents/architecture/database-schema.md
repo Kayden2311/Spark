@@ -1,6 +1,6 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0013_report_preview.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0014_workspace_session_rls.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
 
@@ -11,7 +11,7 @@ Migrations `0006_scoped_runtime_access.sql`, `0007_governance_corrections.sql`, 
 - `spark_app` has no INSERT, UPDATE, or DELETE grant on any table, and no direct read of credentials, sessions, tokens, reports, or platform roles.
 - `spark_auth` is a login-only role created by `pnpm db:bootstrap:local`. It has no table privileges and is the only role that can execute `auth_register_password`, `auth_password_login`, and `auth_start_session`. Only the auth process connects with it (see "Process boundary").
 - `auth_session_principal` and `auth_revoke_session` are executable by both roles because they require an existing session token hash.
-- Registration is one atomic transaction. `auth_start_session` creates the session and returns its principal in the same call, so no unclaimed session rows remain.
+- Registration is one atomic transaction that creates the user, primary email, credential and session only. Since `0014` it no longer creates a default workspace; `auth_register_password` keeps its return columns and returns NULL for `workspace_id`, `workspace_name` and `workspace_slug`. `auth_start_session` creates the session and returns its principal in the same call, so no unclaimed session rows remain.
 - Platform governance runs inside a transaction that sets `spark.session_token_hash`. Staff read policies and `staff_*` functions resolve the actor from a live, unexpired session of an active user, never from a user id argument. A missing session raises `28000` (HTTP 401); a missing role raises `42501` (HTTP 403).
 - Moderation actions may be recorded by community owners and moderators or by active platform content moderators.
 - Suspending a super admin and revoking the `super_admin` role take the same row locks, so concurrent requests cannot leave the platform without an active super admin.
@@ -25,6 +25,18 @@ Migrations `0006_scoped_runtime_access.sql`, `0007_governance_corrections.sql`, 
   - The API waits up to 15 s for the auth process. A sign-up that commits after that is reported as `503 auth_unavailable`; retrying returns `409 email_already_exists` and the user signs in normally.
 - Accepted low-severity edge cases: lock contention beyond `lock_timeout` (2 s) on governance writes surfaces as HTTP 500; a super-admin grant committed between the status check and the update of a concurrent suspension is not covered by the row lock (it requires three simultaneous administrative operations).
 - Open product decision: sign-up returns `409 email_already_exists`, which reveals registered emails. A neutral response needs an email-delivery flow first.
+
+## Session-bound workspace RLS (`0014_workspace_session_rls.sql`)
+
+Workspace row access is bound to the live session, not to the transaction-local settings `spark.user_id` and `spark.tenant_id`, which any runtime caller could set.
+
+- `spark.session_workspace_ids(p_roles text[] DEFAULT ARRAY['owner','admin','member']) RETURNS uuid[]` (STABLE SECURITY DEFINER, executable by `spark_app`) returns the active workspaces where `spark.session_actor()` holds an active membership with one of `p_roles`. Without a live session it returns an empty array.
+- Policies `workspace_read` on `workspaces`, `workspace_members_read` on `workspace_memberships`, and `workspace_read` on the 16 tenant tables of `0002` (startup profiles, teams, projects, boards, issues and their children, calendar events and attendees) compare the row's workspace id with `session_workspace_ids()`, evaluated once per statement. A missing, revoked or expired session, a suspended or deleted user, a left or suspended membership, and an archived workspace all see no rows.
+- `spark.is_workspace_member(target, allowed_roles)` keeps its signature and now delegates to `session_workspace_ids`.
+- `users` policy `self_and_coworker_read` (replacing `own_user_read`) shows the session actor and users with an active membership in one of the actor's active workspaces, through `spark.is_coworker(uuid)`. Sharing only a community does not make users coworkers. The platform `staff_read` policy is unchanged.
+- `spark.require_session_actor()` returns the actor or raises `Live session required` (`28000`). It is internal to workspace write functions and not executable by `spark_app`.
+- `workspaces.version` (integer, default 1) is maintained by `maintain_record`: every update must advance it by exactly one.
+- Not yet migrated: community helpers (`is_community_member`, `can_read_community`, `can_read_post`) and `withDatabaseContext` still use `spark.user_id`/`spark.tenant_id`. They move to the session in a later phase.
 
 ## Platform governance and audit (`0009_platform_governance.sql` to `0011_campaign_review_lock.sql`)
 
@@ -230,7 +242,7 @@ Each notification read/delivery, including unread counts, checks recipient and c
 
 Enable and force RLS when introducing tenant/user-private tables. Ordinary runtime role is not table owner, superuser or BYPASSRLS. Separate migration owner and narrow authentication/billing/worker adapters. Do not grant product runtime broad worker privileges.
 
-Backend derives actor from active opaque session and sets transaction-local user/tenant context on the same connection/transaction as queries. Missing context denies access; never trust actor/tenant headers as authorization. Custom settings assume trusted backend SQL and are not protection against arbitrary runtime SQL execution.
+Backend derives actor from active opaque session and sets the transaction-local session token hash (`spark.session_token_hash`) on the same connection/transaction as queries; workspace policies resolve the actor and its workspaces from that session (see `0014`). Missing context denies access; never trust actor/tenant headers as authorization. Custom settings assume trusted backend SQL and are not protection against arbitrary runtime SQL execution.
 
 Policies use both USING and WITH CHECK with operation-specific permissions:
 

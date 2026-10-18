@@ -20,7 +20,8 @@ const statusA = randomUUID(), statusB = randomUUID(), statusOther = randomUUID()
 const communityA = randomUUID(), communityB = randomUUID(), publicCommunity = randomUUID(), publicPost = randomUUID(), privatePost = randomUUID();
 const table = (name: string) => `"${namespace}"."${name}"`;
 const actorA = { userId: userA, tenantId: tenantA };
-const actorB = { userId: userB, tenantId: tenantB };
+// Live sessions for the two workspace owners; workspace RLS is bound to these, not to spark.user_id/tenant_id.
+const sessionA = randomBytes(32), sessionB = randomBytes(32);
 
 async function rollback(work: () => Promise<void>) {
   await owner.query("BEGIN");
@@ -83,6 +84,7 @@ beforeAll(async () => {
     }
     await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id) VALUES ($1,$2,$3)`, [tenantA,communityA,visitor]);
     await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body,visibility) VALUES ($1,$2,$3,$4,'Private','Private body','members'),($5,$6,$7,$8,'Public','Public body','public')`, [privatePost,tenantA,communityA,userA,publicPost,tenantB,publicCommunity,userB]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$5),($3,$4,'password',$5)`, [userA,sessionA,userB,sessionB,new Date(Date.now()+60*60*1000)]);
     await owner.query("COMMIT");
   } catch (error) { await owner.query("ROLLBACK"); throw error; }
 });
@@ -118,7 +120,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(14);
+    expect(result.rows[0].count).toBe(15);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -265,15 +267,88 @@ describe("Local PostgreSQL schema", () => {
     });
   });
   it("isolates tenants and clears pooled context after commit and rollback", async () => {
-    const first = await withDatabaseContext(runtime,actorA,client=>client.query(`SELECT id FROM ${table("projects")} ORDER BY id`));
+    const first = await asSession(sessionA, `SELECT id FROM ${table("projects")}`);
     expect(first.rows.map(row=>row.id).sort()).toEqual([projectA,projectOther].sort());
-    const second = await withDatabaseContext(runtime,actorB,client=>client.query(`SELECT id FROM ${table("projects")}`));
+    const second = await asSession(sessionB, `SELECT id FROM ${table("projects")}`);
     expect(second.rows).toEqual([{id:projectB}]);
     expect((await runtime.query(`SELECT * FROM ${table("projects")}`)).rows).toEqual([]);
-    await expect(withDatabaseContext(runtime,actorA,async client=>{ await client.query("SELECT 1/0"); })).rejects.toMatchObject({code:"22012"});
+    await expect(asSession(sessionA, "SELECT 1/0")).rejects.toMatchObject({code:"22012"});
     expect((await runtime.query(`SELECT * FROM ${table("projects")}`)).rows).toEqual([]);
-    const spoofed = await withDatabaseContext(runtime,{userId:userA,tenantId:tenantB},client=>client.query(`SELECT * FROM ${table("projects")}`));
-    expect(spoofed.rows).toEqual([]);
+    expect((await asSession(newTokenHash(), `SELECT id FROM ${table("projects")}`)).rows).toEqual([]);
+  });
+  it("ignores spoofed tenant settings", async () => {
+    const client = await runtime.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('spark.user_id',$1,true), set_config('spark.tenant_id',$2,true)", [userA, tenantA]);
+      expect((await client.query(`SELECT id FROM ${table("workspaces")}`)).rows).toEqual([]);
+      expect((await client.query(`SELECT id FROM ${table("projects")}`)).rows).toEqual([]);
+      expect((await client.query(`SELECT id FROM ${table("workspace_memberships")}`)).rows).toEqual([]);
+      expect((await client.query(`SELECT id FROM ${table("users")}`)).rows).toEqual([]);
+      await client.query("COMMIT");
+    } finally { await client.query("ROLLBACK").catch(() => undefined); client.release(); }
+  });
+  it("hides workspaces after leaving or suspension", async () => {
+    const coOwner = randomUUID();
+    const visible = async () => ({
+      workspaces: (await asSession(sessionA, `SELECT id FROM ${table("workspaces")}`)).rows.length,
+      memberships: (await asSession(sessionA, `SELECT id FROM ${table("workspace_memberships")}`)).rows.length,
+      projects: (await asSession(sessionA, `SELECT id FROM ${table("projects")}`)).rows.length,
+    });
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Co-owner')`, [coOwner]);
+    await owner.query(`INSERT INTO ${table("workspace_memberships")} (tenant_id,user_id,role) VALUES ($1,$2,'owner')`, [tenantA, coOwner]);
+    expect(await visible()).toEqual({ workspaces: 1, memberships: 2, projects: 2 });
+    try {
+      await owner.query(`UPDATE ${table("workspace_memberships")} SET status='left',left_at=now() WHERE tenant_id=$1 AND user_id=$2`, [tenantA, userA]);
+      expect(await visible()).toEqual({ workspaces: 0, memberships: 0, projects: 0 });
+      await owner.query(`UPDATE ${table("workspace_memberships")} SET status='suspended',left_at=NULL WHERE tenant_id=$1 AND user_id=$2`, [tenantA, userA]);
+      expect(await visible()).toEqual({ workspaces: 0, memberships: 0, projects: 0 });
+      await owner.query(`UPDATE ${table("workspace_memberships")} SET status='active' WHERE tenant_id=$1 AND user_id=$2`, [tenantA, userA]);
+      await owner.query(`UPDATE ${table("workspaces")} SET status='archived',archived_at=now(),version=version+1 WHERE id=$1`, [tenantA]);
+      expect(await visible()).toEqual({ workspaces: 0, memberships: 0, projects: 0 });
+      await owner.query(`UPDATE ${table("workspaces")} SET status='active',archived_at=NULL,version=version+1 WHERE id=$1`, [tenantA]);
+      await owner.query(`UPDATE ${table("users")} SET status='suspended' WHERE id=$1`, [userA]);
+      expect(await visible()).toEqual({ workspaces: 0, memberships: 0, projects: 0 });
+    } finally {
+      await owner.query(`UPDATE ${table("users")} SET status='active' WHERE id=$1`, [userA]);
+      await owner.query(`UPDATE ${table("workspace_memberships")} SET status='active',left_at=NULL WHERE tenant_id=$1 AND user_id=$2`, [tenantA, userA]);
+      await owner.query(`UPDATE ${table("workspaces")} SET status='active',archived_at=NULL,version=version+1 WHERE id=$1 AND status<>'active'`, [tenantA]);
+      await owner.query(`DELETE FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [tenantA, coOwner]);
+    }
+    expect(await visible()).toEqual({ workspaces: 1, memberships: 1, projects: 2 });
+  });
+  it("lets members read coworkers but not strangers", async () => {
+    const coworker = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Coworker')`, [coworker]);
+    await owner.query(`INSERT INTO ${table("workspace_memberships")} (tenant_id,user_id,role) VALUES ($1,$2,'member')`, [tenantA, coworker]);
+    try {
+      const readable = async (token: Buffer) => (await asSession(token, `SELECT id FROM ${table("users")}`)).rows.map((row) => row.id).sort();
+      // visitor shares only a community with userA, which does not make them coworkers.
+      expect(await readable(sessionA)).toEqual([userA, coworker].sort());
+      expect(await readable(sessionB)).toEqual([userB]);
+      await owner.query(`UPDATE ${table("workspace_memberships")} SET status='left',left_at=now() WHERE tenant_id=$1 AND user_id=$2`, [tenantA, coworker]);
+      expect(await readable(sessionA)).toEqual([userA]);
+    } finally {
+      await owner.query(`DELETE FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [tenantA, coworker]);
+    }
+  });
+  it("registers without creating a workspace", async () => {
+    const token = newTokenHash();
+    const registered = await authRuntime.query(`SELECT * FROM ${fn("auth_register_password")}($1,$2,$3,$4,$5)`, ["Solo User", "solo.user@example.com", await hashPassword("solo user password"), token, future()]);
+    const created = registered.rows[0];
+    expect(created).toMatchObject({ workspace_id: null, workspace_name: null, workspace_slug: null });
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("workspaces")} WHERE created_by_user_id=$1`, [created.user_id])).rows[0].total).toBe(0);
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("workspace_memberships")} WHERE user_id=$1`, [created.user_id])).rows[0].total).toBe(0);
+    expect((await authRuntime.query(`SELECT workspaces FROM ${fn("auth_session_principal")}($1)`, [token])).rows[0].workspaces).toEqual([]);
+  });
+  it("binds workspace versions to the record trigger", async () => {
+    await reject(`UPDATE ${table("workspaces")} SET name='Stale rename' WHERE id=$1`, [tenantA], "23514");
+    await rollback(async () => {
+      await owner.query(`UPDATE ${table("workspaces")} SET name='Renamed',version=version+1 WHERE id=$1`, [tenantA]);
+    });
   });
   it("separates community-only membership from workspace access and public visibility", async () => {
     await withDatabaseContext(runtime,{userId:visitor,tenantId:tenantA},async client=>{
@@ -297,14 +372,14 @@ describe("Local PostgreSQL schema", () => {
     const token = newTokenHash();
     const registered = await authRuntime.query(`SELECT * FROM ${fn("auth_register_password")}($1,$2,$3,$4,$5)`, ["Reg User", "Reg.User@Example.com", password, token, future()]);
     const newUser = registered.rows[0].user_id;
-    expect(registered.rows[0].workspace_name).toBe("Reg User's Space");
+    expect(registered.rows[0].workspace_id).toBeNull();
     await expect(authRuntime.query(`SELECT * FROM ${fn("auth_register_password")}($1,$2,$3,$4,$5)`, ["Dup", "reg.user@example.com", password, newTokenHash(), future()])).rejects.toMatchObject({ code: "23505" });
     const login = await authRuntime.query(`SELECT * FROM ${fn("auth_password_login")}($1)`, ["  REG.USER@example.com "]);
     expect(login.rows).toEqual([{ user_id: newUser, password_hash: password, status: "active" }]);
     expect((await authRuntime.query(`SELECT * FROM ${fn("auth_password_login")}($1)`, ["nobody@example.com"])).rows).toEqual([]);
     const principal = await authRuntime.query(`SELECT * FROM ${fn("auth_session_principal")}($1)`, [token]);
     expect(principal.rows[0]).toMatchObject({ user_id: newUser, email: "Reg.User@Example.com", platform_roles: [] });
-    expect(principal.rows[0].workspaces).toHaveLength(1);
+    expect(principal.rows[0].workspaces).toEqual([]);
     expect((await owner.query(`SELECT verified_at FROM ${table("user_emails")} WHERE user_id=$1`, [newUser])).rows).toEqual([{ verified_at: null }]);
     await authRuntime.query(`SELECT ${fn("auth_revoke_session")}($1)`, [token]);
     expect((await authRuntime.query(`SELECT * FROM ${fn("auth_session_principal")}($1)`, [token])).rows).toEqual([]);
@@ -627,7 +702,7 @@ describe("Local PostgreSQL schema", () => {
       WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
       "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "is_community_member",
-      "is_workspace_member", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
+      "is_coworker", "is_workspace_member", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
       "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_health", "staff_community_series", "staff_engagement_heatmap", "staff_grant_role",
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
       "staff_report_context", "staff_report_preview", "staff_report_stats", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",

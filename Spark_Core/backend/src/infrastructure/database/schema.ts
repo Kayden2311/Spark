@@ -52,7 +52,7 @@ export const accountTokens = spark.table("account_tokens", {
 }).enableRLS();
 export const workspaces = spark.table("workspaces", {
   ...mutable(), slug: text("slug").notNull(), name: text("name").notNull(), status: state("status", ["active", "archived"]).notNull().default("active"),
-  createdByUserId: ref("created_by_user_id").notNull(), archivedAt: instant("archived_at"),
+  createdByUserId: ref("created_by_user_id").notNull(), archivedAt: instant("archived_at"), version: version(),
 }).enableRLS();
 export const workspaceMemberships = spark.table("workspace_memberships", {
   ...tenant(), userId: ref("user_id").notNull(), role: state("role", ["owner", "admin", "member"]).notNull().default("member"),
