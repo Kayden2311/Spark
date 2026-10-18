@@ -1,3 +1,5 @@
+const MAX_VERSION = 2_147_483_647;
+
 /** Entity tags are strong, quoted resource versions such as `"v3"`. */
 export function formatEtag(version: number): string {
   return `"v${version}"`;
@@ -10,5 +12,8 @@ export function formatEtag(version: number): string {
 export function parseIfMatch(header: string | undefined): number | null | "invalid" {
   if (header === undefined) return null;
   const match = /^"v(\d{1,15})"$/u.exec(header.trim());
-  return match?.[1] === undefined ? "invalid" : Number(match[1]);
+  if (match?.[1] === undefined) return "invalid";
+  const version = Number(match[1]);
+  // Versions live in a 32-bit integer column; a larger value could never match and would crash the query.
+  return version > MAX_VERSION ? "invalid" : version;
 }

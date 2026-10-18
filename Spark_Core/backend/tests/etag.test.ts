@@ -13,6 +13,11 @@ describe("etag", () => {
     expect(parseIfMatch('"v0"')).toBe(0);
   });
 
+  it("rejects versions beyond the 32-bit integer column", () => {
+    expect(parseIfMatch('"v2147483647"')).toBe(2147483647);
+    expect(parseIfMatch('"v2147483648"')).toBe("invalid");
+  });
+
   it("rejects weak, wildcard and malformed values", () => {
     for (const value of ['W/"v1"', "*", '"x"', "v1", '"v-1"', '"v1.5"', '"v1", "v2"', "", '"v99999999999999999999"']) {
       expect(parseIfMatch(value)).toBe("invalid");

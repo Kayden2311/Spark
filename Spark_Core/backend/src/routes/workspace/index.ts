@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 
 import { createMemberGuard } from "./guard.js";
+import { registerInvitationRoutes } from "./invitations.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerWorkspaceCrudRoutes } from "./workspaces.js";
 
@@ -14,4 +15,5 @@ export function registerWorkspaceRoutes(app: FastifyInstance, options: Workspace
   const guard = createMemberGuard(options.pool);
   registerWorkspaceCrudRoutes(app, guard);
   registerMemberRoutes(app, guard);
+  registerInvitationRoutes(app, guard, options.pool);
 }

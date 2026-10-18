@@ -78,6 +78,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 - **Priority**: Must
 - **Status**: Planned (`/signup`)
 - **Story**: As a Visitor, I want to register with an email and password so that I can request membership and join workspaces.
+- **Note**: Sign-up no longer creates a workspace; a new user creates one explicitly (US-E1) or joins through an invitation (US-E3).
 - **Acceptance criteria**:
   - Given a new email and a password meeting policy, when I submit, then the account is created with an Argon2id hash and I am signed in or asked to verify the email.
   - Given an email already registered, when I submit, then the response does not disclose that the email exists.
@@ -219,7 +220,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: User
 - **Priority**: Must
-- **Status**: Mockup (`/workspace`)
+- **Status**: Implemented (`POST /api/v1/workspaces`, `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{workspaceId}`, `GET /api/v1/workspaces/by-slug/{slug}`, `PATCH /api/v1/workspaces/{workspaceId}`)
 - **Story**: As a User, I want to create a workspace so that my team has a private place to collaborate.
 - **Acceptance criteria**:
   - Given a valid name, when I create it, then the workspace and my ownership are committed atomically.
@@ -228,25 +229,27 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 ### US-E2: Invite members
 
-- **Actor**: Workspace Owner
+- **Actor**: Workspace Owner or Admin
 - **Priority**: Must
-- **Status**: Planned
-- **Story**: As a Workspace Owner, I want to invite people by email so that my team can join.
+- **Status**: Implemented (`POST /api/v1/workspaces/{workspaceId}/invitations`, `GET /api/v1/workspaces/{workspaceId}/invitations`, `POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/resend`, `DELETE /api/v1/workspaces/{workspaceId}/invitations/{invitationId}`)
+- **Story**: As a Workspace Owner or Admin, I want to invite people by email so that my team can join.
 - **Acceptance criteria**:
-  - Given an email, when I send an invitation, then it is expiring and single-use.
+  - Given an email, when I send an invitation, then it is expiring (7 days) and single-use, and the link is emailed by the background worker; the API never returns the token.
   - Given I revoke a pending invitation, then it can no longer be accepted.
-  - Only the Workspace Owner may send or revoke invitations.
+  - Given I resend an invitation, then a new link is emailed and the previous link stops working.
+  - An owner may invite admins or members; an admin may invite members only. Plain members cannot list, send, resend, or revoke invitations.
 
 ### US-E3: Accept an invitation
 
 - **Actor**: User
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented (`POST /api/v1/invitations/preview`, `POST /api/v1/invitations/accept`)
 - **Story**: As an invited person, I want to accept my invitation so that I can join the workspace.
 - **Acceptance criteria**:
   - Given a valid token and a signed-in account matching the invited recipient, when I accept, then I become a Workspace Member of that tenant only.
   - Given an expired, used, or revoked token, then acceptance fails with a safe error.
-  - Given a different account than the intended recipient, then acceptance is refused.
+  - Given a different account than the intended recipient, then acceptance is refused with `403 recipient_mismatch` naming the masked invited email, and the invitation stays pending.
+  - Given the same account accepts twice, then the second call succeeds with `alreadyMember: true`.
   - Two simultaneous accepts of the same token result in exactly one membership.
 
 ### US-E4: Create and assign tasks
