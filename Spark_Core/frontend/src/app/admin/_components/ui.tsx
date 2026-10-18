@@ -7,7 +7,7 @@ import type { Tone } from "../_lib/format";
 import { ROLE_LABELS, ROLE_TONES, describeChange, initials } from "../_lib/format";
 import type { PlatformRole } from "../_lib/types";
 import { Sparkline } from "./sparkline";
-import { AlertIcon, ArrowDownIcon, ArrowUpIcon, InboxIcon, MoreIcon, RefreshIcon, ShieldIcon } from "./icons";
+import { AlertIcon, ArrowDownIcon, ArrowUpIcon, ChevronIcon, InboxIcon, MoreIcon, RefreshIcon, ShieldIcon } from "./icons";
 
 export function PageHeader({ title, description, actions, meta }: { title: string; description?: ReactNode; actions?: ReactNode; meta?: ReactNode }) {
   return (
@@ -352,6 +352,93 @@ export type RangeDays = (typeof RANGES)[number];
 
 export function RangePicker({ value, onChange }: { value: RangeDays; onChange: (value: RangeDays) => void }) {
   return <Segmented label="Date range" onChange={onChange} options={RANGES.map((days) => ({ value: days, label: `${days}d` }))} value={value} />;
+}
+
+/** Icon chip plus a big number: one focused fact, used in place of a dense list row. */
+export function MetricTile({ icon, label, value, hint }: { icon: ReactNode; label: string; value: ReactNode; hint?: ReactNode }) {
+  return (
+    <div className="admMetricTile">
+      {icon}
+      <div className="admMetricText">
+        <span className="admMetricLabel">{label}</span>
+        <strong className="admMetricValue">{value}</strong>
+        {hint && <span className="admMetricHint">{hint}</span>}
+      </div>
+    </div>
+  );
+}
+
+export interface FacetOption {
+  value: string;
+  label: string;
+  count?: number;
+}
+
+/**
+ * A checkbox multi-select filter in a popover, for narrowing a list by a facet (reason, community…)
+ * with more options than a segmented control or tabs comfortably hold. Nothing selected means "all".
+ */
+export function CheckboxFacet({ label, options, selected, onChange }: { label: string; options: FacetOption[]; selected: Set<string>; onChange: (next: Set<string>) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const toggle = (value: string) => {
+    const next = new Set(selected);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    onChange(next);
+  };
+
+  return (
+    <div className="admFacet" ref={wrap}>
+      <button aria-controls={open ? panelId : undefined} aria-expanded={open} className="admBtn admBtnSecondary admBtnSm admFacetBtn" onClick={() => setOpen((value) => !value)} type="button">
+        {label}
+        {selected.size > 0 && <span className="admFacetCount">{selected.size}</span>}
+        <ChevronIcon aria-hidden="true" className="admFacetChevron" />
+      </button>
+      {open && (
+        <div aria-label={`Filter by ${label.toLowerCase()}`} className="admFacetPanel" id={panelId}>
+          {options.length === 0 ? (
+            <p className="admFacetEmpty">Nothing to filter yet.</p>
+          ) : (
+            <>
+              <ul className="admFacetOptions">
+                {options.map((option) => (
+                  <li key={option.value}>
+                    <label className="admFacetOption">
+                      <input checked={selected.has(option.value)} onChange={() => toggle(option.value)} type="checkbox" />
+                      <span className="admFacetOptionLabel">{option.label}</span>
+                      {option.count !== undefined && <span className="admFacetOptionCount">{option.count}</span>}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              {selected.size > 0 && (
+                <button className="admBtn admBtnGhost admBtnSm admFacetClear" onClick={() => onChange(new Set())} type="button">Clear</button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** A card with a heading row; the building block for non-chart sections. */

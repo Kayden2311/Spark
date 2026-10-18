@@ -1,15 +1,17 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
+import { BarList, InlineBar } from "../_components/charts";
 import { Drawer } from "../_components/drawer";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { BoardIcon, ClockIcon, ListIcon, MegaphoneIcon, ShieldIcon } from "../_components/icons";
-import { Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, KpiCards, LoadMore, NoAccess, PageHeader, Panel, Segmented, SkeletonRows } from "../_components/ui";
-import { adminApi, query, reloadIfStale } from "../_lib/api";
+import { Badge, Card, CheckboxFacet, EmptyState, ErrorBanner, FilterTabs, KeyValue, KpiCards, LoadMore, NoAccess, PageHeader, Panel, Segmented, SkeletonRows } from "../_components/ui";
+import { adminApi, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
 import { REVIEW_STATUS, formatCount, formatDate, formatDateTime, formatPercent, formatRelative, humanize } from "../_lib/format";
+import { VIZ } from "../_lib/palette";
 import type { Campaign, ReviewStatus } from "../_lib/types";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useQueryState } from "../_lib/use-query-state";
@@ -28,12 +30,33 @@ function CampaignReview() {
   const allowed = canAccess(roles, "campaigns");
   const [filter, setFilter] = useQueryState<Filter>("status", "pending", FILTERS);
   const [view, setView] = useQueryState<View>("view", "board", ["board", "list"]);
-  // The board shows every column at once, so it loads all campaigns (newest 100) instead of one status.
-  const list = usePagedList<Campaign>(allowed ? (view === "board" ? "/campaigns?limit=100" : `/campaigns${query({ status: filter === "all" ? undefined : filter })}`) : null);
+  const [communityFilter, setCommunityFilter] = useState<Set<string>>(new Set());
+  // Both views share one fetch (newest 100 across every status), so switching views or status tabs never re-queries.
+  const list = usePagedList<Campaign>(allowed ? "/campaigns?limit=100" : null);
   const [selected, setSelected] = useState<Campaign | null>(null);
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
 
+  const communityCounts = useMemo(() => {
+    const counts = new Map<string, { name: string; count: number }>();
+    for (const item of list.items) counts.set(item.community.id, { name: item.community.name, count: (counts.get(item.community.id)?.count ?? 0) + 1 });
+    return counts;
+  }, [list.items]);
+  const baseItems = useMemo(
+    () => (communityFilter.size === 0 ? list.items : list.items.filter((item) => communityFilter.has(item.community.id))),
+    [list.items, communityFilter],
+  );
+  const filteredList = useMemo(() => (filter === "all" ? baseItems : baseItems.filter((item) => item.reviewStatus === filter)), [baseItems, filter]);
+
   if (!allowed) return <NoAccess />;
+
+  const communityFacet = (
+    <CheckboxFacet
+      label="Community"
+      onChange={setCommunityFilter}
+      options={[...communityCounts.entries()].sort((a, b) => b[1].count - a[1].count).map(([value, { name, count }]) => ({ value, label: name, count }))}
+      selected={communityFilter}
+    />
+  );
 
   const decide = (campaign: Campaign, decision: "approve" | "reject") =>
     setDialog({
@@ -64,14 +87,16 @@ function CampaignReview() {
         title="Sponsored campaigns"
       />
 
-      {view === "board" && <PipelineSummary items={list.items} loading={list.loading} />}
+      <PipelineSummary items={baseItems} loading={list.loading} />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       {view === "board" ? (
-        list.loading ? <SkeletonRows /> : (
+        <>
+          <div className="admPanelTools admBoardTools">{communityFacet}</div>
+          {list.loading ? <SkeletonRows /> : (
           <div className="admBoard">
-            {COLUMNS.filter((column) => column !== "draft" || list.items.some((item) => item.reviewStatus === "draft")).map((column) => {
-              const cards = list.items.filter((item) => item.reviewStatus === column);
+            {COLUMNS.filter((column) => column !== "draft" || baseItems.some((item) => item.reviewStatus === "draft")).map((column) => {
+              const cards = baseItems.filter((item) => item.reviewStatus === column);
               return (
                 <section aria-label={REVIEW_STATUS[column].label} className="admBoardColumn" key={column}>
                   <header className={`admBoardHead admTone-${REVIEW_STATUS[column].tone}`}>
@@ -105,10 +130,24 @@ function CampaignReview() {
               );
             })}
           </div>
-        )
+          )}
+        </>
       ) : (
+      <>
+        {!list.loading && baseItems.length > 0 && (
+          <Card flush subtitle={`${filter === "all" ? "Every" : REVIEW_STATUS[filter].label} campaign loaded, by status`} title="Review pipeline by status">
+            <BarList
+              color={VIZ.blue}
+              items={COLUMNS.filter((column) => baseItems.some((item) => item.reviewStatus === column)).map((column) => ({
+                key: column,
+                label: REVIEW_STATUS[column].label,
+                value: baseItems.filter((item) => item.reviewStatus === column).length,
+              }))}
+            />
+          </Card>
+        )}
       <Panel
-        footer={!list.loading && list.items.length > 0 ? <LoadMore hasMore={list.hasMore} loading={list.loadingMore} noun="campaign" onClick={() => void list.loadMore()} shown={list.items.length} /> : undefined}
+        footer={!list.loading && filteredList.length > 0 ? <LoadMore hasMore={list.hasMore} loading={list.loadingMore} noun="campaign" onClick={() => void list.loadMore()} shown={filteredList.length} /> : undefined}
         label="Campaigns"
         tabs={
           <FilterTabs
@@ -118,10 +157,11 @@ function CampaignReview() {
             value={filter}
           />
         }
+        tools={communityFacet}
       >
         {list.loading ? (
           <SkeletonRows />
-        ) : list.items.length === 0 && !list.error ? (
+        ) : filteredList.length === 0 && !list.error ? (
           <EmptyState title={filter === "pending" ? "Nothing to review" : "No campaigns here"}>{filter === "pending" ? "New submissions will appear here." : "Campaigns appear here once they reach this status."}</EmptyState>
         ) : (
           <table className="admTable">
@@ -136,7 +176,9 @@ function CampaignReview() {
               </tr>
             </thead>
             <tbody>
-              {list.items.map((campaign) => (
+              {filteredList.map((campaign) => {
+                const waiting = waitingDays(campaign);
+                return (
                 <tr key={campaign.id}>
                   <td data-label="Campaign">
                     <div className="admCellMain">
@@ -151,7 +193,17 @@ function CampaignReview() {
                     </div>
                   </td>
                   <td data-label="Placement">{campaign.placement ?? <span className="admMutedCell">Not set</span>}</td>
-                  <td className="admNowrap" data-label="Requested start">{formatDate(campaign.requestedStartAt)}</td>
+                  <td data-label="Requested start">
+                    <div className="admCellMain">
+                      <span className="admNowrap">{formatDate(campaign.requestedStartAt)}</span>
+                      {campaign.reviewStatus === "pending" && (
+                        <span className="admInline">
+                          <InlineBar color={waiting >= 3 ? "#ef4444" : waiting >= 1 ? "#f59e0b" : "#94a3b8"} ratio={waiting / 7} />
+                          <span className="admCellSub">{waiting === 0 ? "today" : `${waiting}d waiting`}</span>
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td data-label="Status"><Badge tone={REVIEW_STATUS[campaign.reviewStatus].tone}>{REVIEW_STATUS[campaign.reviewStatus].label}</Badge></td>
                   <td className="admCellActions">
                     {campaign.reviewStatus === "pending" ? (
@@ -161,11 +213,13 @@ function CampaignReview() {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
       </Panel>
+      </>
       )}
 
       <Drawer

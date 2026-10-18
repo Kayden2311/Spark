@@ -340,6 +340,15 @@ export function BarList({ items, color, valueFormat = formatCount, emptyText = "
   );
 }
 
+/** A thin filled track for one ratio (0–1) next to a value, e.g. "how this compares to the worst row". */
+export function InlineBar({ ratio, color, wide }: { ratio: number; color: string; wide?: boolean }) {
+  return (
+    <span aria-hidden="true" className={`admInlineBarTrack${wide ? " admInlineBarTrack-wide" : ""}`}>
+      <span className="admInlineBarFill" style={{ width: `${Math.max(4, Math.min(100, ratio * 100))}%`, background: color }} />
+    </span>
+  );
+}
+
 /**
  * A small ring gauge for one ratio metric (0–1): a status color fills the ring, the value sits in the
  * center. Always paired by the caller with a text label, so meaning never rests on color alone.

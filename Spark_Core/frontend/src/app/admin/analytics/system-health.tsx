@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { ChartCard, ChartLegend, Gauge, TrendChart } from "../_components/charts";
+import { ChartCard, ChartLegend, Gauge, InlineBar, TrendChart } from "../_components/charts";
 import { AlertIcon, ClockIcon, CpuIcon, DatabaseIcon, LayersIcon, PulseIcon, ShieldIcon } from "../_components/icons";
-import { Badge, Card, KpiCards, Segmented, SkeletonRows } from "../_components/ui";
+import { Badge, Card, KpiCards, MetricTile, Segmented, SkeletonRows } from "../_components/ui";
 import { formatCount, formatDuration, formatPercent, formatRelative, type Tone } from "../_lib/format";
 import { VIZ } from "../_lib/palette";
 
@@ -51,28 +51,6 @@ function CheckTile({ name, icon, check, children }: { name: string; icon: ReactN
         {children}
       </dl>
     </li>
-  );
-}
-
-/** Icon chip plus a big number: one focused fact, used in place of a dense list row. */
-function MetricTile({ icon, label, value, hint }: { icon: ReactNode; label: string; value: ReactNode; hint?: ReactNode }) {
-  return (
-    <div className="admMetricTile">
-      {icon}
-      <div className="admMetricText">
-        <span className="admMetricLabel">{label}</span>
-        <strong className="admMetricValue">{value}</strong>
-        {hint && <span className="admMetricHint">{hint}</span>}
-      </div>
-    </div>
-  );
-}
-
-function InlineBar({ ratio, color }: { ratio: number; color: string }) {
-  return (
-    <span aria-hidden="true" className="admInlineBarTrack">
-      <span className="admInlineBarFill" style={{ width: `${Math.max(4, Math.min(100, ratio * 100))}%`, background: color }} />
-    </span>
   );
 }
 

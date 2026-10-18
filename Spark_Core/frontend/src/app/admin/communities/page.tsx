@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
 import { AVAILABLE, COPY, RESULT, healthOf } from "../_components/community-actions";
+import { ChartCard, ChartLegend, DonutChart } from "../_components/charts";
 import { AlertIcon, CommunityIcon, SearchIcon, TrendIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { Sparkline } from "../_components/sparkline";
@@ -17,6 +18,16 @@ import type { Community, CommunityAction, CommunityState } from "../_lib/types";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useDebounced, useQueryState } from "../_lib/use-query-state";
 
+/** One categorical color per health label, so the donut and its legend never rely on position alone. */
+const HEALTH_COLOR: Record<string, string> = {
+  Growing: VIZ.aqua,
+  Steady: VIZ.blue,
+  Slowing: VIZ.yellow,
+  "Needs review": VIZ.magenta,
+  Quiet: VIZ.violet,
+  Archived: "#94a3b8",
+};
+
 type Filter = "all" | CommunityState | "flagged";
 const FILTERS: readonly Filter[] = ["all", "active", "featured", "frozen", "archived", "flagged"];
 
@@ -28,6 +39,14 @@ function CommunitiesList() {
   const settledSearch = useDebounced(search.trim());
   const list = usePagedList<Community>(allowed ? `/communities${query({ status: filter === "all" ? undefined : filter, search: settledSearch })}` : null);
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
+  const healthMix = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const community of list.items) {
+      const label = healthOf(community).label;
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return [...counts.entries()].map(([label, value]) => ({ label, value, color: HEALTH_COLOR[label] ?? "#94a3b8" }));
+  }, [list.items]);
 
   if (!allowed) return <NoAccess />;
 
@@ -66,6 +85,19 @@ function CommunitiesList() {
         ]}
         label="Community summary"
       />
+
+      <ChartCard
+        empty={healthMix.length === 0}
+        emptyText="No communities loaded yet."
+        height={200}
+        legend={<ChartLegend series={healthMix} />}
+        loading={list.loading}
+        subtitle={`${filter === "all" ? "Every" : filter === "flagged" ? "Flagged" : COMMUNITY_STATE[filter as CommunityState]?.label ?? filter} community loaded, by health`}
+        table={{ columns: ["Health", "Communities"], rows: healthMix.map((item) => [item.label, item.value]) }}
+        title="Health mix"
+      >
+        <DonutChart centerLabel="loaded" centerValue={formatCount(list.items.length)} data={healthMix} height={180} />
+      </ChartCard>
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       <Panel

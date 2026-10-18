@@ -308,6 +308,21 @@
 .admMenuItem:hover, .admMenuItem:focus { color: var(--adm-ink); background: var(--adm-hover); box-shadow: none !important; }
 .admMenuItemDanger { color: var(--adm-red-dark); }
 .admMenuItemDanger:hover, .admMenuItemDanger:focus { color: var(--adm-red-dark); background: #fef3f2; }
+
+/* Checkbox facet filter */
+.admFacet { position: relative; display: inline-block; }
+.admFacetBtn { gap: 6px; }
+.admFacetCount { display: grid; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; color: #fff; font-size: var(--adm-text-3xs); font-weight: 700; line-height: 16px; text-align: center; background: var(--adm-blue); place-items: center; }
+.admFacetChevron { width: 13px; height: 13px; margin-left: -2px; color: var(--adm-faint); }
+.admFacetPanel { position: absolute; z-index: 50; top: calc(100% + 6px); left: 0; width: 272px; max-width: 80vw; padding: 8px; border: 1px solid var(--adm-line); border-radius: var(--adm-radius-sm); background: var(--adm-surface); box-shadow: var(--adm-shadow-lg); animation: adm-pop .12s ease-out; }
+.admFacetOptions { display: grid; max-height: 240px; margin: 0; padding: 0; gap: 1px; overflow-y: auto; list-style: none; }
+.admFacetOption { display: flex; align-items: center; gap: 8px; padding: 7px 10px 7px 8px; border-radius: 6px; font-size: var(--adm-text-xs); cursor: pointer; }
+.admFacetOption:hover { background: var(--adm-hover); }
+.admFacetOption input { flex: none; width: 15px; height: 15px; accent-color: var(--adm-blue); }
+.admFacetOptionLabel { flex: 1; min-width: 0; overflow: hidden; color: var(--adm-text); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.admFacetOptionCount { flex: none; margin-left: 6px; color: var(--adm-faint); font-size: var(--adm-text-3xs); font-variant-numeric: tabular-nums; }
+.admFacetEmpty { margin: 0; padding: 8px; color: var(--adm-subtle); font-size: var(--adm-text-xs); }
+.admFacetClear { width: 100%; margin-top: 4px; justify-content: center; }
 .admMenuItemSeparated { position: relative; margin-top: 9px; }
 .admMenuItemSeparated::before { content: ""; position: absolute; top: -5px; right: -4px; left: -4px; height: 1px; background: var(--adm-line-soft); }
 @keyframes adm-pop { from { opacity: 0; transform: translateY(-4px); } }
@@ -615,11 +630,6 @@
 }
 
 /* ---------- Reports triage desk ---------- */
-.admMiniStats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 0 16px; padding: 0; overflow: hidden; border: 1px solid var(--adm-line); border-radius: var(--adm-radius); list-style: none; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); }
-.admMiniStats li { display: grid; gap: 2px; padding: 12px 18px; }
-.admMiniStats li + li { border-left: 1px solid var(--adm-line); }
-.admMiniStats span { color: var(--adm-subtle); font-size: var(--adm-text-xs); font-weight: 500; }
-.admMiniStats strong { color: var(--adm-ink); font-size: var(--adm-text-xl); font-weight: 700; font-variant-numeric: tabular-nums; }
 .admShortcuts { margin-bottom: 16px; padding: 14px 18px; border: 1px solid var(--adm-line); border-radius: var(--adm-radius); background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); }
 .admShortcuts strong { color: var(--adm-ink); font-size: var(--adm-text-sm); }
 .admShortcuts ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 20px; margin: 10px 0 0; padding: 0; list-style: none; }
@@ -663,9 +673,6 @@
   .admTriageStats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
-  .admMiniStats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .admMiniStats li:nth-child(3) { border-left: 0; }
-  .admMiniStats li:nth-child(n + 3) { border-top: 1px solid var(--adm-line); }
   .admTriageActions .admBtn { flex: 1 1 auto; }
   .admTriageActions kbd { display: none; }
 }
@@ -685,6 +692,7 @@
 .admSessionList .admCellTitle { font-size: var(--adm-text-xs); font-weight: 600; }
 
 /* ---------- Campaign board ---------- */
+.admBoardTools { justify-content: flex-end; margin-bottom: 12px; padding: 0; }
 .admBoard { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; align-items: start; }
 .admBoardColumn { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--adm-line); border-radius: 12px; background: #f1f4f9; }
 .admBoardHead { display: flex; align-items: center; gap: 8px; padding: 2px 4px; }
@@ -809,7 +817,8 @@
 .admRouteMetricTop strong { color: var(--adm-ink); font-variant-numeric: tabular-nums; }
 .admRouteMetricWarn { color: var(--adm-red-dark); }
 .admInlineBarTrack { display: inline-block; width: 64px; height: 5px; overflow: hidden; border-radius: 3px; background: var(--adm-line-soft); }
-.admInlineBarFill { display: block; height: 100%; border-radius: 3px; }
+.admInlineBarTrack-wide { display: block; width: 100%; }
+.admInlineBarFill { display: block; height: 100%; border-radius: 3px; transition: width .2s ease; }
 
 @media (max-width: 720px) {
   .admMetricTiles { grid-template-columns: minmax(0, 1fr); }

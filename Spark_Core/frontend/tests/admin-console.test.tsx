@@ -126,7 +126,7 @@ describe("reports queue", () => {
     mockApi({
       ...triage,
       "GET /api/v1/admin/overview": json(overview),
-      "GET /api/v1/admin/reports?status=open": json({ items: [report], nextCursor: null }),
+      "GET /api/v1/admin/reports?status=open&limit=100": json({ items: [report], nextCursor: null }),
       "POST /api/v1/admin/reports/r1/actions": json({ id: "r1", status: "resolved" }),
     });
     renderQueue();
@@ -153,7 +153,7 @@ describe("reports queue", () => {
     mockApi({
       ...triage,
       "GET /api/v1/admin/overview": json(overview),
-      "GET /api/v1/admin/reports?status=open": json({ items: [report], nextCursor: null }),
+      "GET /api/v1/admin/reports?status=open&limit=100": json({ items: [report], nextCursor: null }),
       "POST /api/v1/admin/reports/r1/actions": json({ code: "report_already_closed", detail: "This report has already been resolved or dismissed." }, 409),
     });
     renderQueue();
@@ -169,8 +169,8 @@ describe("reports queue", () => {
     mockApi({
       ...triage,
       "GET /api/v1/admin/overview": json(overview),
-      "GET /api/v1/admin/reports?status=open&cursor=next-1": json({ items: [{ ...report, id: "r2", target: { ...report.target, title: "Second report" } }], nextCursor: null }),
-      "GET /api/v1/admin/reports?status=open": () => {
+      "GET /api/v1/admin/reports?status=open&limit=100&cursor=next-1": json({ items: [{ ...report, id: "r2", target: { ...report.target, title: "Second report" } }], nextCursor: null }),
+      "GET /api/v1/admin/reports?status=open&limit=100": () => {
         if (failOnce) {
           failOnce = false;
           return new Response(JSON.stringify({ code: "internal_error" }), { status: 500 });
@@ -198,7 +198,7 @@ describe("reports queue", () => {
 describe("review fixes", () => {
   it("returns focus to the action button after cancelling its dialog", async () => {
     navigation.pathname = "/admin/reports";
-    mockApi({ ...triage, "GET /api/v1/admin/overview": json(overview), "GET /api/v1/admin/reports?status=open": json({ items: [report], nextCursor: null }) });
+    mockApi({ ...triage, "GET /api/v1/admin/overview": json(overview), "GET /api/v1/admin/reports?status=open&limit=100": json({ items: [report], nextCursor: null }) });
     render(<AdminLayout><ReportsPage /></AdminLayout>);
     const hide = await screen.findByRole("button", { name: /^Hide content/u });
     await userEvent.click(hide);
@@ -212,7 +212,7 @@ describe("review fixes", () => {
     mockApi({
       ...triage,
       "GET /api/v1/admin/overview": json(overview),
-      "GET /api/v1/admin/reports?status=open": () => (++listCalls === 1 ? json({ items: [report], nextCursor: null })() : json({ items: [], nextCursor: null })()),
+      "GET /api/v1/admin/reports?status=open&limit=100": () => (++listCalls === 1 ? json({ items: [report], nextCursor: null })() : json({ items: [], nextCursor: null })()),
       "POST /api/v1/admin/reports/r1/actions": json({ code: "report_already_closed", detail: "This report has already been resolved or dismissed." }, 409),
     });
     render(<AdminLayout><ReportsPage /></AdminLayout>);
@@ -293,7 +293,7 @@ describe("console v2", () => {
       ...triage,
       "GET /api/v1/admin/reports/r2/context": json({ author: null, communityOpenReports: 0, reporterReportsFiled: 2 }),
       "GET /api/v1/admin/overview": json(overview),
-      "GET /api/v1/admin/reports?status=open": json({ items: [report, second], nextCursor: null }),
+      "GET /api/v1/admin/reports?status=open&limit=100": json({ items: [report, second], nextCursor: null }),
     });
     render(<AdminLayout><ReportsPage /></AdminLayout>);
     const pane = await screen.findByRole("region", { name: "Selected report" });
@@ -373,7 +373,7 @@ describe("console v2", () => {
       "GET /api/v1/admin/reports/r3/preview": preview("Our launch checklist", "You are an idiot"),
       "GET /api/v1/admin/reports/r3/context": json({ author: null, communityOpenReports: 0, reporterReportsFiled: 1 }),
       "GET /api/v1/admin/overview": json(overview),
-      "GET /api/v1/admin/reports?status=open": json({ items: [commentReport], nextCursor: null }),
+      "GET /api/v1/admin/reports?status=open&limit=100": json({ items: [commentReport], nextCursor: null }),
     });
     render(<AdminLayout><ReportsPage /></AdminLayout>);
     const parent = await screen.findByRole("article", { name: "Post the comment replied to" });

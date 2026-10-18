@@ -6,14 +6,15 @@ import { Suspense, useState } from "react";
 
 import { useAuth } from "../../auth-context";
 import { useAdmin } from "../_components/admin-context";
+import { ChartCard, ChartLegend, DonutChart, InlineBar } from "../_components/charts";
 import { AlertIcon, SearchIcon, SignupIcon, UserIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RoleSummary, RowMenu, Segmented, SkeletonRows } from "../_components/ui";
 import { query } from "../_lib/api";
 import { PLATFORM_ROLES, canAccess } from "../_lib/access";
 import { ROLE_LABELS, USER_STATUS, formatCount, formatDate, formatRelative } from "../_lib/format";
-import { SERIES } from "../_lib/palette";
-import type { ActivityResponse, PlatformRole, UserStatus, UserSummary } from "../_lib/types";
+import { CATEGORICAL, SERIES } from "../_lib/palette";
+import type { ActivityResponse, Page, PlatformRole, UserStatus, UserSummary } from "../_lib/types";
 import { useAdminData } from "../_lib/use-admin-data";
 import { usePagedList } from "../_lib/use-paged-list";
 import { canChangeStatus, statusRequest } from "../_components/user-actions";
@@ -23,6 +24,40 @@ import { RolesMatrix } from "./roles-matrix";
 type StatusFilter = "all" | UserStatus;
 const STATUS_FILTERS: readonly StatusFilter[] = ["all", "active", "suspended"];
 const ROLE_FILTERS: readonly ("any" | PlatformRole)[] = ["any", ...PLATFORM_ROLES];
+
+function useHolderCount(role: PlatformRole) {
+  return useAdminData<Page<UserSummary>>(`/users?role=${role}&limit=100`);
+}
+
+/** Who holds each platform role right now. An account can hold more than one, so this totals role
+ * grants, not staff headcount — the subtitle and center label say so rather than imply otherwise. */
+function RoleMix() {
+  // PLATFORM_ROLES is a fixed 5-role tuple, so these are named one by one rather than mapped —
+  // calling a hook inside a loop or .map() would break React's rules of hooks.
+  const holders = [
+    useHolderCount("super_admin"),
+    useHolderCount("platform_admin"),
+    useHolderCount("community_moderator"),
+    useHolderCount("content_moderator"),
+    useHolderCount("campaign_moderator"),
+  ];
+  const loading = holders.some((holder) => !holder.data);
+  const mix = PLATFORM_ROLES.map((role, index) => ({ label: ROLE_LABELS[role], value: holders[index]!.data?.items.length ?? 0, color: CATEGORICAL[index % CATEGORICAL.length] }));
+  const total = mix.reduce((sum, item) => sum + item.value, 0);
+  return (
+    <ChartCard
+      empty={!loading && total === 0}
+      height={200}
+      legend={<ChartLegend series={mix} />}
+      loading={loading}
+      subtitle="Role grants right now; an account can hold more than one"
+      table={{ columns: ["Role", "Holders"], rows: mix.map((item) => [item.label, item.value]) }}
+      title="Platform roles"
+    >
+      <DonutChart centerLabel="role grants" centerValue={formatCount(total)} data={mix} height={180} />
+    </ChartCard>
+  );
+}
 
 function UsersList() {
   const { user: me } = useAuth();
@@ -78,6 +113,8 @@ function UsersList() {
         ]}
         label="Membership"
       />
+
+      <RoleMix />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       <Panel
@@ -149,9 +186,15 @@ function UsersList() {
                     <td data-label="Status"><Badge tone={USER_STATUS[user.status].tone}>{USER_STATUS[user.status].label}</Badge></td>
                     <td data-label="Signals">
                       {user.risk && (user.risk.reportsAgainst > 0 || user.risk.hiddenPosts + user.risk.hiddenComments > 0) ? (
-                        <div className="admTagRow">
-                          {user.risk.reportsAgainst > 0 && <Badge tone={user.risk.reportsAgainst > 2 ? "red" : "amber"}>{user.risk.reportsAgainst} {user.risk.reportsAgainst === 1 ? "report" : "reports"}</Badge>}
-                          {user.risk.hiddenPosts + user.risk.hiddenComments > 0 && <Badge tone="red">{user.risk.hiddenPosts + user.risk.hiddenComments} hidden</Badge>}
+                        <div className="admCellMain">
+                          <div className="admTagRow">
+                            {user.risk.reportsAgainst > 0 && <Badge tone={user.risk.reportsAgainst > 2 ? "red" : "amber"}>{user.risk.reportsAgainst} {user.risk.reportsAgainst === 1 ? "report" : "reports"}</Badge>}
+                            {user.risk.hiddenPosts + user.risk.hiddenComments > 0 && <Badge tone="red">{user.risk.hiddenPosts + user.risk.hiddenComments} hidden</Badge>}
+                          </div>
+                          <InlineBar
+                            color={user.risk.reportsAgainst + user.risk.hiddenPosts + user.risk.hiddenComments > 3 ? "#ef4444" : "#f59e0b"}
+                            ratio={(user.risk.reportsAgainst + user.risk.hiddenPosts + user.risk.hiddenComments) / 6}
+                          />
                         </div>
                       ) : <span className="admMutedCell">None</span>}
                     </td>

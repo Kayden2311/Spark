@@ -1,16 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
-import { KeyboardIcon } from "../_components/icons";
+import { BarList, InlineBar } from "../_components/charts";
+import { ClockIcon, InboxIcon, KeyboardIcon, PulseIcon } from "../_components/icons";
 import { PostPreview } from "../_components/post-preview";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, NoAccess, PageHeader, SkeletonRows, Tag } from "../_components/ui";
+import { Avatar, Badge, Card, CheckboxFacet, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, MetricTile, NoAccess, PageHeader, SkeletonRows, Tag } from "../_components/ui";
 import { adminApi, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
 import { REPORT_STATUS, formatCount, formatDate, formatDateTime, formatRelative, humanize } from "../_lib/format";
+import { VIZ } from "../_lib/palette";
 import type { Report, ReportContext, ReportPreview, ReportStats, ReportStatus } from "../_lib/types";
 import { useAdminData } from "../_lib/use-admin-data";
 import { usePagedList } from "../_lib/use-paged-list";
@@ -68,6 +70,26 @@ function isTyping(target: EventTarget | null): boolean {
 
 const actionable = (report: Report) => report.status === "open" || report.status === "reviewing";
 
+function daysOpen(report: Report): number {
+  return Math.max(0, (Date.now() - Date.parse(report.createdAt)) / 86_400_000);
+}
+
+/** Thin bar under a queue row: how long it has sat open, relative to a one-week horizon. Calm, then amber, then red. */
+function AgeBar({ report }: { report: Report }) {
+  const days = daysOpen(report);
+  const color = days >= 3 ? "#ef4444" : days >= 1 ? "#f59e0b" : "#94a3b8";
+  return <InlineBar color={color} ratio={days / 7} wide />;
+}
+
+function countBy<T>(items: T[], keyOf: (item: T) => string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = keyOf(item);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 function ContextPanel({ report }: { report: Report }) {
   const { roles } = useAdmin();
   const context = useAdminData<ReportContext>(`/reports/${report.id}/context`);
@@ -116,14 +138,24 @@ function TriageDesk() {
   const { roles, overview, refreshOverview, notify } = useAdmin();
   const [status, setStatus] = useQueryState<ReportStatus>("status", "open", STATUSES);
   const allowed = canAccess(roles, "reports");
-  const list = usePagedList<Report>(allowed ? `/reports?status=${status}` : null);
+  const list = usePagedList<Report>(allowed ? `/reports?status=${status}&limit=100` : null);
   const stats = useAdminData<ReportStats>(allowed ? "/reports/stats?days=30" : null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
   const [help, setHelp] = useState(false);
+  const [reasonFilter, setReasonFilter] = useState<Set<string>>(new Set());
+  const [communityFilter, setCommunityFilter] = useState<Set<string>>(new Set());
   const detail = useRef<HTMLElement>(null);
 
-  const items = list.items;
+  const loaded = list.items;
+  const reasonCounts = useMemo(() => countBy(loaded, (report) => report.reasonCode), [loaded]);
+  const communityCounts = useMemo(() => countBy(loaded, (report) => report.community.id), [loaded]);
+  const communityNames = useMemo(() => new Map(loaded.map((report) => [report.community.id, report.community.name])), [loaded]);
+  const items = useMemo(
+    () => loaded.filter((report) => (reasonFilter.size === 0 || reasonFilter.has(report.reasonCode)) && (communityFilter.size === 0 || communityFilter.has(report.community.id))),
+    [loaded, reasonFilter, communityFilter],
+  );
+  const faceted = reasonFilter.size > 0 || communityFilter.size > 0;
   const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
   const index = selected ? items.indexOf(selected) : -1;
 
@@ -205,12 +237,23 @@ function TriageDesk() {
         </div>
       )}
 
-      <ul aria-label="Queue health, last 30 days" className="admMiniStats">
-        <li><span>Open now</span><strong>{stats.data ? formatCount(stats.data.backlog) : "–"}</strong></li>
-        <li><span>Opened (30d)</span><strong>{stats.data ? formatCount(stats.data.opened) : "–"}</strong></li>
-        <li><span>Closed (30d)</span><strong>{stats.data ? formatCount(stats.data.closed) : "–"}</strong></li>
-        <li><span>Median time to decision</span><strong>{stats.data?.medianHoursToClose == null ? "–" : `${stats.data.medianHoursToClose.toFixed(1)} h`}</strong></li>
-      </ul>
+      <div className="admGrid2">
+        <Card subtitle="Last 30 days" title="Queue health">
+          <div className="admMetricTiles">
+            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-amber"><InboxIcon /></span>} label="Open now" value={stats.data ? formatCount(stats.data.backlog) : "–"} />
+            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-violet"><PulseIcon /></span>} label="Opened (30d)" value={stats.data ? formatCount(stats.data.opened) : "–"} />
+            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-green"><InboxIcon /></span>} label="Closed (30d)" value={stats.data ? formatCount(stats.data.closed) : "–"} />
+            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-blue"><ClockIcon /></span>} label="Median time to decision" value={stats.data?.medianHoursToClose == null ? "–" : `${stats.data.medianHoursToClose.toFixed(1)} h`} />
+          </div>
+        </Card>
+        <Card subtitle={`${REPORT_STATUS[status].label} queue · ${formatCount(loaded.length)} loaded`} title="By reason">
+          <BarList
+            color={VIZ.violet}
+            emptyText="Nothing in this queue yet."
+            items={[...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ key: reason, label: humanize(reason), value: count }))}
+          />
+        </Card>
+      </div>
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       <div className="admTriage">
@@ -218,17 +261,37 @@ function TriageDesk() {
           <div className="admPanelHeader">
             <FilterTabs
               label="Report status"
-              onChange={(value) => { setSelectedId(null); setStatus(value); }}
+              onChange={(value) => { setSelectedId(null); setReasonFilter(new Set()); setCommunityFilter(new Set()); setStatus(value); }}
               options={STATUSES.map((value) => ({ value, label: REPORT_STATUS[value].label, count: value === "open" ? overview?.reports.open : undefined }))}
               value={status}
             />
+            <div className="admPanelTools">
+              <CheckboxFacet
+                label="Reason"
+                onChange={setReasonFilter}
+                options={[...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, label: humanize(value), count }))}
+                selected={reasonFilter}
+              />
+              <CheckboxFacet
+                label="Community"
+                onChange={setCommunityFilter}
+                options={[...communityCounts.entries()].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, label: communityNames.get(value) ?? value, count }))}
+                selected={communityFilter}
+              />
+            </div>
           </div>
           {list.loading ? (
             <div className="admCardInset"><SkeletonRows /></div>
           ) : items.length === 0 && !list.error ? (
-            <EmptyState title={status === "open" ? "The queue is clear" : `No ${REPORT_STATUS[status].label.toLowerCase()} reports`}>
-              {status === "open" ? "New reports from members will appear here." : "Reports move here once they reach this status."}
-            </EmptyState>
+            faceted && loaded.length > 0 ? (
+              <EmptyState action={<button className="admBtn admBtnSecondary admBtnSm" onClick={() => { setReasonFilter(new Set()); setCommunityFilter(new Set()); }} type="button">Clear filters</button>} title="No reports match these filters">
+                Try a different reason or community.
+              </EmptyState>
+            ) : (
+              <EmptyState title={status === "open" ? "The queue is clear" : `No ${REPORT_STATUS[status].label.toLowerCase()} reports`}>
+                {status === "open" ? "New reports from members will appear here." : "Reports move here once they reach this status."}
+              </EmptyState>
+            )
           ) : (
             <ul className="admTriageItems">
               {items.map((report) => (
@@ -244,6 +307,7 @@ function TriageDesk() {
                       {report.community.name}
                       {report.target.moderationStatus === "hidden" && <Badge tone="red">Hidden</Badge>}
                     </span>
+                    {actionable(report) && <AgeBar report={report} />}
                   </button>
                 </li>
               ))}
