@@ -53,7 +53,6 @@ function RoleMix() {
       subtitle="Role grants right now; an account can hold more than one"
       table={{ columns: ["Role", "Holders"], rows: mix.map((item) => [item.label, item.value]) }}
       title="Platform roles"
-      tone="violet"
     >
       <DonutChart centerLabel="role grants" centerValue={formatCount(total)} data={mix} height={180} />
     </ChartCard>

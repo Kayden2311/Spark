@@ -3,7 +3,7 @@
 import { useId, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { formatCount, shortDate, type Tone } from "../_lib/format";
+import { formatCount, shortDate } from "../_lib/format";
 import { CHART_INK, sequential } from "../_lib/palette";
 import { ErrorBanner } from "./ui";
 
@@ -86,18 +86,16 @@ interface ChartCardProps {
   emptyText?: string;
   height?: number;
   className?: string;
-  /** Colored left edge for a chart that owns a clear category elsewhere (its series color, a status). */
-  tone?: Tone;
   children: ReactNode;
 }
 
 /** A titled chart with loading, error and empty states, and a switch to view the numbers as a table. */
-export function ChartCard({ title, subtitle, legend, actions, table, loading, error, onRetry, empty, emptyText = "No activity in this period yet.", height = 260, className, tone, children }: ChartCardProps) {
+export function ChartCard({ title, subtitle, legend, actions, table, loading, error, onRetry, empty, emptyText = "No activity in this period yet.", height = 260, className, children }: ChartCardProps) {
   const [asTable, setAsTable] = useState(false);
   const headingId = useId();
   const ready = !loading && !error && !empty;
   return (
-    <section aria-labelledby={headingId} className={`admCard admChartCard${tone ? ` admCardToned admTone-${tone}` : ""}${className ? ` ${className}` : ""}`}>
+    <section aria-labelledby={headingId} className={`admCard admChartCard${className ? ` ${className}` : ""}`}>
       <div className="admChartHead">
         <div className="admChartTitle">
           <h2 id={headingId}>{title}</h2>
@@ -252,7 +250,9 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
   );
 }
 
-/** Part-to-whole for a handful of categories. More than six categories should fold into "Other". */
+/** Part-to-whole for a handful of categories. More than six categories should fold into "Other". A
+ * hovered slice (from the ring itself or its legend row) pops out slightly and dims the rest, with the
+ * tooltip layered above the center label so the two never visually collide. */
 export function DonutChart({ data, centerValue, centerLabel, valueFormat = formatCount, height = 220 }: {
   data: Array<{ label: string; value: number; color: string }>;
   centerValue: string;
@@ -261,6 +261,7 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
   height?: number;
 }) {
   const reduced = useReducedMotion();
+  const [active, setActive] = useState<number | null>(null);
   const total = data.reduce((sum, item) => sum + item.value, 0);
   return (
     <div className="admDonut">
@@ -273,12 +274,24 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
               innerRadius="68%"
               isAnimationActive={!reduced}
               nameKey="label"
+              onMouseEnter={(_, index) => setActive(index)}
+              onMouseLeave={() => setActive(null)}
               outerRadius="98%"
               paddingAngle={data.length > 1 ? 1.5 : 0}
               stroke={CHART_INK.surface}
               strokeWidth={2}
             >
-              {data.map((item) => <Cell fill={item.color} key={item.label} />)}
+              {data.map((item, index) => (
+                <Cell
+                  className={active === index ? "admDonutActiveSlice" : undefined}
+                  fill={item.color}
+                  fillOpacity={active === null || active === index ? 1 : 0.4}
+                  key={item.label}
+                  stroke={active === index ? "#0f172a" : CHART_INK.surface}
+                  strokeWidth={active === index ? 2.5 : 2}
+                  style={{ transition: "fill-opacity .15s ease, stroke .15s ease", cursor: "pointer" }}
+                />
+              ))}
             </Pie>
             <Tooltip
               content={(props) => {
@@ -293,6 +306,7 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
                 );
               }}
               isAnimationActive={false}
+              wrapperStyle={{ zIndex: 20 }}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -302,8 +316,13 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
         </div>
       </div>
       <ul className="admDonutLegend">
-        {data.map((item) => (
-          <li key={item.label}>
+        {data.map((item, index) => (
+          <li
+            className={active === index ? "admDonutLegendActive" : undefined}
+            key={item.label}
+            onMouseEnter={() => setActive(index)}
+            onMouseLeave={() => setActive(null)}
+          >
             <span aria-hidden="true" className="admLegendSwatch" style={{ background: item.color }} />
             <span className="admDonutName">{item.label}</span>
             <strong>{valueFormat(item.value)}</strong>

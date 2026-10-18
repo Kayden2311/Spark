@@ -239,7 +239,7 @@ function TriageDesk() {
       )}
 
       <div className="admGrid2">
-        <Card subtitle="Last 30 days" title="Queue health" tone="amber">
+        <Card subtitle="Last 30 days" title="Queue health">
           <div className="admMetricTiles">
             <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-amber"><InboxIcon /></span>} label="Open now" value={stats.data ? formatCount(stats.data.backlog) : "–"} />
             <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-violet"><PulseIcon /></span>} label="Opened (30d)" value={stats.data ? formatCount(stats.data.opened) : "–"} />
@@ -247,7 +247,7 @@ function TriageDesk() {
             <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-blue"><ClockIcon /></span>} label="Median time to decision" value={stats.data?.medianHoursToClose == null ? "–" : `${stats.data.medianHoursToClose.toFixed(1)} h`} />
           </div>
         </Card>
-        <Card subtitle={`${REPORT_STATUS[status].label} queue · ${formatCount(loaded.length)} loaded`} title="By reason" tone="violet">
+        <Card subtitle={`${REPORT_STATUS[status].label} queue · ${formatCount(loaded.length)} loaded`} title="By reason">
           <BarList
             color={VIZ.violet}
             emptyText="Nothing in this queue yet."

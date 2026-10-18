@@ -95,7 +95,6 @@ function CommunitiesList() {
         subtitle={`${filter === "all" ? "Every" : filter === "flagged" ? "Flagged" : COMMUNITY_STATE[filter as CommunityState]?.label ?? filter} community loaded, by health`}
         table={{ columns: ["Health", "Communities"], rows: healthMix.map((item) => [item.label, item.value]) }}
         title="Health mix"
-        tone="green"
       >
         <DonutChart centerLabel="loaded" centerValue={formatCount(list.items.length)} data={healthMix} height={180} />
       </ChartCard>

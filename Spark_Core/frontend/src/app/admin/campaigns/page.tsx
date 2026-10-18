@@ -135,7 +135,7 @@ function CampaignReview() {
       ) : (
       <>
         {!list.loading && baseItems.length > 0 && (
-          <Card flush subtitle={`${filter === "all" ? "Every" : REVIEW_STATUS[filter].label} campaign loaded, by status`} title="Review pipeline by status" tone="blue">
+          <Card flush subtitle={`${filter === "all" ? "Every" : REVIEW_STATUS[filter].label} campaign loaded, by status`} title="Review pipeline by status">
             <BarList
               color={VIZ.blue}
               items={COLUMNS.filter((column) => baseItems.some((item) => item.reviewStatus === column)).map((column) => ({

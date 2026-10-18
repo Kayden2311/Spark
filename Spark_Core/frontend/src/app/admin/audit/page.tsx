@@ -99,12 +99,12 @@ function AuditLog() {
 
       {list.items.length > 0 && (
         <div className="admGrid2">
-          <Card subtitle={`Across the ${list.items.length} entries loaded below`} title="Actions by staff member" tone="navy">
+          <Card subtitle={`Across the ${list.items.length} entries loaded below`} title="Actions by staff member">
             <div className="admCardInset">
               <BarList color={VIZ.blue} items={byStaff.map((item) => ({ key: item.key, label: item.key, value: item.value }))} />
             </div>
           </Card>
-          <Card subtitle={`Across the ${list.items.length} entries loaded below`} title="Actions by target" tone="violet">
+          <Card subtitle={`Across the ${list.items.length} entries loaded below`} title="Actions by target">
             <div className="admCardInset">
               <BarList color={VIZ.violet} items={byTarget.map((item) => ({ key: item.key, label: item.key === "community" ? "Communities" : `${humanize(item.key)}s`, value: item.value }))} />
             </div>

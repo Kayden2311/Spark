@@ -99,7 +99,6 @@ function Billing() {
           subtitle="Recurring revenue at the end of each month, at today's prices (yearly plans count as one twelfth)"
           table={{ columns: ["Month", "MRR", "New paid", "Cancelled"], rows: months.map((point) => [shortMonth(point.month), formatMoney(point.mrrMinor, currency), point.newPaid, point.churned]) }}
           title="Monthly recurring revenue"
-          tone="blue"
         >
           <TrendChart
             data={months.map((point) => ({ ...point, mrr: point.mrrMinor }))}
@@ -118,7 +117,6 @@ function Billing() {
           subtitle={freePlan ? `Share of MRR by paid plan · ${formatCount(freePlan.subscriptions)} workspaces on ${freePlan.name}` : "Share of MRR by paid plan"}
           table={{ columns: ["Plan", "Subscriptions", "MRR"], rows: (overview.data?.planMix ?? []).map((plan) => [plan.name, plan.subscriptions, formatMoney(plan.mrrMinor, plan.currency ?? currency)]) }}
           title="Plan mix"
-          tone="green"
         >
           <DonutChart
             centerLabel="paying"
@@ -141,11 +139,10 @@ function Billing() {
           subtitle="Paid subscriptions started and cancelled each month"
           table={{ columns: ["Month", "New paid", "Cancelled"], rows: months.map((point) => [shortMonth(point.month), point.newPaid, point.churned]) }}
           title="Subscription movement"
-          tone="green"
         >
           <TrendChart data={months as unknown as Array<Record<string, unknown>>} height={220} kind="bar" series={[{ key: "newPaid", ...SERIES.newPaid }, { key: "churned", ...SERIES.churned }]} xFormat={shortMonth} xKey="month" />
         </ChartCard>
-        <Card subtitle="Money owed and payment failures to follow up." title="Collections" tone="amber">
+        <Card subtitle="Money owed and payment failures to follow up." title="Collections">
           {!overview.data && !overview.error && <div className="admCardInset"><SkeletonRows rows={4} /></div>}
           {overview.data && (
             <ul className="admStatList">

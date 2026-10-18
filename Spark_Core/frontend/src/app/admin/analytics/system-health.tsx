@@ -223,7 +223,6 @@ export function SystemHealthPanel() {
           subtitle={`95% of requests finished within this time, ${perBucket}`}
           table={{ columns: ["From", "p95 (ms)"], rows: traffic.series.filter((point) => point.p95Ms !== null).map((point) => [minuteLabel(point.minute), point.p95Ms ?? 0]) }}
           title="Response time"
-          tone="violet"
         >
           <TrendChart
             data={traffic.series.map((point) => ({ ...point, p95: point.p95Ms ?? 0 }))}
@@ -238,17 +237,17 @@ export function SystemHealthPanel() {
 
       <p className="admEyebrow">Slowest &amp; failing endpoints</p>
       <div className="admGrid2">
-        <Card flush subtitle={`Highest p95 response time, ${windowLabel} (endpoints with 3+ requests)`} title="Slowest endpoints" tone="amber">
+        <Card flush subtitle={`Highest p95 response time, ${windowLabel} (endpoints with 3+ requests)`} title="Slowest endpoints">
           <RouteTable empty="Not enough traffic to rank endpoints yet." focus="latency" routes={traffic.slowest} />
         </Card>
-        <Card flush subtitle={`Endpoints that returned errors, ${windowLabel}`} title="Endpoints with errors" tone="red">
+        <Card flush subtitle={`Endpoints that returned errors, ${windowLabel}`} title="Endpoints with errors">
           <RouteTable empty="No errors in this window." focus="errors" routes={traffic.failing} />
         </Card>
       </div>
 
       <p className="admEyebrow">Infrastructure</p>
       <div className="admGrid2">
-        <Card subtitle="Size, connections and how often reads are served from memory" title="Database" tone="blue">
+        <Card subtitle="Size, connections and how often reads are served from memory" title="Database">
           <div className="admMetricTiles">
             <MetricTile
               hint="share of reads from memory, not disk"
@@ -268,7 +267,7 @@ export function SystemHealthPanel() {
             <MetricTile hint={data.database.poolWaiting > 0 ? `${data.database.poolWaiting} waiting` : undefined} icon={<span aria-hidden="true" className="admMetricIcon admTone-blue"><CpuIcon /></span>} label="API pool" value={`${data.database.poolTotal - data.database.poolIdle} / ${data.database.poolTotal}`} />
           </div>
         </Card>
-        <Card subtitle="The API process that answered this request" title="API process" tone="violet">
+        <Card subtitle="The API process that answered this request" title="API process">
           <div className="admMetricTiles">
             <MetricTile
               hint="p99 over the last minute"
