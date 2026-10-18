@@ -50,6 +50,34 @@ async function asSession(tokenHash: Buffer | null, sql: string, values: unknown[
   } finally { client.release(); }
 }
 
+type Account = { id: string; token: Buffer; email: string };
+// A user with a primary email and a live session, created directly by the table owner.
+async function account(name: string, email = `${randomUUID()}@example.com`): Promise<Account> {
+  const id = randomUUID(), token = newTokenHash();
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,$2)`, [id, name]);
+  await owner.query(`INSERT INTO ${table("user_emails")} (user_id,email,normalized_email,is_primary) VALUES ($1,$2,lower(btrim($2)),true)`, [id, email]);
+  await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$3)`, [id, token, future()]);
+  return { id, token, email };
+}
+const inDays = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+const uniqueSlug = () => `ws-${randomUUID().slice(0, 12)}`;
+async function createWorkspace(who: Account, name = "Acme", slug = uniqueSlug()) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_create_workspace")}($1,$2)`, [name, slug])).rows[0] as { outcome: string; workspace_id: string | null };
+}
+async function addMember(workspace: string, who: Account, role: string) {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("workspace_memberships")} (tenant_id,user_id,role) VALUES ($1,$2,$3)`, [workspace, who.id, role]);
+}
+async function invite(who: Account, workspace: string, email: string, role = "member", tokenHash = newTokenHash(), expiresAt = inDays(7)) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_create_invitation")}($1,$2,$3,$4,$5)`, [workspace, email, role, tokenHash, expiresAt])).rows[0] as { outcome: string; invitation_id: string | null };
+}
+async function accept(who: Account, tokenHash: Buffer) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_accept_invitation")}($1)`, [tokenHash])).rows[0];
+}
+const outcome = async (who: Account, call: string, values: unknown[]) => (await asSession(who.token, `SELECT ${fn(call)} AS outcome`, values)).rows[0].outcome as string;
+const auditRows = async (resource: string) => (await owner.query(`SELECT action,actor_user_id,resource_type,metadata FROM ${table("audit_events")} WHERE resource_id=$1 ORDER BY created_at,id`, [resource])).rows;
+
 beforeAll(async () => {
   await owner.connect();
   const runtimeDatabase = await runtime.query("SELECT current_database() AS name,current_user AS role");
@@ -120,7 +148,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(15);
+    expect(result.rows[0].count).toBe(16);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -261,9 +289,13 @@ describe("Local PostgreSQL schema", () => {
     await reject(`INSERT INTO ${table("calendar_events")} (tenant_id,organizer_user_id,title,starts_at,ends_at) VALUES ($1,$2,'Invalid',now(),now()-interval '1 hour')`,[tenantA,userA],"23514");
     await rollback(async () => {
       const event=await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload) VALUES ($1,'test','workspace',$1,1,'{}') RETURNING id`,[tenantA]);
-      const sql=`INSERT INTO ${table("notifications")} (tenant_id,recipient_user_id,outbox_event_id,kind,title,resource_type,resource_id) VALUES ($1,$2,$3,'test','Test','workspace',$1)`;
+      const sql=`INSERT INTO ${table("notifications")} (tenant_id,recipient_user_id,outbox_event_id,kind,title,resource_type,resource_id) VALUES ($1,$2,$3,'invitation_accepted','Test','workspace',$1)`;
       const values=[tenantA,userA,event.rows[0].id];
       await owner.query(sql,values); await expect(owner.query(sql,values)).rejects.toMatchObject({code:"23505"});
+    });
+    await rollback(async () => {
+      const event=await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload) VALUES ($1,'test','workspace',$1,1,'{}') RETURNING id`,[tenantA]);
+      await expect(owner.query(`INSERT INTO ${table("notifications")} (tenant_id,recipient_user_id,outbox_event_id,kind,title,resource_type,resource_id) VALUES ($1,$2,$3,'unknown_kind','Test','workspace',$1)`,[tenantA,userA,event.rows[0].id])).rejects.toMatchObject({code:"23514"});
     });
   });
   it("isolates tenants and clears pooled context after commit and rollback", async () => {
@@ -487,7 +519,7 @@ describe("Local PostgreSQL schema", () => {
     await expect(owner.query(`INSERT INTO ${table("moderation_actions")} (tenant_id,community_id,actor_user_id,action,reason) VALUES ($1,$2,$3,'hide','Not a moderator')`, [tenantA, communityA, visitor])).rejects.toMatchObject({ code: "23514" });
   });
   it("keeps the runtime role read-only and every definer function pinned", async () => {
-    for (const name of ["users","user_emails","posts","post_comments","communities","platform_role_assignments","sessions","content_reports","moderation_actions","promotion_campaigns","promotion_reviews","password_credentials","workspaces","workspace_memberships"]) {
+    for (const name of ["users","user_emails","posts","post_comments","communities","platform_role_assignments","sessions","content_reports","moderation_actions","promotion_campaigns","promotion_reviews","password_credentials","workspaces","workspace_memberships","workspace_invitations","notifications","outbox_events","audit_events"]) {
       for (const privilege of ["INSERT","UPDATE","DELETE"]) {
         const result = await owner.query("SELECT has_table_privilege('spark_app',$1,$2) AS allowed", [`"${namespace}"."${name}"`, privilege]);
         expect({ name, privilege, allowed: result.rows[0].allowed }).toEqual({ name, privilege, allowed: false });
@@ -707,7 +739,8 @@ describe("Local PostgreSQL schema", () => {
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
       "staff_report_context", "staff_report_preview", "staff_report_stats", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
-      "staff_user_sessions",
+      "staff_user_sessions", "ws_accept_invitation", "ws_create_invitation", "ws_create_workspace", "ws_invitation_preview", "ws_list_members",
+      "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role", "ws_update_workspace",
     ]);
   });
   it("protects admin-tier accounts, drops revoked roles at once and guards promotions of closed communities", async () => {
@@ -929,5 +962,284 @@ describe("Local PostgreSQL schema", () => {
     const invoices = await call(adminToken, `SELECT * FROM ${fn("staff_list_invoices")}('open',NULL,NULL,10)`);
     expect(invoices).toHaveLength(1);
     expect(invoices[0]).toMatchObject({ plan_name: "Pro", total_minor: "2900", status: "open" });
+  });
+  it("creates a workspace with its owner atomically", async () => {
+    const alice = await account("Alice Owner");
+    const created = await createWorkspace(alice, "  Acme Labs  ", "acme-" + randomUUID().slice(0, 8));
+    expect(created.outcome).toBe("ok");
+    const workspace = created.workspace_id!;
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT name,created_by_user_id,version FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows).toEqual([{ name: "Acme Labs", created_by_user_id: alice.id, version: 1 }]);
+    expect((await owner.query(`SELECT user_id,role,status FROM ${table("workspace_memberships")} WHERE tenant_id=$1`, [workspace])).rows).toEqual([{ user_id: alice.id, role: "owner", status: "active" }]);
+    expect(await auditRows(workspace)).toEqual([expect.objectContaining({ action: "workspace.created", actor_user_id: alice.id, resource_type: "workspace" })]);
+    expect((await asSession(alice.token, `SELECT id FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows).toHaveLength(1);
+    const slug = (await owner.query(`SELECT slug FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows[0].slug;
+    const other = await account("Other Founder");
+    expect(await createWorkspace(other, "Copy", slug)).toEqual({ outcome: "slug_taken", workspace_id: null });
+    expect(await createWorkspace(alice, "Copy", slug)).toEqual({ outcome: "slug_taken", workspace_id: null });
+    for (let index = 1; index < 20; index++) expect((await createWorkspace(alice, `Workspace ${index}`)).outcome).toBe("ok");
+    expect(await createWorkspace(alice, "One too many")).toEqual({ outcome: "too_many_workspaces", workspace_id: null });
+    const call = `SELECT * FROM ${fn("ws_create_workspace")}($1,$2)`;
+    for (const bad of ["-ab", "ab", "Upper-case", "trailing-", "a".repeat(41), "has space"]) {
+      await expect(asSession(other.token, call, ["Valid", bad])).rejects.toMatchObject({ code: "22023", message: "Invalid workspace slug" });
+    }
+    for (const bad of ["   ", "x".repeat(81)]) {
+      await expect(asSession(other.token, call, [bad, uniqueSlug()])).rejects.toMatchObject({ code: "22023", message: "Invalid workspace name" });
+    }
+    for (const token of [null, newTokenHash()]) {
+      await expect(asSession(token, call, ["No session", uniqueSlug()])).rejects.toMatchObject({ code: "28000" });
+    }
+  });
+  it("renames with optimistic version", async () => {
+    const alice = await account("Rename Owner"), bob = await account("Rename Member"), carol = await account("Rename Stranger");
+    const workspace = (await createWorkspace(alice, "Acme")).workspace_id!;
+    await addMember(workspace, bob, "member");
+    const rename = (who: Account, target: string, version: number, name: string) =>
+      asSession(who.token, `SELECT * FROM ${fn("ws_update_workspace")}($1,$2,$3)`, [target, version, name]).then((r) => r.rows[0]);
+    expect(await rename(alice, workspace, 1, "  Renamed  ")).toEqual({ outcome: "ok", version: 2 });
+    expect(await rename(alice, workspace, 1, "Stale")).toEqual({ outcome: "version_mismatch", version: 2 });
+    expect(await rename(bob, workspace, 2, "Member rename")).toEqual({ outcome: "forbidden", version: null });
+    expect(await rename(carol, workspace, 2, "Stranger rename")).toEqual({ outcome: "not_found", version: null });
+    expect(await rename(alice, randomUUID(), 1, "Missing")).toEqual({ outcome: "not_found", version: null });
+    await expect(rename(alice, workspace, 2, " ")).rejects.toMatchObject({ code: "22023", message: "Invalid workspace name" });
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT name,version FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows[0]).toEqual({ name: "Renamed", version: 2 });
+    const renamed = (await auditRows(workspace)).filter((row) => row.action === "workspace.renamed");
+    expect(renamed).toEqual([{ action: "workspace.renamed", actor_user_id: alice.id, resource_type: "workspace", metadata: { from: "Acme", to: "Renamed" } }]);
+  });
+  it("invites, previews, revokes and expires invitations", async () => {
+    const alice = await account("Invite Owner"), dave = await account("Invite Admin"), bob = await account("Invite Member", `Invite.Member.${randomUUID()}@Example.com`);
+    const carol = await account("Invite Stranger");
+    const workspace = (await createWorkspace(alice, "Invite Co")).workspace_id!;
+    await addMember(workspace, dave, "admin");
+    await addMember(workspace, bob, "member");
+    const erin = `erin.${randomUUID()}@example.com`;
+    expect((await invite(dave, workspace, erin, "admin")).outcome).toBe("forbidden");
+    expect((await invite(bob, workspace, erin)).outcome).toBe("forbidden");
+    expect((await invite(carol, workspace, erin)).outcome).toBe("not_found");
+    expect((await invite(alice, randomUUID(), erin)).outcome).toBe("not_found");
+    expect((await invite(alice, workspace, `  ${bob.email.toUpperCase()} `)).outcome).toBe("already_member");
+    const token = newTokenHash();
+    const created = await invite(alice, workspace, `  ${erin.toUpperCase()}  `, "member", token);
+    expect(created.outcome).toBe("ok");
+    const invitation = created.invitation_id!;
+    expect((await invite(dave, workspace, erin)).outcome).toBe("invitation_pending");
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT email_normalized,role,status,invited_by_user_id FROM ${table("workspace_invitations")} WHERE id=$1`, [invitation])).rows[0])
+      .toEqual({ email_normalized: erin, role: "member", status: "pending", invited_by_user_id: alice.id });
+    const outbox = async () => (await owner.query(`SELECT event_type,aggregate_type,aggregate_version,payload,processed_at FROM ${table("outbox_events")} WHERE aggregate_id=$1 ORDER BY aggregate_version`, [invitation])).rows;
+    expect(await outbox()).toEqual([{ event_type: "invitation.created", aggregate_type: "workspace_invitation", aggregate_version: 1, payload: { invitationId: invitation }, processed_at: null }]);
+    expect(await auditRows(invitation)).toEqual([{ action: "invitation.created", actor_user_id: alice.id, resource_type: "invitation", metadata: { role: "member" } }]);
+
+    const call = `SELECT * FROM ${fn("ws_create_invitation")}($1,$2,$3,$4,$5)`;
+    for (const [email, role, expires, message] of [
+      ["not-an-email", "member", inDays(7), "Invalid invitation email"], ["a b@example.com", "member", inDays(7), "Invalid invitation email"],
+      [`${"x".repeat(250)}@example.com`, "member", inDays(7), "Invalid invitation email"], [erin, "owner", inDays(7), "Invalid invitation role"],
+      [erin, "member", inDays(9), "Invalid invitation expiry"], [erin, "member", new Date(Date.now() - 1000), "Invalid invitation expiry"],
+    ] as const) {
+      await expect(asSession(alice.token, call, [workspace, email, role, newTokenHash(), expires])).rejects.toMatchObject({ code: "22023", message });
+    }
+    await expect(asSession(null, call, [workspace, erin, "member", newTokenHash(), inDays(7)])).rejects.toMatchObject({ code: "28000" });
+
+    // Previews need no session; the token hash itself is never readable by the runtime role.
+    const preview = async (hash: Buffer) => (await runtime.query(`SELECT * FROM ${fn("ws_invitation_preview")}($1)`, [hash])).rows;
+    expect(await preview(token)).toEqual([expect.objectContaining({ status: "pending", workspace_name: "Invite Co", inviter_name: "Invite Owner", role: "member", email_hint: "e***@example.com" })]);
+    expect(await preview(newTokenHash())).toEqual([]);
+    expect((await owner.query(`SELECT has_column_privilege('spark_app',$1,'token_hash','SELECT') AS allowed`, [table("workspace_invitations")])).rows[0].allowed).toBe(false);
+    await expect(asSession(alice.token, `SELECT token_hash FROM ${table("workspace_invitations")}`)).rejects.toMatchObject({ code: "42501" });
+    const listed = (who: Account) => asSession(who.token, `SELECT id FROM ${table("workspace_invitations")} WHERE tenant_id=$1`, [workspace]).then((r) => r.rows.map((row) => row.id));
+    expect(await listed(alice)).toEqual([invitation]);
+    expect(await listed(dave)).toEqual([invitation]);
+    expect(await listed(bob)).toEqual([]);
+    expect(await listed(carol)).toEqual([]);
+
+    expect(await outcome(bob, "ws_resend_invitation($1)", [invitation])).toBe("forbidden");
+    expect(await outcome(carol, "ws_resend_invitation($1)", [invitation])).toBe("not_found");
+    expect(await outcome(dave, "ws_resend_invitation($1)", [invitation])).toBe("ok");
+    expect((await outbox()).map((row) => [row.event_type, row.aggregate_version])).toEqual([["invitation.created", 1], ["invitation.resent", 2]]);
+    expect(await outcome(carol, "ws_revoke_invitation($1)", [invitation])).toBe("not_found");
+    expect(await outcome(bob, "ws_revoke_invitation($1)", [invitation])).toBe("forbidden");
+    expect(await outcome(alice, "ws_revoke_invitation($1)", [randomUUID()])).toBe("not_found");
+    expect(await outcome(alice, "ws_revoke_invitation($1)", [invitation])).toBe("ok");
+    expect(await outcome(alice, "ws_revoke_invitation($1)", [invitation])).toBe("not_pending");
+    expect(await outcome(alice, "ws_resend_invitation($1)", [invitation])).toBe("not_pending");
+    expect((await preview(token))[0].status).toBe("revoked");
+    expect((await auditRows(invitation)).map((row) => row.action)).toEqual(["invitation.created", "invitation.resent", "invitation.revoked"]);
+    expect(await accept(await account("Erin", erin), token)).toMatchObject({ outcome: "invitation_revoked", workspace_id: null });
+
+    // An admin manages member invitations only.
+    const adminInvite = await invite(alice, workspace, `admin.${randomUUID()}@example.com`, "admin");
+    expect(adminInvite.outcome).toBe("ok");
+    expect(await outcome(dave, "ws_revoke_invitation($1)", [adminInvite.invitation_id])).toBe("forbidden");
+    expect(await outcome(dave, "ws_resend_invitation($1)", [adminInvite.invitation_id])).toBe("forbidden");
+
+    // A pending invitation past its expiry previews as expired, cannot be accepted, and is retired by a new invite.
+    const frank = `frank.${randomUUID()}@example.com`, staleToken = newTokenHash(), stale = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("workspace_invitations")} (id,tenant_id,email_normalized,role,token_hash,invited_by_user_id,created_at,expires_at) VALUES ($1,$2,$3,'member',$4,$5,now()-interval '9 days',now()-interval '1 day')`, [stale, workspace, frank, staleToken, alice.id]);
+    expect((await preview(staleToken))[0].status).toBe("expired");
+    expect((await accept(await account("Frank", frank), staleToken)).outcome).toBe("invitation_expired");
+    expect((await invite(alice, workspace, frank)).outcome).toBe("ok");
+    expect((await owner.query(`SELECT status FROM ${table("workspace_invitations")} WHERE id=$1`, [stale])).rows[0].status).toBe("expired");
+  });
+  it("accepts only for the invited account", async () => {
+    const alice = await account("Accept Owner"), bobEmail = `bob.${randomUUID()}@example.com`;
+    const bob = await account("Bob", bobEmail), mallory = await account("Mallory");
+    const workspace = (await createWorkspace(alice, "Accept Co")).workspace_id!;
+    await owner.query("SET ROLE spark_owner");
+    const slug = (await owner.query(`SELECT slug FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows[0].slug;
+    const token = newTokenHash();
+    const invitation = (await invite(alice, workspace, `  ${bobEmail.toUpperCase()} `, "member", token)).invitation_id!;
+    expect(await accept(mallory, token)).toEqual({ outcome: "recipient_mismatch", workspace_id: null, workspace_slug: null, role: null });
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT status FROM ${table("workspace_invitations")} WHERE id=$1`, [invitation])).rows[0].status).toBe("pending");
+    expect(await accept(bob, newTokenHash())).toMatchObject({ outcome: "invalid_invitation", workspace_id: null });
+    await expect(asSession(null, `SELECT * FROM ${fn("ws_accept_invitation")}($1)`, [token])).rejects.toMatchObject({ code: "28000" });
+
+    expect(await accept(bob, token)).toEqual({ outcome: "ok", workspace_id: workspace, workspace_slug: slug, role: "member" });
+    expect((await owner.query(`SELECT role,status FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [workspace, bob.id])).rows).toEqual([{ role: "member", status: "active" }]);
+    expect((await owner.query(`SELECT status,accepted_by_user_id FROM ${table("workspace_invitations")} WHERE id=$1`, [invitation])).rows[0]).toEqual({ status: "accepted", accepted_by_user_id: bob.id });
+    expect((await owner.query(`SELECT kind,title,resource_type,resource_id FROM ${table("notifications")} WHERE recipient_user_id=$1`, [alice.id])).rows)
+      .toEqual([{ kind: "invitation_accepted", title: "Bob joined Accept Co", resource_type: "workspace", resource_id: workspace }]);
+    expect((await owner.query(`SELECT event_type,payload,processed_at IS NOT NULL AS processed FROM ${table("outbox_events")} WHERE aggregate_id=$1 AND event_type='invitation.accepted'`, [invitation])).rows)
+      .toEqual([{ event_type: "invitation.accepted", payload: { workspaceId: workspace, userId: bob.id }, processed: true }]);
+    expect((await auditRows(invitation)).map((row) => [row.action, row.actor_user_id])).toEqual([["invitation.created", alice.id], ["invitation.accepted", bob.id]]);
+    expect(await accept(bob, token)).toEqual({ outcome: "already_member", workspace_id: workspace, workspace_slug: slug, role: "member" });
+    expect((await accept(mallory, token)).outcome).toBe("invitation_used");
+
+    // Member list: active members only, explicit columns, email visible to owners and admins only.
+    const members = (who: Account) => asSession(who.token, `SELECT * FROM ${fn("ws_list_members")}($1)`, [workspace]);
+    const ownerView = await members(alice);
+    expect(ownerView.fields.map((field) => field.name)).toEqual(["user_id", "display_name", "avatar_url", "email", "role", "status", "joined_at"]);
+    expect(ownerView.rows.map((row) => [row.user_id, row.role, row.email])).toEqual(expect.arrayContaining([[alice.id, "owner", alice.email], [bob.id, "member", bobEmail]]));
+    expect(ownerView.rows).toHaveLength(2);
+    expect((await members(bob)).rows.every((row) => row.email === null)).toBe(true);
+    expect((await members(mallory)).rows).toEqual([]);
+
+    // A member who left is re-activated by a new invitation instead of getting a second row.
+    expect(await outcome(bob, "ws_remove_member($1,$2)", [workspace, bob.id])).toBe("ok");
+    expect((await members(alice)).rows.map((row) => row.user_id)).toEqual([alice.id]);
+    const again = newTokenHash();
+    expect((await invite(alice, workspace, bobEmail, "admin", again)).outcome).toBe("ok");
+    expect(await accept(bob, again)).toEqual({ outcome: "ok", workspace_id: workspace, workspace_slug: slug, role: "admin" });
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT role,status,left_at FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [workspace, bob.id])).rows).toEqual([{ role: "admin", status: "active", left_at: null }]);
+
+    // A suspended membership is not silently re-activated.
+    await owner.query(`UPDATE ${table("workspace_memberships")} SET status='suspended' WHERE tenant_id=$1 AND user_id=$2`, [workspace, bob.id]);
+    const third = newTokenHash();
+    expect((await invite(alice, workspace, bobEmail, "member", third)).outcome).toBe("ok");
+    expect((await accept(bob, third)).outcome).toBe("membership_suspended");
+    expect((await owner.query(`SELECT status FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [workspace, bob.id])).rows[0].status).toBe("suspended");
+  });
+  it("accepts once under concurrency", async () => {
+    const alice = await account("Race Owner"), bobEmail = `race.${randomUUID()}@example.com`, bob = await account("Racer", bobEmail);
+    const workspace = (await createWorkspace(alice, "Race Co")).workspace_id!;
+    const token = newTokenHash();
+    expect((await invite(alice, workspace, bobEmail, "member", token)).outcome).toBe("ok");
+    const clients = [0, 1].map(() => new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 }));
+    await Promise.all(clients.map((client) => client.connect()));
+    try {
+      await Promise.all(clients.map((client) => client.query("SET lock_timeout = '15s'")));
+      const attempt = async (client: pg.Client) => {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('spark.session_token_hash',$1,true)", [bob.token.toString("hex")]);
+        const result = await client.query(`SELECT * FROM ${fn("ws_accept_invitation")}($1)`, [token]);
+        await client.query("COMMIT");
+        return result.rows[0].outcome as string;
+      };
+      expect((await Promise.all(clients.map(attempt))).sort()).toEqual(["already_member", "ok"]);
+    } finally {
+      await Promise.allSettled(clients.map((client) => client.query("ROLLBACK")));
+      await Promise.allSettled(clients.map((client) => client.end()));
+    }
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2 AND status='active'`, [workspace, bob.id])).rows[0].total).toBe(1);
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("notifications")} WHERE tenant_id=$1`, [workspace])).rows[0].total).toBe(1);
+  });
+  it("protects the last owner", async () => {
+    const alice = await account("Sole Owner"), bob = await account("Promoted"), carol = await account("Admin C"), dave = await account("Admin D");
+    const eve = await account("Member E"), frank = await account("Member F"), stranger = await account("Outsider");
+    const workspace = (await createWorkspace(alice, "Owner Co")).workspace_id!;
+    for (const [who, role] of [[bob, "member"], [carol, "admin"], [dave, "admin"], [eve, "member"], [frank, "member"]] as const) await addMember(workspace, who, role);
+    const setRole = (who: Account, target: string, role: string) => outcome(who, "ws_set_member_role($1,$2,$3)", [workspace, target, role]);
+    const remove = (who: Account, target: string) => outcome(who, "ws_remove_member($1,$2)", [workspace, target]);
+    const membershipId = async (who: Account) => {
+      await owner.query("SET ROLE spark_owner");
+      return (await owner.query(`SELECT id FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [workspace, who.id])).rows[0].id as string;
+    };
+
+    expect(await setRole(alice, alice.id, "admin")).toBe("last_owner");
+    expect(await remove(alice, alice.id)).toBe("last_owner");
+    expect(await setRole(carol, eve.id, "admin")).toBe("forbidden");
+    expect(await setRole(stranger, eve.id, "admin")).toBe("not_found");
+    expect(await setRole(alice, stranger.id, "admin")).toBe("not_found");
+    await expect(setRole(alice, eve.id, "boss")).rejects.toMatchObject({ code: "22023", message: "Invalid member role" });
+    expect(await setRole(alice, bob.id, "owner")).toBe("ok");
+    expect(await setRole(alice, alice.id, "admin")).toBe("ok");
+    expect((await auditRows(await membershipId(bob))).map((row) => [row.action, row.metadata.from, row.metadata.to])).toEqual([["member.role_changed", "member", "owner"]]);
+    expect(await setRole(bob, bob.id, "member")).toBe("last_owner");
+
+    expect(await remove(carol, dave.id)).toBe("forbidden");
+    expect(await remove(carol, bob.id)).toBe("forbidden");
+    expect(await remove(eve, frank.id)).toBe("forbidden");
+    expect(await remove(stranger, eve.id)).toBe("not_found");
+    expect(await remove(carol, stranger.id)).toBe("not_found");
+    expect(await remove(carol, eve.id)).toBe("ok");
+    expect(await remove(carol, eve.id)).toBe("not_found");
+    expect(await remove(frank, frank.id)).toBe("ok");
+    expect(await remove(bob, alice.id)).toBe("ok");
+    expect((await auditRows(await membershipId(eve))).map((row) => [row.action, row.actor_user_id])).toEqual([["member.removed", carol.id]]);
+    expect((await auditRows(await membershipId(frank))).map((row) => [row.action, row.actor_user_id])).toEqual([["member.left", frank.id]]);
+    expect((await owner.query(`SELECT status,left_at IS NOT NULL AS left FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [workspace, frank.id])).rows[0]).toEqual({ status: "left", left: true });
+    // Removed members see nothing of the workspace any more, not even its member list.
+    expect((await asSession(eve.token, `SELECT id FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows).toEqual([]);
+    expect((await asSession(alice.token, `SELECT * FROM ${fn("ws_list_members")}($1)`, [workspace])).rows).toEqual([]);
+    expect(await remove(alice, bob.id)).toBe("not_found");
+  });
+  it("hides platform-suspended and deleted coworkers", async () => {
+    const alice = await account("Viewer"), bob = await account("Coworker B");
+    const workspace = (await createWorkspace(alice, "Coworker Co")).workspace_id!;
+    await addMember(workspace, bob, "member");
+    const readable = async () => (await asSession(alice.token, `SELECT id FROM ${table("users")}`)).rows.map((row) => row.id).sort();
+    expect(await readable()).toEqual([alice.id, bob.id].sort());
+    try {
+      await owner.query(`UPDATE ${table("users")} SET status='suspended' WHERE id=$1`, [bob.id]);
+      expect(await readable()).toEqual([alice.id]);
+      await owner.query(`UPDATE ${table("users")} SET status='active',deleted_at=now() WHERE id=$1`, [bob.id]);
+      expect(await readable()).toEqual([alice.id]);
+      expect((await asSession(alice.token, `SELECT ${fn("is_coworker")}($1) AS visible`, [bob.id])).rows[0].visible).toBe(false);
+    } finally {
+      await owner.query(`UPDATE ${table("users")} SET status='active',deleted_at=NULL WHERE id=$1`, [bob.id]);
+    }
+    expect(await readable()).toEqual([alice.id, bob.id].sort());
+  });
+  it("gives revoked and expired sessions no workspace rows", async () => {
+    const revoked = newTokenHash(), expired = newTokenHash();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at,revoked_at) VALUES ($1,$2,'password',$3,now())`, [userA, revoked, future()]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,created_at,expires_at) VALUES ($1,$2,'password',now()-interval '2 hours',now()-interval '1 hour')`, [userA, expired]);
+    expect((await asSession(sessionA, `SELECT id FROM ${table("workspaces")} WHERE id=$1`, [tenantA])).rows).toHaveLength(1);
+    for (const token of [revoked, expired]) {
+      expect((await asSession(token, `SELECT id FROM ${table("workspaces")}`)).rows).toEqual([]);
+      expect((await asSession(token, `SELECT id FROM ${table("projects")}`)).rows).toEqual([]);
+      expect((await asSession(token, `SELECT id FROM ${table("workspace_memberships")}`)).rows).toEqual([]);
+    }
+  });
+  it("keeps an exact inventory of workspace row policies", async () => {
+    const tenantTables = ["startup_profiles","teams","team_memberships","projects","boards","issue_statuses","workflow_transitions","sprints","issues","issue_labels","issue_label_links","issue_comments","issue_links","issue_events","calendar_events","event_attendees"];
+    const ownerPolicy = ["owner_maintenance", "ALL", ["spark_owner"], "PERMISSIVE"];
+    const appRead = (name: string) => [name, "SELECT", ["spark_app"], "PERMISSIVE"];
+    const expected: Record<string, unknown[][]> = {
+      users: [ownerPolicy, appRead("self_and_coworker_read"), appRead("staff_read")],
+      workspaces: [ownerPolicy, appRead("workspace_read")],
+      workspace_memberships: [ownerPolicy, appRead("staff_read"), appRead("workspace_members_read")],
+      workspace_invitations: [appRead("invitation_admin_read"), ownerPolicy],
+      ...Object.fromEntries(tenantTables.map((name) => [name, [ownerPolicy, appRead("workspace_read")]])),
+    };
+    const policies = await owner.query(`SELECT tablename,policyname,cmd,roles::text[] AS roles,permissive FROM pg_policies WHERE schemaname=$1 AND tablename = ANY($2::text[]) ORDER BY tablename,policyname`, [namespace, Object.keys(expected)]);
+    const actual: Record<string, unknown[][]> = {};
+    for (const row of policies.rows) (actual[row.tablename] ??= []).push([row.policyname, row.cmd, row.roles, row.permissive]);
+    expect(actual).toEqual(expected);
   });
 });

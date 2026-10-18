@@ -1,6 +1,6 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0014_workspace_session_rls.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0015_workspace_membership_writes.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
 
@@ -37,6 +37,18 @@ Workspace row access is bound to the live session, not to the transaction-local 
 - `spark.require_session_actor()` returns the actor or raises `Live session required` (`28000`). It is internal to workspace write functions and not executable by `spark_app`.
 - `workspaces.version` (integer, default 1) is maintained by `maintain_record`: every update must advance it by exactly one.
 - Not yet migrated: community helpers (`is_community_member`, `can_read_community`, `can_read_post`) and `withDatabaseContext` still use `spark.user_id`/`spark.tenant_id`. They move to the session in a later phase.
+
+## Workspace, membership and invitation writes (`0015_workspace_membership_writes.sql`)
+
+The runtime role still has no INSERT, UPDATE or DELETE grant on these tables. Every write is a `spark.ws_*` SECURITY DEFINER function executable by `spark_app` that derives the actor from the live session (`28000` without one), raises `22023` with a fixed message for invalid input, returns a closed set of outcomes and writes one `audit_events` row in the same transaction. Non-members get `not_found`, members without the role get `forbidden`.
+
+- `ws_create_workspace`, `ws_update_workspace` (optimistic `version`), `ws_list_members` (active members, explicit columns, email only for owners and admins).
+- `ws_create_invitation`, `ws_resend_invitation`, `ws_revoke_invitation`, `ws_invitation_preview` (no session; masked email hint) and `ws_accept_invitation` (primary email must match; re-activates a `left` membership; outbox event and an `invitation_accepted` notification for the inviter). Owners manage all invitations, admins only `member` invitations. Invitation creation and resend enqueue `invitation.created`/`invitation.resent` outbox events; the hash passed at creation is an unusable placeholder until the worker issues the real token.
+- `ws_set_member_role` (owners only) and `ws_remove_member` (self-leave, owners remove anyone, admins remove members). The last active owner cannot be demoted or removed (`last_owner`); the check is explicit because the deferred `workspace_owner` trigger only fires at commit.
+- Lock order in every function: workspace row, then invitation, then membership.
+- `workspace_invitations`: column-level `SELECT` for `spark_app` without `token_hash` and `accepted_by_user_id`, policy `invitation_admin_read` for owners and admins.
+- `notifications.kind` is limited to `invitation_accepted` (later milestones extend the list).
+- `is_coworker` additionally hides platform-suspended and soft-deleted coworkers.
 
 ## Platform governance and audit (`0009_platform_governance.sql` to `0011_campaign_review_lock.sql`)
 
