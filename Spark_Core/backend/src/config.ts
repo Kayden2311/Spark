@@ -28,6 +28,17 @@ export interface AuthConfig {
   readonly rateLimitWindowMs: number;
 }
 
+/** Configuration of the background worker: only the worker database role and outbound email settings. */
+export interface WorkerConfig {
+  readonly logLevel: string;
+  readonly workerDatabaseUrl: string;
+  readonly databaseSsl: boolean;
+  readonly smtpUrl: string;
+  readonly emailFrom: string;
+  /** Origin (plus optional path) of the web app that email links point to, without a trailing slash. */
+  readonly appBaseUrl: string;
+}
+
 function integer(value: string | undefined, fallback: number, name: string): number {
   const parsed = Number(value ?? fallback);
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -120,6 +131,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (production && env.MIGRATION_DATABASE_URL) {
     throw new Error("MIGRATION_DATABASE_URL must not be set for the API process in production");
   }
+  if (production && env.WORKER_DATABASE_URL) {
+    throw new Error("WORKER_DATABASE_URL must not be set for the API process in production");
+  }
   const authServiceUrl = serviceUrl(required(env, "AUTH_SERVICE_URL", production ? "" : "http://127.0.0.1:4100"), production);
   const redisUrl = required(
     env,
@@ -173,6 +187,9 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
   if (production && env.MIGRATION_DATABASE_URL) {
     throw new Error("MIGRATION_DATABASE_URL must not be set for the auth process in production");
   }
+  if (production && env.WORKER_DATABASE_URL) {
+    throw new Error("WORKER_DATABASE_URL must not be set for the auth process in production");
+  }
   if (env.DATABASE_URL && databaseRole(env.DATABASE_URL) === databaseRole(authDatabaseUrl)) {
     throw new Error("AUTH_DATABASE_URL must use a different database role than DATABASE_URL");
   }
@@ -199,5 +216,58 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
     redisUrl,
     rateLimitMax: integer(env.RATE_LIMIT_MAX, 120, "RATE_LIMIT_MAX"),
     rateLimitWindowMs: integer(env.RATE_LIMIT_WINDOW_MS, 60_000, "RATE_LIMIT_WINDOW_MS"),
+  };
+}
+
+function appBaseUrl(raw: string, production: boolean): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("APP_BASE_URL must be a valid URL");
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.search || url.hash || url.username || url.password) {
+    throw new Error("APP_BASE_URL must be an http(s) URL without query, fragment or credentials");
+  }
+  if (production && url.protocol !== "https:") throw new Error("APP_BASE_URL must use HTTPS in production");
+  return `${url.origin}${url.pathname}`.replace(/\/+$/u, "");
+}
+
+function smtpUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("SMTP_URL must be a valid smtp:// or smtps:// URL");
+  }
+  if (!["smtp:", "smtps:"].includes(url.protocol)) throw new Error("SMTP_URL must be a valid smtp:// or smtps:// URL");
+  return raw;
+}
+
+export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
+  const production = env.NODE_ENV === "production";
+  const workerDatabaseUrl = required(
+    env,
+    "WORKER_DATABASE_URL",
+    production ? "" : "postgresql://spark_worker:spark_worker_local_only@127.0.0.1:5432/spark",
+  );
+  // The worker must never hold the runtime, login or migration credentials.
+  for (const name of ["DATABASE_URL", "AUTH_DATABASE_URL", "MIGRATION_DATABASE_URL"]) {
+    if (production && env[name]) throw new Error(`${name} must not be set for the worker process in production`);
+    const other = env[name];
+    if (other && databaseRole(other) === databaseRole(workerDatabaseUrl)) {
+      throw new Error(`WORKER_DATABASE_URL must use a different database role than ${name}`);
+    }
+  }
+  const databaseSsl = env.DATABASE_SSL === "true";
+  if (production && !databaseSsl) throw new Error("DATABASE_SSL must be true in production");
+
+  return {
+    logLevel: env.LOG_LEVEL ?? "info",
+    workerDatabaseUrl,
+    databaseSsl,
+    smtpUrl: smtpUrl(required(env, "SMTP_URL", production ? "" : "smtp://127.0.0.1:1025")),
+    emailFrom: required(env, "EMAIL_FROM", production ? "" : "Spark <no-reply@spark.local>"),
+    appBaseUrl: appBaseUrl(required(env, "APP_BASE_URL", production ? "" : "http://localhost:3000"), production),
   };
 }

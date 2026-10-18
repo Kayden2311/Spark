@@ -51,6 +51,7 @@ try {
     --set app_password=spark_app_local_only `
     --set migrator_password=spark_migrate_local_only `
     --set auth_password=spark_auth_local_only `
+    --set worker_password=spark_worker_local_only `
     --file (Join-Path $PSScriptRoot "..\infra\postgres\bootstrap-local.sql")
 
   if ($LASTEXITCODE -ne 0) {

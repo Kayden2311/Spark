@@ -24,5 +24,15 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Local SMTP catcher: the worker delivers here in development. Web inbox at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   spark-redis-data:

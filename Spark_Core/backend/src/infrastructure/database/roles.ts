@@ -50,3 +50,22 @@ export async function assertRuntimeRole(pool: Pool): Promise<void> {
     throw new Error(`Database role ${runtime.role} must not be able to create sessions or bypass RLS`);
   }
 }
+
+/**
+ * Fails worker startup unless its pool uses the least-privilege worker role: not a superuser, not exempt
+ * from RLS, no role memberships, unable to read application tables, and able to claim outbox events.
+ */
+export async function assertWorkerRole(pool: Pool): Promise<void> {
+  const result = await pool.query<RoleProbe & { reads_users: boolean | null; claims_outbox: boolean | null }>(
+    `${ROLE_PROBE}, has_table_privilege(to_regclass('spark.users'), 'SELECT') AS reads_users,
+       COALESCE(has_function_privilege(to_regprocedure('spark.worker_claim_outbox(uuid,integer,integer)'), 'EXECUTE'), false) AS claims_outbox
+     FROM pg_catalog.pg_roles r WHERE r.rolname = current_user`,
+  );
+  const worker = result.rows[0];
+  if (!worker) throw new Error("Unable to inspect the worker database role");
+  if (worker.reads_users === null) throw new Error("The worker pool is not connected to the Spark database");
+  if (worker.superuser || worker.bypass_rls || worker.reads_users || worker.memberships > 0) {
+    throw new Error(`Database role ${worker.role} is too privileged for the worker pool`);
+  }
+  if (!worker.claims_outbox) throw new Error(`Database role ${worker.role} cannot claim outbox events; run the migrations`);
+}

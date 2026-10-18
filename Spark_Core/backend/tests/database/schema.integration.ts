@@ -13,6 +13,7 @@ const journal = `${namespace}_journal`;
 const owner = new pg.Client({ connectionString: localConnection("MIGRATION_DATABASE_URL"), connectionTimeoutMillis: 5000 });
 const runtime = new pg.Pool({ connectionString: localConnection("DATABASE_URL"), max: 1, connectionTimeoutMillis: 5000 });
 const authRuntime = new pg.Pool({ connectionString: localConnection("AUTH_DATABASE_URL"), max: 1, connectionTimeoutMillis: 5000 });
+const workerRuntime = new pg.Pool({ connectionString: localConnection("WORKER_DATABASE_URL"), max: 2, connectionTimeoutMillis: 5000 });
 let folder: string;
 const userA = randomUUID(), userB = randomUUID(), visitor = randomUUID();
 const tenantA = randomUUID(), tenantB = randomUUID(), projectA = randomUUID(), projectB = randomUUID(), projectOther = randomUUID();
@@ -69,8 +70,21 @@ async function addMember(workspace: string, who: Account, role: string) {
   await owner.query("SET ROLE spark_owner");
   await owner.query(`INSERT INTO ${table("workspace_memberships")} (tenant_id,user_id,role) VALUES ($1,$2,$3)`, [workspace, who.id, role]);
 }
-async function invite(who: Account, workspace: string, email: string, role = "member", tokenHash = newTokenHash(), expiresAt = inDays(7)) {
-  return (await asSession(who.token, `SELECT * FROM ${fn("ws_create_invitation")}($1,$2,$3,$4,$5)`, [workspace, email, role, tokenHash, expiresAt])).rows[0] as { outcome: string; invitation_id: string | null };
+async function invite(who: Account, workspace: string, email: string, role = "member", expiresAt = inDays(7)) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_create_invitation")}($1,$2,$3,$4)`, [workspace, email, role, expiresAt])).rows[0] as { outcome: string; invitation_id: string | null };
+}
+// Only the worker role can give an invitation a usable token; returns the hash it stored, or null when refused.
+async function issueToken(invitation: string): Promise<Buffer | null> {
+  const tokenHash = newTokenHash();
+  const issued = (await workerRuntime.query(`SELECT ${fn("worker_issue_invitation_token")}($1,$2) AS issued`, [invitation, tokenHash])).rows[0].issued as boolean;
+  return issued ? tokenHash : null;
+}
+async function inviteWithToken(who: Account, workspace: string, email: string, role = "member") {
+  const created = await invite(who, workspace, email, role);
+  if (created.outcome !== "ok") throw new Error(`Invitation not created: ${created.outcome}`);
+  const token = await issueToken(created.invitation_id!);
+  if (!token) throw new Error("Token not issued");
+  return { invitation: created.invitation_id!, token };
 }
 async function accept(who: Account, tokenHash: Buffer) {
   return (await asSession(who.token, `SELECT * FROM ${fn("ws_accept_invitation")}($1)`, [tokenHash])).rows[0];
@@ -120,6 +134,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await runtime.end();
   await authRuntime.end();
+  await workerRuntime.end();
   try {
     await owner.query("ROLLBACK");
     await owner.query("SET ROLE spark_owner");
@@ -148,7 +163,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(16);
+    expect(result.rows[0].count).toBe(17);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -979,6 +994,10 @@ describe("Local PostgreSQL schema", () => {
     expect(await createWorkspace(alice, "Copy", slug)).toEqual({ outcome: "slug_taken", workspace_id: null });
     for (let index = 1; index < 20; index++) expect((await createWorkspace(alice, `Workspace ${index}`)).outcome).toBe("ok");
     expect(await createWorkspace(alice, "One too many")).toEqual({ outcome: "too_many_workspaces", workspace_id: null });
+    // Archived workspaces do not count toward the cap.
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("workspaces")} SET archived_at=now(),version=version+1 WHERE id=$1`, [workspace]);
+    expect((await createWorkspace(alice, "After archive")).outcome).toBe("ok");
     const call = `SELECT * FROM ${fn("ws_create_workspace")}($1,$2)`;
     for (const bad of ["-ab", "ab", "Upper-case", "trailing-", "a".repeat(41), "has space"]) {
       await expect(asSession(other.token, call, ["Valid", bad])).rejects.toMatchObject({ code: "22023", message: "Invalid workspace slug" });
@@ -1019,8 +1038,7 @@ describe("Local PostgreSQL schema", () => {
     expect((await invite(carol, workspace, erin)).outcome).toBe("not_found");
     expect((await invite(alice, randomUUID(), erin)).outcome).toBe("not_found");
     expect((await invite(alice, workspace, `  ${bob.email.toUpperCase()} `)).outcome).toBe("already_member");
-    const token = newTokenHash();
-    const created = await invite(alice, workspace, `  ${erin.toUpperCase()}  `, "member", token);
+    const created = await invite(alice, workspace, `  ${erin.toUpperCase()}  `, "member");
     expect(created.outcome).toBe("ok");
     const invitation = created.invitation_id!;
     expect((await invite(dave, workspace, erin)).outcome).toBe("invitation_pending");
@@ -1030,16 +1048,18 @@ describe("Local PostgreSQL schema", () => {
     const outbox = async () => (await owner.query(`SELECT event_type,aggregate_type,aggregate_version,payload,processed_at FROM ${table("outbox_events")} WHERE aggregate_id=$1 ORDER BY aggregate_version`, [invitation])).rows;
     expect(await outbox()).toEqual([{ event_type: "invitation.created", aggregate_type: "workspace_invitation", aggregate_version: 1, payload: { invitationId: invitation }, processed_at: null }]);
     expect(await auditRows(invitation)).toEqual([{ action: "invitation.created", actor_user_id: alice.id, resource_type: "invitation", metadata: { role: "member" } }]);
+    const token = (await issueToken(invitation))!;
+    expect(token).not.toBeNull();
 
-    const call = `SELECT * FROM ${fn("ws_create_invitation")}($1,$2,$3,$4,$5)`;
+    const call = `SELECT * FROM ${fn("ws_create_invitation")}($1,$2,$3,$4)`;
     for (const [email, role, expires, message] of [
       ["not-an-email", "member", inDays(7), "Invalid invitation email"], ["a b@example.com", "member", inDays(7), "Invalid invitation email"],
       [`${"x".repeat(250)}@example.com`, "member", inDays(7), "Invalid invitation email"], [erin, "owner", inDays(7), "Invalid invitation role"],
       [erin, "member", inDays(9), "Invalid invitation expiry"], [erin, "member", new Date(Date.now() - 1000), "Invalid invitation expiry"],
     ] as const) {
-      await expect(asSession(alice.token, call, [workspace, email, role, newTokenHash(), expires])).rejects.toMatchObject({ code: "22023", message });
+      await expect(asSession(alice.token, call, [workspace, email, role, expires])).rejects.toMatchObject({ code: "22023", message });
     }
-    await expect(asSession(null, call, [workspace, erin, "member", newTokenHash(), inDays(7)])).rejects.toMatchObject({ code: "28000" });
+    await expect(asSession(null, call, [workspace, erin, "member", inDays(7)])).rejects.toMatchObject({ code: "28000" });
 
     // Previews need no session; the token hash itself is never readable by the runtime role.
     const preview = async (hash: Buffer) => (await runtime.query(`SELECT * FROM ${fn("ws_invitation_preview")}($1)`, [hash])).rows;
@@ -1063,7 +1083,9 @@ describe("Local PostgreSQL schema", () => {
     expect(await outcome(alice, "ws_revoke_invitation($1)", [invitation])).toBe("ok");
     expect(await outcome(alice, "ws_revoke_invitation($1)", [invitation])).toBe("not_pending");
     expect(await outcome(alice, "ws_resend_invitation($1)", [invitation])).toBe("not_pending");
-    expect((await preview(token))[0].status).toBe("revoked");
+    // A settled invitation previews its status only.
+    expect(await preview(token)).toEqual([{ status: "revoked", workspace_name: null, inviter_name: null, role: null, email_hint: null, expires_at: null }]);
+    expect(await issueToken(invitation)).toBeNull();
     expect((await auditRows(invitation)).map((row) => row.action)).toEqual(["invitation.created", "invitation.resent", "invitation.revoked"]);
     expect(await accept(await account("Erin", erin), token)).toMatchObject({ outcome: "invitation_revoked", workspace_id: null });
 
@@ -1077,10 +1099,25 @@ describe("Local PostgreSQL schema", () => {
     const frank = `frank.${randomUUID()}@example.com`, staleToken = newTokenHash(), stale = randomUUID();
     await owner.query("SET ROLE spark_owner");
     await owner.query(`INSERT INTO ${table("workspace_invitations")} (id,tenant_id,email_normalized,role,token_hash,invited_by_user_id,created_at,expires_at) VALUES ($1,$2,$3,'member',$4,$5,now()-interval '9 days',now()-interval '1 day')`, [stale, workspace, frank, staleToken, alice.id]);
-    expect((await preview(staleToken))[0].status).toBe("expired");
+    expect(await preview(staleToken)).toEqual([{ status: "expired", workspace_name: null, inviter_name: null, role: null, email_hint: null, expires_at: null }]);
+    expect(await issueToken(stale)).toBeNull();
     expect((await accept(await account("Frank", frank), staleToken)).outcome).toBe("invitation_expired");
     expect((await invite(alice, workspace, frank)).outcome).toBe("ok");
     expect((await owner.query(`SELECT status FROM ${table("workspace_invitations")} WHERE id=$1`, [stale])).rows[0].status).toBe("expired");
+
+    // A resend revives an expired invitation (by status or by date) unless a newer one for the address is pending.
+    expect(await outcome(alice, "ws_resend_invitation($1)", [stale])).toBe("not_pending");
+    const lapsed = randomUUID(), overdue = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("workspace_invitations")} (id,tenant_id,email_normalized,role,token_hash,invited_by_user_id,created_at,expires_at,status) VALUES
+      ($1,$3,$4,'member',$5,$7,now()-interval '9 days',now()-interval '2 days','expired'),($2,$3,$6,'member',$8,$7,now()-interval '9 days',now()-interval '2 days','pending')`,
+      [lapsed, overdue, workspace, `lapsed.${randomUUID()}@example.com`, newTokenHash(), `overdue.${randomUUID()}@example.com`, alice.id, newTokenHash()]);
+    for (const id of [lapsed, overdue]) {
+      expect(await outcome(dave, "ws_resend_invitation($1)", [id])).toBe("ok");
+      await owner.query("SET ROLE spark_owner");
+      expect((await owner.query(`SELECT status,expires_at > now()+interval '6 days 23 hours' AS renewed FROM ${table("workspace_invitations")} WHERE id=$1`, [id])).rows[0]).toEqual({ status: "pending", renewed: true });
+      expect(await issueToken(id)).not.toBeNull();
+    }
   });
   it("accepts only for the invited account", async () => {
     const alice = await account("Accept Owner"), bobEmail = `bob.${randomUUID()}@example.com`;
@@ -1088,8 +1125,10 @@ describe("Local PostgreSQL schema", () => {
     const workspace = (await createWorkspace(alice, "Accept Co")).workspace_id!;
     await owner.query("SET ROLE spark_owner");
     const slug = (await owner.query(`SELECT slug FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows[0].slug;
-    const token = newTokenHash();
-    const invitation = (await invite(alice, workspace, `  ${bobEmail.toUpperCase()} `, "member", token)).invitation_id!;
+    const { invitation, token: firstToken } = await inviteWithToken(alice, workspace, `  ${bobEmail.toUpperCase()} `);
+    // Re-issuing rotates the token: the earlier link stops working.
+    const token = (await issueToken(invitation))!;
+    expect(await accept(bob, firstToken)).toMatchObject({ outcome: "invalid_invitation", workspace_id: null });
     expect(await accept(mallory, token)).toEqual({ outcome: "recipient_mismatch", workspace_id: null, workspace_slug: null, role: null });
     await owner.query("SET ROLE spark_owner");
     expect((await owner.query(`SELECT status FROM ${table("workspace_invitations")} WHERE id=$1`, [invitation])).rows[0].status).toBe("pending");
@@ -1119,24 +1158,21 @@ describe("Local PostgreSQL schema", () => {
     // A member who left is re-activated by a new invitation instead of getting a second row.
     expect(await outcome(bob, "ws_remove_member($1,$2)", [workspace, bob.id])).toBe("ok");
     expect((await members(alice)).rows.map((row) => row.user_id)).toEqual([alice.id]);
-    const again = newTokenHash();
-    expect((await invite(alice, workspace, bobEmail, "admin", again)).outcome).toBe("ok");
+    const { token: again } = await inviteWithToken(alice, workspace, bobEmail, "admin");
     expect(await accept(bob, again)).toEqual({ outcome: "ok", workspace_id: workspace, workspace_slug: slug, role: "admin" });
     await owner.query("SET ROLE spark_owner");
     expect((await owner.query(`SELECT role,status,left_at FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [workspace, bob.id])).rows).toEqual([{ role: "admin", status: "active", left_at: null }]);
 
     // A suspended membership is not silently re-activated.
     await owner.query(`UPDATE ${table("workspace_memberships")} SET status='suspended' WHERE tenant_id=$1 AND user_id=$2`, [workspace, bob.id]);
-    const third = newTokenHash();
-    expect((await invite(alice, workspace, bobEmail, "member", third)).outcome).toBe("ok");
+    const { token: third } = await inviteWithToken(alice, workspace, bobEmail, "member");
     expect((await accept(bob, third)).outcome).toBe("membership_suspended");
     expect((await owner.query(`SELECT status FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [workspace, bob.id])).rows[0].status).toBe("suspended");
   });
   it("accepts once under concurrency", async () => {
     const alice = await account("Race Owner"), bobEmail = `race.${randomUUID()}@example.com`, bob = await account("Racer", bobEmail);
     const workspace = (await createWorkspace(alice, "Race Co")).workspace_id!;
-    const token = newTokenHash();
-    expect((await invite(alice, workspace, bobEmail, "member", token)).outcome).toBe("ok");
+    const { token } = await inviteWithToken(alice, workspace, bobEmail);
     const clients = [0, 1].map(() => new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 }));
     await Promise.all(clients.map((client) => client.connect()));
     try {
@@ -1197,6 +1233,43 @@ describe("Local PostgreSQL schema", () => {
     expect((await asSession(alice.token, `SELECT * FROM ${fn("ws_list_members")}($1)`, [workspace])).rows).toEqual([]);
     expect(await remove(alice, bob.id)).toBe("not_found");
   });
+  it("lets an owner leave while another owner remains", async () => {
+    const alice = await account("Co-owner A"), bob = await account("Co-owner B");
+    const workspace = (await createWorkspace(alice, "Co-owned")).workspace_id!;
+    await addMember(workspace, bob, "owner");
+    expect(await outcome(alice, "ws_remove_member($1,$2)", [workspace, alice.id])).toBe("ok");
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT user_id,status FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND role='owner' ORDER BY status`, [workspace])).rows)
+      .toEqual([{ user_id: bob.id, status: "active" }, { user_id: alice.id, status: "left" }]);
+    expect(await outcome(bob, "ws_remove_member($1,$2)", [workspace, bob.id])).toBe("last_owner");
+  });
+  it("skips the accepted notification when the inviter has left", async () => {
+    const alice = await account("Stay Owner"), dave = await account("Leaving Admin"), bobEmail = `late.${randomUUID()}@example.com`, bob = await account("Late Bob", bobEmail);
+    const workspace = (await createWorkspace(alice, "Left Co")).workspace_id!;
+    await addMember(workspace, dave, "admin");
+    const { invitation, token } = await inviteWithToken(dave, workspace, bobEmail);
+    expect(await outcome(dave, "ws_remove_member($1,$2)", [workspace, dave.id])).toBe("ok");
+    expect((await accept(bob, token)).outcome).toBe("ok");
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("notifications")} WHERE tenant_id=$1`, [workspace])).rows[0].total).toBe(0);
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("outbox_events")} WHERE aggregate_id=$1 AND event_type='invitation.accepted'`, [invitation])).rows[0].total).toBe(1);
+    expect((await auditRows(invitation)).map((row) => row.action)).toEqual(["invitation.created", "invitation.accepted"]);
+  });
+  it("caps pending invitations per workspace", async () => {
+    const alice = await account("Busy Owner");
+    const workspace = (await createWorkspace(alice, "Busy Co")).workspace_id!;
+    const first = await invite(alice, workspace, `cap.0.${randomUUID()}@example.com`);
+    expect(first.outcome).toBe("ok");
+    // Exactly one invitation.created event per created invitation.
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT event_type FROM ${table("outbox_events")} WHERE aggregate_id=$1`, [first.invitation_id])).rows).toEqual([{ event_type: "invitation.created" }]);
+    for (let index = 1; index < 100; index++) expect((await invite(alice, workspace, `cap.${index}.${randomUUID()}@example.com`)).outcome).toBe("ok");
+    expect(await invite(alice, workspace, `cap.over.${randomUUID()}@example.com`)).toEqual({ outcome: "too_many_invitations", invitation_id: null });
+    // Pending invitations past their expiry no longer count.
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("workspace_invitations")} SET expires_at=created_at+interval '1 millisecond' WHERE id=$1`, [first.invitation_id]);
+    expect((await invite(alice, workspace, `cap.again.${randomUUID()}@example.com`)).outcome).toBe("ok");
+  });
   it("hides platform-suspended and deleted coworkers", async () => {
     const alice = await account("Viewer"), bob = await account("Coworker B");
     const workspace = (await createWorkspace(alice, "Coworker Co")).workspace_id!;
@@ -1241,5 +1314,137 @@ describe("Local PostgreSQL schema", () => {
     const actual: Record<string, unknown[][]> = {};
     for (const row of policies.rows) (actual[row.tablename] ??= []).push([row.policyname, row.cmd, row.roles, row.permissive]);
     expect(actual).toEqual(expected);
+  });
+  it("confines the worker role to the worker functions", async () => {
+    const workerRole = await owner.query(`SELECT rolsuper,rolbypassrls,rolinherit,rolcanlogin,rolcreaterole,rolcreatedb,
+      (SELECT count(*)::integer FROM pg_auth_members m WHERE m.member=r.oid OR m.roleid=r.oid) AS memberships,
+      has_database_privilege('spark_worker',current_database(),'TEMPORARY') AS temp, has_schema_privilege('spark_worker',$1,'CREATE') AS create_in_schema
+      FROM pg_roles r WHERE rolname='spark_worker'`, [namespace]);
+    expect(workerRole.rows).toEqual([{ rolsuper: false, rolbypassrls: false, rolinherit: false, rolcanlogin: true, rolcreaterole: false, rolcreatedb: false, memberships: 0, temp: false, create_in_schema: false }]);
+    const workerTables = await owner.query(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname=$1 AND c.relkind IN ('r','v','m') AND (has_table_privilege('spark_worker',c.oid,'SELECT') OR has_table_privilege('spark_worker',c.oid,'INSERT')
+        OR has_table_privilege('spark_worker',c.oid,'UPDATE') OR has_table_privilege('spark_worker',c.oid,'DELETE'))`, [namespace]);
+    expect(workerTables.rows).toEqual([]);
+    const workerFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname=$1 AND has_function_privilege('spark_worker',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
+    const expected = ["worker_claim_outbox", "worker_complete_outbox", "worker_fail_outbox", "worker_invitation_email", "worker_issue_invitation_token"];
+    expect(workerFunctions.rows.map((row) => row.proname)).toEqual(expected);
+    for (const role of ["spark_app", "spark_auth"]) {
+      const reachable = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname=$1 AND p.proname = ANY($3::text[]) AND has_function_privilege($2,p.oid,'EXECUTE')`, [namespace, role, expected]);
+      expect({ role, reachable: reachable.rows }).toEqual({ role, reachable: [] });
+    }
+    for (const name of ["users", "outbox_events", "workspace_invitations", "sessions"]) {
+      await expect(workerRuntime.query(`SELECT 1 FROM ${table(name)} LIMIT 1`)).rejects.toMatchObject({ code: "42501" });
+    }
+    await expect(runtime.query(`SELECT * FROM ${fn("worker_claim_outbox")}($1,1,60)`, [randomUUID()])).rejects.toMatchObject({ code: "42501" });
+    await expect(runtime.query(`SELECT ${fn("worker_issue_invitation_token")}($1,$2)`, [randomUUID(), newTokenHash()])).rejects.toMatchObject({ code: "42501" });
+    await expect(authRuntime.query(`SELECT * FROM ${fn("worker_invitation_email")}($1)`, [randomUUID()])).rejects.toMatchObject({ code: "42501" });
+    await expect(workerRuntime.query(`SELECT * FROM ${fn("ws_invitation_preview")}($1)`, [newTokenHash()])).rejects.toMatchObject({ code: "42501" });
+    await expect(workerRuntime.query(`SELECT * FROM ${fn("auth_password_login")}($1)`, ["a@example.com"])).rejects.toMatchObject({ code: "42501" });
+  });
+  // Worker tests seed rows a year in the past so they are claimed before any other pending event.
+  async function seedOutbox(count: number, attempts = 0) {
+    await owner.query("SET ROLE spark_owner");
+    const rows = await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload,available_at,attempts)
+      SELECT $1,'test.event','test',gen_random_uuid(),1,'{}',now()-interval '1 year'+make_interval(secs => g),$3 FROM generate_series(1,$2::integer) g RETURNING id`, [tenantA, count, attempts]);
+    return rows.rows.map((row) => row.id as string);
+  }
+  const claim = (db: pg.Pool | pg.Client, lock: string, limit: number, lease = 600) =>
+    db.query(`SELECT * FROM ${fn("worker_claim_outbox")}($1,$2,$3)`, [lock, limit, lease]).then((r) => r.rows);
+  const complete = (id: string, lock: string) =>
+    workerRuntime.query(`SELECT ${fn("worker_complete_outbox")}($1,$2) AS done`, [id, lock]).then((r) => r.rows[0].done as boolean);
+  const fail = (id: string, lock: string, code: string, retryAt: Date) =>
+    workerRuntime.query(`SELECT ${fn("worker_fail_outbox")}($1,$2,$3,$4) AS done`, [id, lock, code, retryAt]).then((r) => r.rows[0].done as boolean);
+  const outboxRow = async (id: string) => {
+    await owner.query("SET ROLE spark_owner");
+    return (await owner.query(`SELECT attempts,lock_token,locked_until,processed_at,last_error_code,available_at FROM ${table("outbox_events")} WHERE id=$1`, [id])).rows[0];
+  };
+  it("claims each outbox row once across concurrent workers", async () => {
+    const seeded = await seedOutbox(6);
+    const clients = [0, 1].map(() => new pg.Client({ connectionString: localConnection("WORKER_DATABASE_URL"), connectionTimeoutMillis: 5000 }));
+    await Promise.all(clients.map((client) => client.connect()));
+    const locks = [randomUUID(), randomUUID()];
+    let claimed: Array<Array<{ id: string; attempts: number; event_type: string }>>;
+    try {
+      await Promise.all(clients.map((client) => client.query("BEGIN")));
+      // The first transaction still holds its row locks while the second claims.
+      const first = await claim(clients[0]!, locks[0]!, 3);
+      const second = await claim(clients[1]!, locks[1]!, 3);
+      await Promise.all(clients.map((client) => client.query("COMMIT")));
+      claimed = [first, second];
+    } finally {
+      await Promise.allSettled(clients.map((client) => client.end()));
+    }
+    const ids = claimed.flat().map((row) => row.id);
+    expect(new Set(ids).size).toBe(6);
+    expect([...ids].sort()).toEqual([...seeded].sort());
+    expect(claimed.flat().every((row) => row.attempts === 1 && row.event_type === "test.event")).toBe(true);
+    const leased = claimed[0]![0]!.id;
+    expect((await outboxRow(leased)).lock_token).toBe(locks[0]);
+    expect(await complete(leased, locks[1]!)).toBe(false);
+    expect(await complete(leased, locks[0]!)).toBe(true);
+    expect(await outboxRow(leased)).toMatchObject({ lock_token: null, locked_until: null, attempts: 1 });
+    expect((await outboxRow(leased)).processed_at).not.toBeNull();
+    expect(await complete(leased, locks[0]!)).toBe(false);
+    for (const [index, rows] of claimed.entries()) for (const row of rows) if (row.id !== leased) expect(await complete(row.id, locks[index]!)).toBe(true);
+    for (const [limit, lease] of [[0, 60], [101, 60], [1, 9], [1, 601]] as const) {
+      await expect(claim(workerRuntime, randomUUID(), limit, lease)).rejects.toMatchObject({ code: "22023" });
+    }
+  });
+  it("retries failed deliveries and dead-letters after eight attempts", async () => {
+    const [fresh] = await seedOutbox(1), [worn] = await seedOutbox(1, 7);
+    const lock = randomUUID();
+    const rows = await claim(workerRuntime, lock, 2);
+    expect(rows.map((row) => row.id).sort()).toEqual([fresh, worn].sort());
+    const retryAt = new Date(Date.now() + 60 * 60 * 1000);
+    expect(await fail(fresh!, randomUUID(), "smtp_error", retryAt)).toBe(false);
+    await expect(fail(fresh!, lock, "x".repeat(65), retryAt)).rejects.toMatchObject({ code: "22023" });
+    expect(await fail(fresh!, lock, "smtp_error", retryAt)).toBe(true);
+    expect(await outboxRow(fresh!)).toMatchObject({ attempts: 1, lock_token: null, locked_until: null, processed_at: null, last_error_code: "smtp_error", available_at: retryAt });
+    expect(await complete(fresh!, lock)).toBe(false);
+    expect(await fail(worn!, lock, "template_error", retryAt)).toBe(true);
+    const dead = await outboxRow(worn!);
+    expect(dead).toMatchObject({ attempts: 8, lock_token: null, last_error_code: "template_error" });
+    expect(dead.processed_at).not.toBeNull();
+    // Retire the retry row so later claims do not see it.
+    await owner.query(`UPDATE ${table("outbox_events")} SET processed_at=now() WHERE id=$1`, [fresh]);
+  });
+  it("reads invitation emails and issues tokens only for pending invitations", async () => {
+    const alice = await account("Mail Owner"), email = `mail.${randomUUID()}@example.com`;
+    const workspace = (await createWorkspace(alice, "Mail Co")).workspace_id!;
+    const invitation = (await invite(alice, workspace, email, "member")).invitation_id!;
+    const view = async (id: string) => (await workerRuntime.query(`SELECT * FROM ${fn("worker_invitation_email")}($1)`, [id])).rows;
+    expect(await view(invitation)).toEqual([{ status: "pending", email, workspace_name: "Mail Co", inviter_name: "Mail Owner", role: "member", expires_at: expect.any(Date) }]);
+    expect(await view(randomUUID())).toEqual([]);
+    await expect(workerRuntime.query(`SELECT ${fn("worker_issue_invitation_token")}($1,$2)`, [invitation, randomBytes(16)])).rejects.toMatchObject({ code: "22023" });
+    expect((await workerRuntime.query(`SELECT ${fn("worker_issue_invitation_token")}($1,$2) AS issued`, [randomUUID(), newTokenHash()])).rows[0].issued).toBe(false);
+    const token = (await issueToken(invitation))!;
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT token_hash FROM ${table("workspace_invitations")} WHERE id=$1`, [invitation])).rows[0].token_hash).toEqual(token);
+    expect(await outcome(alice, "ws_revoke_invitation($1)", [invitation])).toBe("ok");
+    expect(await issueToken(invitation)).toBeNull();
+    expect((await view(invitation))[0].status).toBe("revoked");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("workspaces")} SET archived_at=now(),version=version+1 WHERE id=$1`, [workspace]);
+    expect((await view(invitation))[0].status).toBe("unavailable");
+  });
+  it("lets the worker update stale issue outbox rows", async () => {
+    await rollback(async () => {
+      const issue = randomUUID();
+      await owner.query(`INSERT INTO ${table("issues")} (id,tenant_id,project_id,number,title,status_id,reporter_user_id) VALUES ($1,$2,$3,399,'Moving',$4,$5)`, [issue, tenantB, projectB, statusB, userB]);
+      await owner.query(`INSERT INTO ${table("issue_events")} (tenant_id,project_id,issue_id,actor_user_id,event_type,from_version,to_version,changes) VALUES ($1,$2,$3,$4,'created',0,1,'{}')`, [tenantB, projectB, issue, userB]);
+      await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload) VALUES ($1,'issue.created','issue',$2,1,'{}')`, [tenantB, issue]);
+      await owner.query("SET CONSTRAINTS ALL IMMEDIATE"); await owner.query("SET CONSTRAINTS ALL DEFERRED");
+      await owner.query(`UPDATE ${table("issues")} SET title='Moved',version=2 WHERE id=$1`, [issue]);
+      await owner.query(`INSERT INTO ${table("issue_events")} (tenant_id,project_id,issue_id,actor_user_id,event_type,from_version,to_version,changes) VALUES ($1,$2,$3,$4,'updated',1,2,'{}')`, [tenantB, projectB, issue, userB]);
+      await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload) VALUES ($1,'issue.updated','issue',$2,2,'{}')`, [tenantB, issue]);
+      await owner.query("SET CONSTRAINTS ALL IMMEDIATE"); await owner.query("SET CONSTRAINTS ALL DEFERRED");
+      // Lease and delivery bookkeeping on the version-1 event must not trip the issue change-set check.
+      await owner.query(`UPDATE ${table("outbox_events")} SET attempts=attempts+1,locked_until=now()+interval '1 minute',lock_token=gen_random_uuid() WHERE aggregate_id=$1 AND aggregate_version=1`, [issue]);
+      await owner.query(`UPDATE ${table("outbox_events")} SET locked_until=NULL,lock_token=NULL,processed_at=now() WHERE aggregate_id=$1 AND aggregate_version=1`, [issue]);
+      await owner.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await expect(owner.query(`UPDATE ${table("outbox_events")} SET aggregate_version=3 WHERE aggregate_id=$1 AND aggregate_version=1`, [issue])).rejects.toMatchObject({ code: "23514" });
+    });
   });
 });

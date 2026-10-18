@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm run --parallel \"/^dev:(api|auth)$/\"",
+    "dev": "pnpm run --parallel \"/^dev:(api|auth|worker)$/\"",
     "dev:api": "node --env-file-if-exists=../.env --watch --import tsx src/server.ts",
     "dev:auth": "node --env-file-if-exists=../.env --watch --import tsx src/auth-server.ts",
+    "dev:worker": "node --env-file-if-exists=../.env --watch --import tsx src/worker.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=../.env dist/server.js",
     "start:auth": "node --env-file-if-exists=../.env dist/auth-server.js",
+    "start:worker": "node --env-file-if-exists=../.env dist/worker.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
@@ -30,10 +32,12 @@
     "drizzle-orm": "0.45.2",
     "fastify": "5.12.3",
     "ioredis": "6.0.0",
+    "nodemailer": "10.0.14",
     "pg": "8.23.0"
   },
   "devDependencies": {
     "@types/node": "22.20.2",
+    "@types/nodemailer": "8.0.2",
     "@types/pg": "8.23.1",
     "drizzle-kit": "0.31.10",
     "tsx": "4.23.13"
