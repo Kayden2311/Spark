@@ -4029,6 +4029,8 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsInviteSentTitle { color: var(--ink); font-size: 1.1rem; font-weight: 650; letter-spacing: -.02em; }
 .wsInviteSent .wsModalActions { justify-content: center; width: 100%; margin-top: .6rem; }
 
+/* Absolutely positioned so the always-mounted live region takes no grid row in .wsMembers. */
+.wsToastRegion { position: absolute; }
 .wsToast { position: fixed; z-index: 110; right: 1.5rem; bottom: 1.5rem; display: flex; max-width: min(28rem, calc(100vw - 2rem)); align-items: center; gap: .7rem; padding: .85rem .9rem .85rem 1rem; border-radius: .85rem; color: #fff; background: #0f1f3d; box-shadow: 0 20px 40px -12px rgba(9, 22, 48, .5); font-size: .88rem; font-weight: 600; line-height: 1.45; animation: ws-rise .22s cubic-bezier(.16, 1, .3, 1) both; }
 .wsToast > svg { width: 1.2rem; height: 1.2rem; flex: none; padding: .15rem; border-radius: 50%; fill: none; stroke: #0f1f3d; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; background: #4ade80; }
 .wsToast[data-tone="error"] > svg { background: #fca5a5; }

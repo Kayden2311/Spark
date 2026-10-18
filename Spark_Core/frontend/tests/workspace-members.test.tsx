@@ -116,9 +116,29 @@ describe("members page", () => {
     const table = await renderMembers();
     const select = within(table).getByRole("combobox", { name: "Role for Avery Founder" });
     await userEvent.selectOptions(select, "member");
+    const dialog = await screen.findByRole("dialog", { name: "Change your own role?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Change my role" }));
     expect(await screen.findByText("A workspace needs at least one owner.")).toBeInTheDocument();
     expect(calls.find((call) => call.key === "PATCH /api/v1/workspaces/w1/members/u-avery")?.body).toEqual({ role: "member" });
     await waitFor(() => expect(select).toHaveValue("owner"));
+  });
+
+  it("asks an owner to confirm before giving up their own owner role, and cancel keeps it", async () => {
+    mockApi(ownerRoutes({ "PATCH /api/v1/workspaces/w1/members/u-avery": json({ ...avery, role: "admin" }) }));
+    const table = await renderMembers();
+    const select = within(table).getByRole("combobox", { name: "Role for Avery Founder" });
+    await userEvent.selectOptions(select, "admin");
+    const dialog = await screen.findByRole("dialog", { name: "Change your own role?" });
+    expect(dialog).toHaveTextContent("You'll lose owner rights");
+    expect(calls.some((call) => call.key.startsWith("PATCH"))).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(select).toHaveValue("owner");
+    expect(calls.some((call) => call.key.startsWith("PATCH"))).toBe(false);
+
+    await userEvent.selectOptions(select, "admin");
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "Change your own role?" })).getByRole("button", { name: "Change my role" }));
+    await waitFor(() => expect(calls.find((call) => call.key === "PATCH /api/v1/workspaces/w1/members/u-avery")?.body).toEqual({ role: "admin" }));
   });
 
   it("changes a role and reloads the list", async () => {
@@ -169,9 +189,29 @@ describe("members page", () => {
     const panel = await screen.findByRole("region", { name: "Pending invitations" });
     const row = (await within(panel).findByText("casey@example.com")).closest("li")!;
     expect(within(row).getByText("Expires in 5 days")).toBeInTheDocument();
+    // One polite live region is always mounted, so the announcement is not lost when the toast appears.
+    const live = screen.getByRole("status");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live).toBeEmptyDOMElement();
     await userEvent.click(within(row).getByRole("button", { name: "Resend invitation to casey@example.com" }));
-    expect(await screen.findByText("New link sent; the previous link no longer works.")).toBeInTheDocument();
+    await waitFor(() => expect(live).toHaveTextContent("New link sent; the previous link no longer works."));
+    expect(screen.getByRole("status")).toBe(live);
     expect(calls.some((call) => call.key === "POST /api/v1/workspaces/w1/invitations/inv-1/resend")).toBe(true);
+  });
+
+  it("hides resend and revoke on admin invitations from admins, who may not settle them", async () => {
+    const adminInvite = { ...pending, id: "inv-2", email: "dana@example.com", role: "admin" };
+    mockApi(ownerRoutes({
+      "GET /api/v1/workspaces/by-slug/northstar-labs": json({ ...workspace, role: "admin" }),
+      "GET /api/v1/workspaces/w1/invitations?status=pending": json({ items: [pending, adminInvite] }),
+    }));
+    await renderMembers();
+    const panel = await screen.findByRole("region", { name: "Pending invitations" });
+    const adminRow = (await within(panel).findByText("dana@example.com")).closest("li")!;
+    expect(within(adminRow).queryByRole("button")).not.toBeInTheDocument();
+    const memberRow = within(panel).getByText("casey@example.com").closest("li")!;
+    expect(within(memberRow).getByRole("button", { name: "Resend invitation to casey@example.com" })).toBeInTheDocument();
+    expect(within(memberRow).getByRole("button", { name: "Revoke invitation to casey@example.com" })).toBeInTheDocument();
   });
 
   it("revokes a pending invitation", async () => {

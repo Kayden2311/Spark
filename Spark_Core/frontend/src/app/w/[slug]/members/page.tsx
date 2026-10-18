@@ -38,7 +38,10 @@ function errorFor(error: unknown): string {
   return error instanceof ApiError && error.code === "last_owner" ? LAST_OWNER : messageOf(error);
 }
 
-type Confirm = { kind: "remove"; member: WorkspaceMember } | { kind: "leave"; member: WorkspaceMember };
+type Confirm =
+  | { kind: "remove"; member: WorkspaceMember }
+  | { kind: "leave"; member: WorkspaceMember }
+  | { kind: "demote-self"; member: WorkspaceMember; role: WorkspaceRole };
 type Toast = { id: number; text: string; tone: "success" | "error" };
 
 export default function MembersPage() {
@@ -77,8 +80,13 @@ export default function MembersPage() {
   const roles = override.list === members.data ? override.roles : {};
   const me = user?.id;
 
-  const changeRole = async (member: WorkspaceMember, role: WorkspaceRole) => {
+  const changeRole = async (member: WorkspaceMember, role: WorkspaceRole, confirmed = false) => {
     if (role === member.role) return;
+    // An owner giving up their own owner role cannot take it back alone: confirm first.
+    if (!confirmed && member.userId === me && member.role === "owner") {
+      setConfirm({ kind: "demote-self", member, role });
+      return;
+    }
     setRowError(null);
     setSavingRole(member.userId);
     setOverride({ list: members.data, roles: { ...roles, [member.userId]: role } });
@@ -109,6 +117,11 @@ export default function MembersPage() {
 
   const runConfirm = async () => {
     if (!confirm || confirmBusy) return;
+    if (confirm.kind === "demote-self") {
+      closeConfirm();
+      void changeRole(confirm.member, confirm.role, true);
+      return;
+    }
     setConfirmBusy(true);
     setConfirmError(null);
     try {
@@ -278,10 +291,13 @@ export default function MembersPage() {
                     <small>Invited by {invitation.invitedBy.displayName}<span aria-hidden="true" className="wsDot">·</span><span className="wsExpiry">{expiresIn(invitation.expiresAt)}</span></small>
                   </span>
                   <span className="wsRole" data-role={invitation.role}>{roleLabel(invitation.role)}</span>
-                  <span className="wsPendingActions">
-                    <button aria-label={`Resend invitation to ${invitation.email}`} className="wsGhostButton" disabled={busyInvite === invitation.id} onClick={() => void settleInvitation(invitation, "resend")} type="button">Resend</button>
-                    <button aria-label={`Revoke invitation to ${invitation.email}`} className="wsGhostButton danger" disabled={busyInvite === invitation.id} onClick={() => void settleInvitation(invitation, "revoke")} type="button">Revoke</button>
-                  </span>
+                  {/* Only owners may resend or revoke an admin invitation; the API refuses it for admins. */}
+                  {(isOwner || invitation.role !== "admin") && (
+                    <span className="wsPendingActions">
+                      <button aria-label={`Resend invitation to ${invitation.email}`} className="wsGhostButton" disabled={busyInvite === invitation.id} onClick={() => void settleInvitation(invitation, "resend")} type="button">Resend</button>
+                      <button aria-label={`Revoke invitation to ${invitation.email}`} className="wsGhostButton danger" disabled={busyInvite === invitation.id} onClick={() => void settleInvitation(invitation, "revoke")} type="button">Revoke</button>
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -297,7 +313,21 @@ export default function MembersPage() {
         />
       )}
 
-      {confirm && (
+      {confirm?.kind === "demote-self" && (
+        <Modal
+          description={<p>You&apos;ll lose owner rights in {workspace.name} and become {confirm.role === "admin" ? "an admin" : "a member"}. Only another owner can make you an owner again.</p>}
+          onClose={closeConfirm}
+          title="Change your own role?"
+          tone="danger"
+        >
+          <div className="wsModalActions">
+            <button className="sparkSecondary" data-autofocus onClick={closeConfirm} type="button">Cancel</button>
+            <button className="wsDangerButton" onClick={() => void runConfirm()} type="button">Change my role</button>
+          </div>
+        </Modal>
+      )}
+
+      {confirm && confirm.kind !== "demote-self" && (
         <Modal
           busy={confirmBusy}
           description={confirm.kind === "leave"
@@ -317,13 +347,16 @@ export default function MembersPage() {
         </Modal>
       )}
 
-      {toast && (
-        <div className="wsToast" data-tone={toast.tone} key={toast.id} role="status">
-          <svg aria-hidden="true" viewBox="0 0 24 24">{toast.tone === "success" ? <path d="m5 12.5 4.5 4.5L19 7.5" /> : <path d="M12 7v6M12 16.5v.5" />}</svg>
-          {toast.text}
-          <button aria-label="Dismiss" onClick={() => setToast(null)} type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
-        </div>
-      )}
+      {/* One live region stays mounted so screen readers announce each new message. */}
+      <div aria-live="polite" className="wsToastRegion" role="status">
+        {toast && (
+          <div className="wsToast" data-tone={toast.tone} key={toast.id}>
+            <svg aria-hidden="true" viewBox="0 0 24 24">{toast.tone === "success" ? <path d="m5 12.5 4.5 4.5L19 7.5" /> : <path d="M12 7v6M12 16.5v.5" />}</svg>
+            {toast.text}
+            <button aria-label="Dismiss" onClick={() => setToast(null)} type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

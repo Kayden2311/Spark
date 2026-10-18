@@ -44,10 +44,15 @@ export function Modal({ title, description, onClose, busy = false, tone = "defau
       const items = [...node.querySelectorAll<HTMLElement>(FOCUSABLE)];
       if (items.length === 0) return;
       const [head, tail] = [items[0], items[items.length - 1]];
-      if (event.shiftKey && document.activeElement === head) {
+      const active = document.activeElement;
+      // Focus on the panel itself, on the body or outside the dialog re-enters at the first or last item.
+      if (!(active instanceof HTMLElement) || !items.includes(active)) {
+        event.preventDefault();
+        (event.shiftKey ? tail : head).focus();
+      } else if (event.shiftKey && active === head) {
         event.preventDefault();
         tail.focus();
-      } else if (!event.shiftKey && document.activeElement === tail) {
+      } else if (!event.shiftKey && active === tail) {
         event.preventDefault();
         head.focus();
       }
