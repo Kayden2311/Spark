@@ -100,6 +100,35 @@ describe("/w/[slug] guard", () => {
     expect(requested).toEqual([]);
   });
 
+  it("waits while the session is loading: no redirect and no request", () => {
+    auth.isLoading = true;
+    auth.isAuthenticated = false;
+    mockApi({});
+    render(<WorkspaceLayout><p>Inside</p></WorkspaceLayout>);
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(requested).toEqual([]);
+  });
+
+  it("keeps the same shell from loading to ready, so it does not remount", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    requested = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requested.push(url);
+      await gate;
+      return json(workspace)();
+    }));
+    const { container } = render(<WorkspaceLayout><p>Inside</p></WorkspaceLayout>);
+    const loadingShell = container.querySelector(".appShell");
+    const loadingSidebar = container.querySelector("aside.sidebar");
+    expect(loadingShell).not.toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading workspace");
+    release();
+    expect(await screen.findByText("Inside")).toBeInTheDocument();
+    expect(container.querySelector(".appShell")).toBe(loadingShell);
+    expect(container.querySelector("aside.sidebar")).toBe(loadingSidebar);
+  });
+
   it("shows a calm not-found state on 404 and refreshes the session", async () => {
     mockApi({ "GET /api/v1/workspaces/by-slug/northstar-labs": json({ code: "workspace_not_found" }, 404) });
     window.localStorage.setItem(LAST_KEY, "northstar-labs");
@@ -165,6 +194,29 @@ describe("workspace shell", () => {
     const menu = await screen.findByRole("navigation", { name: "Your workspaces" });
     expect(within(menu).getByRole("link", { name: /Orbit Studio/ })).toHaveAttribute("href", "/w/orbit-studio");
     expect(within(menu).getByRole("link", { name: /Create workspace/ })).toHaveAttribute("href", "/onboarding");
+  });
+
+  it("closes the switcher on Escape and returns focus to its button", async () => {
+    navigation.pathname = "/schedule";
+    render(<SchedulePage />);
+    const trigger = screen.getByRole("button", { name: /switch workspace/i });
+    await userEvent.click(trigger);
+    const menu = await screen.findByRole("navigation", { name: "Your workspaces" });
+    within(menu).getByRole("link", { name: /Orbit Studio/ }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("navigation", { name: "Your workspaces" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("closes the mobile menu on Escape", async () => {
+    navigation.pathname = "/schedule";
+    render(<SchedulePage />);
+    const toggle = screen.getByRole("button", { name: "Menu" });
+    await userEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Close" })).toHaveAttribute("aria-expanded", "true");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Menu" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Menu" })).toHaveFocus();
   });
 
   it("works with zero workspaces", async () => {

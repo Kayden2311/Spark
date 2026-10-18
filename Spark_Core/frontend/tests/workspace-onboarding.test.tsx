@@ -63,6 +63,7 @@ describe("onboarding", () => {
     expect(screen.getByLabelText("Workspace address")).toHaveValue("northstar-labs");
     expect(screen.getByTestId("slug-preview")).toHaveTextContent("spark.app/w/northstar-labs");
     expect(screen.getByText(/Next: choose how your team works/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Workspace name")).toHaveAttribute("maxLength", "80");
   });
 
   it("creates the workspace, refreshes the session and opens it", async () => {

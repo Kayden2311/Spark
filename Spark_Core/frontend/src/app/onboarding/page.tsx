@@ -121,7 +121,7 @@ export default function OnboardingPage() {
                 autoComplete="organization"
                 autoFocus
                 id="workspace-name"
-                maxLength={NAME_MAX + 20}
+                maxLength={NAME_MAX}
                 onChange={(event) => onNameChange(event.target.value)}
                 placeholder="Northstar Labs"
                 value={name}

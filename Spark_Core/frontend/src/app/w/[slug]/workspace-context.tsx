@@ -11,8 +11,9 @@ interface WorkspaceContextValue {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
-export function WorkspaceProvider({ workspace, reload, children }: WorkspaceContextValue & { children: ReactNode }) {
-  return <WorkspaceContext.Provider value={{ workspace, reload }}>{children}</WorkspaceContext.Provider>;
+/** `value` is null while the workspace loads or failed; the layout only renders pages once it is set. */
+export function WorkspaceProvider({ value, children }: { value: WorkspaceContextValue | null; children: ReactNode }) {
+  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 
 /** The workspace the current /w/[slug] route belongs to. Only valid below the workspace layout. */

@@ -72,3 +72,41 @@ export async function workspaceApi<T>(path: string, { method = "GET", body, ifMa
 export function messageOf(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 }
+
+export interface WorkspaceMember {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  /** Only owners and admins receive email addresses. */
+  email: string | null;
+  role: WorkspaceRole;
+  joinedAt: string;
+}
+
+export type InvitationRole = "admin" | "member";
+
+export interface WorkspaceInvitation {
+  id: string;
+  email: string;
+  role: InvitationRole;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  invitedBy: { id: string; displayName: string };
+  expiresAt: string;
+  createdAt: string;
+}
+
+/** What an emailed invitation link shows before it is accepted. Non-pending invitations only carry `status`. */
+export interface InvitationPreview {
+  status: WorkspaceInvitation["status"];
+  workspaceName: string | null;
+  inviterName: string | null;
+  role: InvitationRole | null;
+  emailHint: string | null;
+  expiresAt: string | null;
+}
+
+export interface AcceptedInvitation {
+  workspace: { id: string; slug: string };
+  role: WorkspaceRole;
+  alreadyMember: boolean;
+}

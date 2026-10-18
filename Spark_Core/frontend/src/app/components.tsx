@@ -41,17 +41,24 @@ function WorkspaceSwitcher({ active }: { active: ShellWorkspace | null }) {
   const { workspaces } = useAuth();
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
 
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: MouseEvent) => { if (!wrap.current?.contains(event.target as Node)) setOpen(false); };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      trigger.current?.focus();
+    };
     document.addEventListener("mousedown", onPointer);
-    document.addEventListener("keydown", onKey);
+    // Capture phase, so the switcher closes before the mobile menu sees the same Escape.
+    document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", onPointer);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
   }, [open]);
 
@@ -64,6 +71,7 @@ function WorkspaceSwitcher({ active }: { active: ShellWorkspace | null }) {
         aria-label={`Switch workspace, current: ${name}`}
         className="workspacePicker"
         onClick={() => setOpen((value) => !value)}
+        ref={trigger}
         type="button"
       >
         <span className="avatar workspaceAvatar">{active ? initials(active.name) : "+"}</span>
@@ -111,6 +119,19 @@ export function WorkspaceShell({ children, current, workspace }: { children: Rea
   // The mobile menu closes whenever the route changes.
   const menuOpen = menu.open && menu.path === pathname;
   const remembered = useSyncExternalStore(subscribeLastWorkspace, readLastWorkspace, () => null);
+  const menuToggle = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      // The workspace switcher handles its own Escape first.
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      setMenu({ open: false, path: pathname });
+      menuToggle.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen, pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -147,6 +168,7 @@ export function WorkspaceShell({ children, current, workspace }: { children: Rea
             aria-expanded={menuOpen}
             className="sidebarMenuToggle"
             onClick={() => setMenu({ open: !menuOpen, path: pathname })}
+            ref={menuToggle}
             type="button"
           >
             <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 24 24">{menuOpen ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}</svg>
