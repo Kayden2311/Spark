@@ -72,11 +72,11 @@ export function registerCredentialRoutes(app: FastifyInstance, options: Credenti
       const hashedPassword = await hashPassword(request.body.password);
       const session = newSessionToken();
 
-      // User, email, credential, default workspace, ownership and session commit atomically.
-      let created: { user_id: string; workspace_id: string; workspace_name: string; workspace_slug: string } | undefined;
+      // User, email, credential and session commit atomically; workspaces are created later, on purpose.
+      let created: { user_id: string } | undefined;
       try {
-        const result = await pool.query<{ user_id: string; workspace_id: string; workspace_name: string; workspace_slug: string }>(
-          "SELECT user_id, workspace_id, workspace_name, workspace_slug FROM spark.auth_register_password($1,$2,$3,$4,$5)",
+        const result = await pool.query<{ user_id: string }>(
+          "SELECT user_id FROM spark.auth_register_password($1,$2,$3,$4,$5)",
           [displayName, email, hashedPassword, session.tokenHash, session.expiresAt],
         );
         created = result.rows[0];
@@ -93,24 +93,17 @@ export function registerCredentialRoutes(app: FastifyInstance, options: Credenti
 
       setSessionCookie(reply, session.token, SESSION_TTL_SECONDS);
 
-      const userWorkspace = {
-        workspaceId: created.workspace_id,
-        workspaceName: created.workspace_name,
-        workspaceSlug: created.workspace_slug,
-        role: "owner",
-      };
-
       return reply.code(201).send({
         user: {
           id: created.user_id,
           email: normalizedEmail,
           displayName,
           avatarUrl: null,
-          role: "owner",
+          role: "member",
           platformRoles: [],
         },
-        workspace: userWorkspace,
-        workspaces: [userWorkspace],
+        workspace: null,
+        workspaces: [],
         platformRoles: [],
       });
     },
