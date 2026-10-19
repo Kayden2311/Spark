@@ -85,3 +85,59 @@ export const WATERFALL = {
     completedAt: null,
   })),
 };
+
+/** Test copies of GET /projects/{id}/board. */
+const card = (id: string, number: number, statusId: string, title: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  number,
+  key: `OPS-${number}`,
+  title,
+  type: "task",
+  priority: "medium",
+  statusId,
+  assignee: null as { id: string; displayName: string; avatarUrl: string | null } | null,
+  storyPoints: null as number | null,
+  dueDate: null as string | null,
+  phaseId: null as string | null,
+  version: 1,
+  completedAt: null as string | null,
+  createdAt: "2026-10-19T09:00:00.000Z",
+  ...extra,
+});
+
+const boardStatus = (id: string, name: string, category: string, position: number, wipLimit: number | null, count: number) => ({ id, name, category, position, wipLimit, count });
+
+export const KANBAN_BOARD = {
+  project: { id: "p-ops", key: "OPS", name: "Ops desk", methodology: "kanban" },
+  statuses: [
+    boardStatus("s1", "Backlog", "backlog", 0, null, 1),
+    boardStatus("s2", "Ready", "todo", 1, 8, 2),
+    boardStatus("s3", "In progress", "in_progress", 2, 4, 0),
+    boardStatus("s4", "Review", "in_progress", 3, 3, 3),
+    boardStatus("s5", "Done", "done", 4, null, 1),
+  ],
+  issues: [
+    card("i0", 9, "s1", "Collect feedback themes"),
+    card("i1", 1, "s2", "Reset VPN tokens", { type: "bug", priority: "high", assignee: { id: "u-blake", displayName: "Blake Rivers", avatarUrl: null }, dueDate: "2020-01-01" }),
+    card("i2", 2, "s2", "Order new laptops"),
+    card("i4", 4, "s4", "Rotate on-call schedule"),
+    card("i5", 5, "s4", "Update runbook"),
+    card("i6", 6, "s4", "Audit shared drives"),
+    card("i7", 7, "s5", "Archive old tickets", { dueDate: "2020-01-01", completedAt: "2026-10-18T10:00:00.000Z" }),
+  ],
+  truncated: false,
+};
+
+/** The IssueDetail the API returns for a card after a write. */
+export function issueDetail(base: ReturnType<typeof card>, changes: Record<string, unknown> = {}) {
+  return {
+    ...base,
+    projectId: "p-ops",
+    description: null,
+    reporter: { id: "u-avery", displayName: "Avery Founder" },
+    startedAt: null,
+    updatedAt: "2026-10-19T10:00:00.000Z",
+    archivedAt: null,
+    ...changes,
+  };
+}

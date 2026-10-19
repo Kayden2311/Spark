@@ -18,14 +18,15 @@ const auth = {
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
-  usePathname: () => `/w/northstar-labs/p/${navigation.params.key}`,
+  usePathname: () => `/w/northstar-labs/p/${navigation.params.key}/overview`,
   useSearchParams: () => new URLSearchParams(),
   useParams: () => navigation.params,
 }));
 vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 
 import WorkspaceLayout from "../src/app/w/[slug]/layout";
-import ProjectOverviewPage from "../src/app/w/[slug]/p/[key]/page";
+import ProjectLayout from "../src/app/w/[slug]/p/[key]/layout";
+import ProjectOverviewPage from "../src/app/w/[slug]/p/[key]/overview/page";
 
 const workspace = { id: "w1", slug: "northstar-labs", name: "Northstar Labs", role: "owner", memberCount: 2, version: 2, createdAt: "2026-10-18T10:00:00.000Z" };
 const members = [
@@ -59,7 +60,7 @@ function mockApi(project: unknown, { role = "owner", extra = {} as Record<string
 
 async function renderOverview(key: string) {
   navigation.params = { slug: "northstar-labs", key };
-  render(<WorkspaceLayout><ProjectOverviewPage /></WorkspaceLayout>);
+  render(<WorkspaceLayout><ProjectLayout><ProjectOverviewPage /></ProjectLayout></WorkspaceLayout>);
 }
 
 const patches = () => calls.filter((call) => call.key.startsWith("PATCH"));
@@ -72,16 +73,22 @@ describe("project overview", () => {
     mockApi(KANBAN);
     await renderOverview("OPS");
     expect(await screen.findByRole("heading", { level: 1, name: "Ops desk" })).toBeInTheDocument();
-    const header = screen.getByRole("region", { name: "Project details" });
+    // The shared project header (also shown on the board) carries the key, methodology and tabs.
+    const header = screen.getByRole("region", { name: "Project" });
     expect(within(header).getByText("OPS")).toBeInTheDocument();
     expect(within(header).getByText("Kanban")).toHaveAttribute("data-methodology", "kanban");
-    expect(within(header).getByText("Blake Rivers")).toBeInTheDocument();
-    expect(screen.getByText("Requests from the support team.")).toBeInTheDocument();
+    const tabs = within(header).getByRole("navigation", { name: "Project views" });
+    expect(within(tabs).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+    expect(within(tabs).getByRole("link", { name: "Board" })).toHaveAttribute("href", "/w/northstar-labs/p/OPS");
+    const details = screen.getByRole("region", { name: "Project details" });
+    expect(within(details).getByText("Blake Rivers")).toBeInTheDocument();
+    expect(within(details).getByText("Requests from the support team.")).toBeInTheDocument();
 
     const board = screen.getByRole("region", { name: "Board columns" });
     expect(within(board).getAllByRole("listitem")).toHaveLength(5);
     expect(within(board).getByText("WIP 4")).toBeInTheDocument();
-    expect(within(board).getByText("The board arrives in the next update.")).toBeInTheDocument();
+    expect(within(board).queryByText("The board arrives in the next update.")).not.toBeInTheDocument();
+    expect(within(board).getByRole("link", { name: "Open the board" })).toHaveAttribute("href", "/w/northstar-labs/p/OPS");
 
     const flow = screen.getByRole("region", { name: "WIP limits" });
     expect(within(flow).getByText("3 of 5 columns have a WIP limit.")).toBeInTheDocument();
