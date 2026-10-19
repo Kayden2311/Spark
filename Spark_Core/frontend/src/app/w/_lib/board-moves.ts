@@ -1,6 +1,6 @@
 /** Pure board helpers: the optimistic copy of a move, WIP checks and keyboard targets. Ranking itself happens in the API. */
 
-import type { BoardState, IssueCard } from "./issues";
+import type { BoardState, BoardStatus, IssueCard } from "./issues";
 
 export type ArrowKey = "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown";
 
@@ -72,6 +72,23 @@ export function addCard(board: BoardState, card: IssueCard): BoardState {
 /** Replaces a card's fields (after a successful write) without moving it. */
 export function replaceCard(board: BoardState, card: IssueCard): BoardState {
   return { ...board, issues: board.issues.map((issue) => (issue.id === card.id ? card : issue)) };
+}
+
+/** The inline explanation a full column shows. `fallback` is the API's sentence when the local copy has no limit yet. */
+export function wipMessage(status: BoardStatus | undefined, fallback?: string): string {
+  if (status && status.wipLimit !== null) return `${status.name} is at its WIP limit (${status.wipLimit}). Finish or move a task out first.`;
+  return `${fallback ?? "This column is at its WIP limit."} Finish or move a task out first.`;
+}
+
+/** Drops a card that left the board (archived) and lowers its column's count. Unknown cards leave the board as it is. */
+export function removeCard(board: BoardState, issueId: string): BoardState {
+  const gone = board.issues.find((issue) => issue.id === issueId);
+  if (!gone) return board;
+  return {
+    ...board,
+    issues: board.issues.filter((issue) => issue.id !== issueId),
+    statuses: board.statuses.map((status) => (status.id === gone.statusId ? { ...status, count: Math.max(0, status.count - 1) } : status)),
+  };
 }
 
 /** True when the column has a WIP limit that is reached. Never true for a reorder inside the card's own column. */

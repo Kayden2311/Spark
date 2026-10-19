@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { columnIssues, keyboardTarget, moveCard, wipBlocked } from "../src/app/w/_lib/board-moves";
+import { columnIssues, keyboardTarget, moveCard, removeCard, wipBlocked } from "../src/app/w/_lib/board-moves";
 import type { BoardState } from "../src/app/w/_lib/issues";
 import { KANBAN_BOARD } from "./project-fixtures";
 
@@ -69,5 +69,15 @@ describe("keyboardTarget", () => {
     expect(keyboardTarget(board, "i4", "ArrowUp")).toBeNull();
     expect(keyboardTarget(board, "i6", "ArrowDown")).toBeNull();
     expect(keyboardTarget(board, "missing", "ArrowDown")).toBeNull();
+  });
+});
+
+describe("removeCard", () => {
+  it("drops an archived card and lowers its column count", () => {
+    const next = removeCard(board, "i5");
+    expect(keys(next, "s4")).toEqual(["OPS-4", "OPS-6"]);
+    expect(count(next, "s4")).toBe(2);
+    expect(count(board, "s4")).toBe(3);
+    expect(removeCard(board, "missing")).toBe(board);
   });
 });

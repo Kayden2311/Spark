@@ -7,14 +7,16 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 
 /**
  * Accessible modal dialog: labelled by its title, focus moves in on open and back to the opener on close,
- * Tab stays inside, Escape and the backdrop close it (unless `busy`).
+ * Tab stays inside, Escape and the backdrop close it (unless `busy`). The "drawer" variant slides in from the
+ * right on wide screens and fills the screen on phones.
  */
-export function Modal({ title, description, onClose, busy = false, tone = "default", children }: {
+export function Modal({ title, description, onClose, busy = false, tone = "default", variant = "dialog", children }: {
   title: string;
   description?: ReactNode;
   onClose(): void;
   busy?: boolean;
   tone?: "default" | "danger";
+  variant?: "dialog" | "drawer";
   children: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -68,13 +70,14 @@ export function Modal({ title, description, onClose, busy = false, tone = "defau
   }, []);
 
   return createPortal(
-    <div className="wsModalLayer" onMouseDown={(event) => { if (event.target === event.currentTarget && !locked.current) close.current(); }}>
+    <div className="wsModalLayer" data-variant={variant} onMouseDown={(event) => { if (event.target === event.currentTarget && !locked.current) close.current(); }}>
       <div
         aria-describedby={description ? descriptionId : undefined}
         aria-labelledby={titleId}
         aria-modal="true"
         className="wsModal"
         data-tone={tone}
+        data-variant={variant}
         ref={panel}
         role="dialog"
         tabIndex={-1}

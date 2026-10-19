@@ -4382,8 +4382,8 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsBoard { display: grid; gap: .9rem; min-width: 0; }
 .wsBoardBanner { display: flex; align-items: center; gap: .5rem; padding: .65rem .9rem; border: 1px solid #fde68a; border-radius: .7rem; color: #854d0e; background: #fffbeb; font-size: .86rem; font-weight: 600; }
 .wsBoardBanner svg { width: 1.05rem; height: 1.05rem; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
-.wsBoardScroller { display: grid; grid-auto-columns: minmax(16.5rem, 1fr); grid-auto-flow: column; align-items: start; gap: .9rem; overflow-x: auto; padding: .15rem .15rem 1rem; scroll-snap-type: x proximity; }
-.wsBoardColumn { display: grid; align-content: start; gap: .6rem; min-width: 0; padding: .8rem .7rem .7rem; border: 1px solid var(--line); border-top: 3px solid #cbd5e1; border-radius: 1rem; background: #f4f7fb; scroll-snap-align: start; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.wsBoardScroller { display: grid; grid-auto-columns: minmax(12.25rem, 1fr); grid-auto-flow: column; align-items: start; gap: .9rem; overflow-x: auto; padding: .15rem .15rem 1rem; scroll-snap-type: x proximity; }
+.wsBoardColumn { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: .6rem; min-width: 0; padding: .8rem .7rem .7rem; border: 1px solid var(--line); border-top: 3px solid #cbd5e1; border-radius: 1rem; background: #f4f7fb; scroll-snap-align: start; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
 .wsBoardColumn[data-category="todo"] { border-top-color: #93b8f5; }
 .wsBoardColumn[data-category="in_progress"] { border-top-color: #f5c96b; }
 .wsBoardColumn[data-category="done"] { border-top-color: #7fd8b3; }
@@ -4398,7 +4398,7 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsBoardNotice { padding: .5rem .65rem; border: 1px solid #fde68a; border-radius: .6rem; color: #854d0e; background: #fffbeb; font-size: .78rem; font-weight: 600; line-height: 1.45; animation: ws-pop .18s ease-out both; }
 .wsBoardList { display: grid; align-content: start; gap: .5rem; min-height: 3.5rem; margin: 0; padding: 0; list-style: none; }
 .wsBoardItem { position: relative; }
-.wsBoardCard { display: grid; gap: .45rem; padding: .7rem .75rem .65rem; border: 1px solid var(--line); border-radius: .75rem; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); cursor: grab; outline: none; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease, opacity .15s ease; }
+.wsBoardCard { display: grid; gap: .45rem; padding: .7rem .75rem .65rem; border: 1px solid var(--line); border-radius: .75rem; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); cursor: pointer; outline: none; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease, opacity .15s ease; }
 .wsBoardCard:hover { border-color: #c7d7f0; box-shadow: 0 8px 18px -10px rgba(15, 36, 87, .3); }
 .wsBoardCard:focus-visible { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, .3); }
 .wsBoardCard[data-picked] { border-color: var(--method-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--method-accent) 30%, transparent), 0 14px 26px -12px rgba(15, 36, 87, .4); transform: rotate(-1deg) scale(1.02); }
@@ -4440,7 +4440,7 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsBoardAdd { display: grid; gap: .35rem; }
 .wsBoardAddRow { display: flex; align-items: center; gap: .3rem; padding: .2rem .2rem .2rem .3rem; border: 1.5px dashed #cdd9ea; border-radius: .65rem; background: rgba(255, 255, 255, .6); transition: border-color .15s ease, background .15s ease; }
 .wsBoardAddRow:focus-within { border-style: solid; border-color: var(--blue); background: #fff; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
-.wsBoardAddRow input { min-width: 0; flex: 1; padding: .4rem .35rem; border: 0; color: var(--ink); background: transparent; font: inherit; font-size: .84rem; outline: none; }
+.wsBoardAddRow input { width: 0; min-width: 0; flex: 1; padding: .4rem .35rem; border: 0; color: var(--ink); background: transparent; font: inherit; font-size: .84rem; outline: none; }
 .wsBoardAddRow input::placeholder { color: #8a99ad; }
 .wsBoardAddRow input:disabled { cursor: not-allowed; }
 .wsBoardAddButton { display: grid; width: 1.9rem; height: 1.9rem; flex: none; place-items: center; padding: 0; border: 0; border-radius: .45rem; color: #fff; background: var(--blue); transition: opacity .15s ease; }
@@ -4449,7 +4449,7 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsBoardState { display: grid; justify-items: start; gap: .8rem; }
 .wsBoardState h2 { color: var(--ink); font-size: 1.15rem; font-weight: 650; }
 .wsBoardState p { color: var(--muted); }
-.wsBoardSkeleton { display: grid; grid-auto-columns: minmax(16.5rem, 1fr); grid-auto-flow: column; gap: .9rem; overflow: hidden; }
+.wsBoardSkeleton { display: grid; grid-auto-columns: minmax(12.25rem, 1fr); grid-auto-flow: column; gap: .9rem; overflow: hidden; }
 .wsBoardSkeleton span:not(.wsSrOnly) { display: block; height: 22rem; border-radius: 1rem; background: linear-gradient(90deg, #eaf0f8 0%, #f5f8fc 50%, #eaf0f8 100%); background-size: 200% 100%; animation: ws-shimmer 1.4s linear infinite; }
 
 /* Touch screens have no hover, so the Move button stays visible at every width. */
@@ -4460,11 +4460,55 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 @media (max-width: 767px) {
   .wsBoardScroller { grid-auto-columns: minmax(82%, 1fr); scroll-snap-type: x mandatory; }
   .wsBoardMoveButton { opacity: 1; }
-  .wsBoardCard { cursor: default; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .wsBoardCard, .wsBoardColumn, .wsBoardMoveButton { transition: none; }
   .wsBoardCard[data-picked] { transform: none; }
   .wsBoardNotice, .wsBoardMenu { animation: none; }
+}
+
+/* Task drawer: the modal's drawer variant slides in from the right; phones get the whole screen. */
+.wsModalLayer[data-variant="drawer"] { place-items: stretch end; padding: 0; overflow: hidden; }
+.wsModal[data-variant="drawer"] { width: min(100%, 34rem); height: 100%; align-content: start; gap: 1.25rem; overflow-y: auto; overscroll-behavior: contain; padding: 1.5rem 1.6rem 2rem; border-width: 0 0 0 1px; border-radius: 0; box-shadow: -24px 0 60px -20px rgba(9, 38, 90, .35); animation: ws-slide-in .24s cubic-bezier(.16, 1, .3, 1) both; }
+.wsModal[data-variant="drawer"]::before { right: 0; left: 0; border-radius: 0; background: linear-gradient(90deg, var(--method-accent, var(--blue)), color-mix(in srgb, var(--method-accent, var(--blue)) 40%, #fff)); }
+.wsModal[data-variant="drawer"] .wsModalHeader h2 { padding: .2rem .55rem; border-radius: .45rem; color: #1e3a8a; background: #e8efff; font-size: .82rem; font-weight: 800; letter-spacing: .02em; }
+@keyframes ws-slide-in { from { opacity: .4; transform: translateX(2.5rem); } to { opacity: 1; transform: none; } }
+.wsDrawerForm { display: grid; gap: 1rem; }
+.wsField textarea.wsDrawerTitle { min-height: 0; field-sizing: content; padding: .55rem .7rem; font-size: 1.15rem; font-weight: 650; line-height: 1.35; letter-spacing: -.02em; resize: none; }
+.wsDrawerGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
+.wsDrawerGrid .wsField .wsSelect, .wsDrawerGrid .wsField input { min-height: 2.75rem; padding-top: .55rem; padding-bottom: .55rem; font-size: .9rem; }
+.wsDrawerActions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .65rem; padding-top: .35rem; }
+.wsDrawerActions .sparkPrimary { min-width: 7.5rem; }
+.wsDrawerArchive { display: inline-flex; min-height: 2.5rem; align-items: center; gap: .4rem; padding: .45rem .7rem; border: 1px solid transparent; border-radius: .55rem; color: #b91c1c; background: transparent; font-size: .86rem; font-weight: 700; transition: background .15s ease, border-color .15s ease; }
+.wsDrawerArchive:hover { border-color: #fecaca; background: #fef2f2; }
+.wsDrawerArchive svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.wsDrawerConfirm { display: grid; gap: .75rem; padding: .9rem 1rem; border: 1px solid #fecaca; border-radius: .75rem; background: #fef6f6; animation: ws-pop .16s ease-out both; }
+.wsDrawerConfirm p { color: #7f1d1d; font-size: .88rem; line-height: 1.55; }
+.wsDrawerConfirm strong { color: #991b1b; }
+.wsDrawerConfirm .wsModalActions { margin-top: 0; }
+.wsDrawerConfirm .wsDangerButton { min-height: 2.75rem; padding: .6rem 1.1rem; }
+.wsDrawerState { display: grid; justify-items: start; gap: .75rem; color: var(--muted); }
+.wsDrawerSkeleton { display: grid; gap: .8rem; }
+.wsDrawerSkeleton span:not(.wsSrOnly) { display: block; height: 3rem; border-radius: .65rem; background: linear-gradient(90deg, #eaf0f8 0%, #f5f8fc 50%, #eaf0f8 100%); background-size: 200% 100%; animation: ws-shimmer 1.4s linear infinite; }
+.wsDrawerSkeleton span:nth-child(3) { height: 7rem; }
+.wsDrawerHistory { display: grid; gap: .7rem; padding-top: 1.15rem; border-top: 1px solid var(--line); }
+.wsDrawerHistory h3 { color: var(--ink); font-size: .92rem; font-weight: 700; }
+.wsHistoryList { display: grid; gap: .1rem; margin: 0; padding: 0; list-style: none; }
+.wsHistoryList li { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .6rem; padding: .45rem 0; }
+.wsHistoryList li + li::before { position: absolute; top: -.55rem; left: .7rem; width: 1px; height: .9rem; background: var(--line); content: ""; }
+.wsHistoryList p { color: var(--ink); font-size: .84rem; line-height: 1.45; }
+.wsHistoryList time { color: var(--muted); font-size: .76rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wsHistoryList:empty::after { color: var(--muted); font-size: .84rem; content: "No history yet."; }
+.wsHistoryMore { justify-self: start; min-height: 2.4rem; padding: .45rem .9rem; font-size: .84rem; }
+
+@media (max-width: 640px) {
+  .wsModalLayer[data-variant="drawer"] { align-items: stretch; padding: 0; }
+  .wsModal[data-variant="drawer"] { width: 100%; padding: 1.15rem 1rem 1.5rem; border-width: 0; box-shadow: none; animation-name: ws-rise; }
+  .wsDrawerGrid { grid-template-columns: minmax(0, 1fr); }
+  .wsDrawerActions .sparkPrimary { flex: 1 1 8rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wsModal[data-variant="drawer"], .wsDrawerConfirm, .wsDrawerSkeleton span { animation: none; }
 }

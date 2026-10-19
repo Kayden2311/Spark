@@ -22,7 +22,7 @@ The implemented backend baseline provides process health (`GET /health`), clean 
 | --- | --- | --- |
 | Frontend | Next.js, React, TypeScript | Server rendering, routing, and accessible light-theme design tokens. |
 | Backend | Fastify, TypeScript | Small runtime, schema-first HTTP APIs, Clean Architecture, and good performance. |
-| Database | PostgreSQL through `pg` & Drizzle ORM | ACID transactions, strict schema constraints, Drizzle migrations (`0000`–`0019`), and RLS. |
+| Database | PostgreSQL through `pg` & Drizzle ORM | ACID transactions, strict schema constraints, Drizzle migrations (`0000`–`0021`), and RLS. |
 | Security & Auth | Argon2id, SHA-256 bytea sessions | Robust password hashing, opaque session token management, and platform role RBAC. |
 | Cache and limiter | Redis | Shared cache, distributed rate limits, and short-lived coordination. |
 | Contracts | Fastify JSON Schema and OpenAPI | Runtime validation and generated API documentation without a premature shared package. |
@@ -84,7 +84,7 @@ An owner creates a workspace and sends expiring, single-use invitations. Accepta
 
 ### US-05: Manage tasks
 
-Members create, assign, and move tasks. Concurrent updates use a version or conditional request so one update cannot silently overwrite another. Keyboard and mobile interactions remain usable.
+Members create, assign, and move tasks. Concurrent updates use a version or conditional request so one update cannot silently overwrite another. Keyboard and mobile interactions remain usable. Implemented (M3): the project board at `/w/[slug]/p/[key]` (quick-add with an `Idempotency-Key`, drag and drop, keyboard moves, a "Move to…" menu, WIP limits refused with `409 wip_limit_reached`), a task drawer for editing, assigning and archiving with `If-Match` (a stale save gets `412` with the current task), the task history, and `?issue=<KEY>-<n>` deep links used by the assignment email. Issue versions are advanced by the write functions themselves (`version + 1`); the `maintain_record` trigger only checks that every update advances the version by exactly one.
 
 ### US-06: Notifications
 

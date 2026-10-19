@@ -136,9 +136,9 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
       {content}
       {/* One live region stays mounted so screen readers announce each new message: toasts and board moves alike. */}
       <div aria-live="polite" className="wsToastRegion" role="status">
-        {announcement && <span className="wsSrOnly" key={announcement.id}>{announcement.text}</span>}
+        {announcement && <span className="wsSrOnly" key={`announcement-${announcement.id}`}>{announcement.text}</span>}
         {toast && (
-          <div className="wsToast" data-tone={toast.tone} key={toast.id}>
+          <div className="wsToast" data-tone={toast.tone} key={`toast-${toast.id}`}>
             <svg aria-hidden="true" viewBox="0 0 24 24">{toast.tone === "success" ? <path d="m5 12.5 4.5 4.5L19 7.5" /> : toast.tone === "info" ? <path d="M12 11v6M12 7.5v.5" /> : <path d="M12 7v6M12 16.5v.5" />}</svg>
             {toast.text}
             <button aria-label="Dismiss" onClick={() => setToast(null)} type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>

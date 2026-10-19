@@ -2,23 +2,29 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "next/navigation";
 
 import { initials } from "../../../../components";
 import { ApiError, messageOf, workspaceApi } from "../../../_lib/api";
-import { addCard, columnIssues, currentTarget, keyboardTarget, moveCard, positionOf, replaceCard, wipBlocked, type ArrowKey, type MoveTarget } from "../../../_lib/board-moves";
-import { boardPath, createIssue, moveIssue, priorityLabel, toCard, typeLabel, type BoardState, type BoardStatus, type IssueCard, type IssueMove } from "../../../_lib/issues";
+import { addCard, columnIssues, currentTarget, keyboardTarget, moveCard, positionOf, removeCard, replaceCard, wipBlocked, wipMessage, type ArrowKey, type MoveTarget } from "../../../_lib/board-moves";
+import { boardPath, createIssue, moveIssue, priorityLabel, toCard, typeLabel, type BoardState, type BoardStatus, type IssueCard, type IssueDetail, type IssueMove } from "../../../_lib/issues";
 import { formatDay, methodologyOf, todayIso } from "../../../_lib/projects";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
+import { useWorkspace } from "../../workspace-context";
 import { useProject } from "./project-context";
+import { TASK_GONE, TaskDrawer } from "./task-drawer";
 
 export const TEAMMATE_MOVED = "Updated by a teammate — the board was refreshed.";
 export const TEAMMATE_MOVED_STALE = "Updated by a teammate. Reload the page to see the latest board.";
 const ARROWS: readonly string[] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+const ISSUE_PARAM = "issue";
 
-/** The inline explanation a full column shows. `fallback` is the API's sentence when the local copy has no limit yet. */
-export function wipMessage(status: BoardStatus | undefined, fallback?: string): string {
-  if (status && status.wipLimit !== null) return `${status.name} is at its WIP limit (${status.wipLimit}). Finish or move a task out first.`;
-  return `${fallback ?? "This column is at its WIP limit."} Finish or move a task out first.`;
+/** Sets or removes ?issue= without a navigation; Next.js syncs useSearchParams with history.replaceState. */
+function replaceIssueParam(key: string | null) {
+  const url = new URL(window.location.href);
+  if (key === null) url.searchParams.delete(ISSUE_PARAM);
+  else url.searchParams.set(ISSUE_PARAM, key);
+  if (url.href !== window.location.href) window.history.replaceState(null, "", url);
 }
 
 function taskCount(count: number): string {
@@ -45,6 +51,8 @@ type MoveSource = "keyboard" | "pointer" | "menu";
 
 export function ProjectBoard() {
   const { project, notify, announce, reloadProject } = useProject();
+  const { workspace } = useWorkspace();
+  const issueParam = useSearchParams().get(ISSUE_PARAM);
   const path = boardPath(project.id);
   const loaded = useWorkspaceData<BoardState>(path);
   const base = loaded.dataPath === path ? loaded.data : null;
@@ -61,6 +69,28 @@ export function ProjectBoard() {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [focusRequest, setFocusRequest] = useState<{ selector: string; serial: number } | null>(null);
   const helpId = useId();
+  // The task drawer. A ?issue=<KEY>-<n> link (the assignment email's) opens it once the board is loaded;
+  // the parameter is acted on when it changes, so opening and closing here only keep it in sync.
+  const [drawer, setDrawer] = useState<{ id: string; key: string } | null>(null);
+  const [seenParam, setSeenParam] = useState<string | null>(null);
+  const [missingLink, setMissingLink] = useState<{ key: string } | null>(null);
+  if (committed && issueParam !== seenParam) {
+    setSeenParam(issueParam);
+    if (issueParam !== null) {
+      const linked = committed.issues.find((issue) => issue.key.toUpperCase() === issueParam.toUpperCase());
+      if (linked) {
+        if (drawer?.id !== linked.id) setDrawer({ id: linked.id, key: linked.key });
+      } else {
+        setMissingLink({ key: issueParam });
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!missingLink) return;
+    replaceIssueParam(null);
+    notify(TASK_GONE, "error");
+  }, [missingLink, notify]);
 
   useEffect(() => {
     baseRef.current = base;
@@ -201,7 +231,12 @@ export function ProjectBoard() {
     if (event.target !== event.currentTarget) return;
     const { key } = event;
     if (pickup?.issueId !== issue.id) {
-      if (key !== " " && key !== "Enter") return;
+      if (key === "Enter") {
+        event.preventDefault();
+        openDrawer(issue);
+        return;
+      }
+      if (key !== " ") return;
       event.preventDefault();
       if (busy[issue.id]) return;
       setMenuFor(null);
@@ -233,6 +268,41 @@ export function ProjectBoard() {
       announce(`Move cancelled. ${issue.key} is back in ${describe(committed, issue)}.`);
       if (key === "Escape") focusCard(issue.id);
     }
+  };
+
+  const openDrawer = (issue: IssueCard) => {
+    setPickup(null);
+    setMenuFor(null);
+    setDrawer({ id: issue.id, key: issue.key });
+    setSeenParam(issue.key);
+    replaceIssueParam(issue.key);
+  };
+
+  // The parameter stays "seen" until the URL catches up, so a render in between cannot reopen the drawer.
+  const closeDrawer = () => {
+    setDrawer(null);
+    replaceIssueParam(null);
+  };
+
+  /** A newer version of a task from the drawer: the card follows it, to the end of a new column when its status changed. */
+  const onIssueChanged = (detail: IssueDetail) => {
+    update(source, (current) => {
+      const before = current.issues.find((item) => item.id === detail.id);
+      if (!before) return current;
+      const moved = before.statusId === detail.statusId
+        ? current
+        : moveCard(current, detail.id, detail.statusId, columnIssues(current, detail.statusId).filter((item) => item.id !== detail.id).at(-1)?.id ?? null);
+      return replaceCard(moved, toCard(detail));
+    });
+    reloadProject();
+    void refresh(false);
+  };
+
+  const onIssueArchived = (detail: IssueDetail) => {
+    closeDrawer();
+    update(source, (current) => removeCard(current, detail.id));
+    reloadProject();
+    void refresh(false);
   };
 
   const dropTarget = (event: DragEvent<HTMLUListElement>, statusId: string, draggedId: string): MoveTarget => {
@@ -296,7 +366,7 @@ export function ProjectBoard() {
 
   return (
     <section aria-label="Board" className="wsBoard">
-      <p className="wsSrOnly" id={helpId}>Press Space or Enter to pick up the task, arrow keys to move it, Enter to drop it and Escape to cancel. The Move to button offers the same moves from a menu.</p>
+      <p className="wsSrOnly" id={helpId}>Press Enter to open the task. Press Space to pick it up, arrow keys to move it, Enter or Space to drop it and Escape to cancel. The Move to button offers the same moves from a menu.</p>
       {board.truncated && (
         <p className="wsBoardBanner" role="note">
           <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5M12 7.5v.5" /></svg>
@@ -352,6 +422,7 @@ export function ProjectBoard() {
                       setDrag({ issueId: issue.id, over: null });
                     }}
                     onKeyDown={(event) => onCardKeyDown(event, issue)}
+                    onOpen={() => openDrawer(issue)}
                     onToggleMenu={() => {
                       setPickup(null);
                       setMenuFor((current) => (current === issue.id ? null : issue.id));
@@ -370,11 +441,24 @@ export function ProjectBoard() {
           );
         })}
       </div>
+      {drawer && (
+        <TaskDrawer
+          board={committed}
+          issueId={drawer.id}
+          issueKey={drawer.key}
+          key={drawer.id}
+          onArchived={onIssueArchived}
+          onChanged={onIssueChanged}
+          onClose={closeDrawer}
+          project={project}
+          workspaceId={workspace.id}
+        />
+      )}
     </section>
   );
 }
 
-function BoardCardItem({ issue, helpId, picked, busy, dragging, overdue, phaseName, showPoints, marker, menu, menuOpen, onKeyDown, onDragStart, onDragEnd, onToggleMenu }: {
+function BoardCardItem({ issue, helpId, picked, busy, dragging, overdue, phaseName, showPoints, marker, menu, menuOpen, onKeyDown, onOpen, onDragStart, onDragEnd, onToggleMenu }: {
   issue: IssueCard;
   helpId: string;
   picked: boolean;
@@ -387,6 +471,8 @@ function BoardCardItem({ issue, helpId, picked, busy, dragging, overdue, phaseNa
   menu: ReactNode;
   menuOpen: boolean;
   onKeyDown(event: KeyboardEvent<HTMLDivElement>): void;
+  /** Opens the task drawer (a click; Enter goes through onKeyDown so a keyboard move can claim it). */
+  onOpen(): void;
   onDragStart(): void;
   onDragEnd(): void;
   onToggleMenu(): void;
@@ -414,6 +500,7 @@ function BoardCardItem({ issue, helpId, picked, busy, dragging, overdue, phaseNa
             event.dataTransfer.effectAllowed = "move";
             onDragStart();
           }}
+          onClick={onOpen}
           onKeyDown={onKeyDown}
           role="button"
           tabIndex={0}
