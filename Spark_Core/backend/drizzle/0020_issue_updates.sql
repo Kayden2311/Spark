@@ -1,15 +1,18 @@
 -- Issue updates, moves, ranking and WIP admission (M3). The runtime role still has no INSERT, UPDATE or
 -- DELETE grant on issues: they change only through spark.ws_update_issue, which derives the actor from the
 -- live session, returns a closed set of outcomes and writes the issue, its issue.updated history row, its
--- outbox row, any issue.reranked change sets of a rebalanced column and an optional issue_assigned
--- notification in one transaction. Lock order as in 0019: workspace row FOR SHARE, project row FOR UPDATE,
--- board, then issues (the updated issue, then the target column by id when it is rebalanced). Every issue
--- writer holds the project row lock, so positions are computed without races.
+-- outbox row, any issue.reranked change sets of a rebalance and an optional issue_assigned notification in
+-- one transaction. Lock order as in 0019: workspace row FOR SHARE, project row FOR UPDATE, board, then
+-- issues (the updated issue, then the renumbered issues by id). Every issue writer holds the project row
+-- lock, so positions are computed without races.
 -- Ranking: issues.position numeric(20,6) orders a status column. afterIssueId X places the issue at the
 -- midpoint between X and the next issue (X + 1024 at the end), null places it first (first - 1024, or 1024),
 -- and a status change or restore without afterIssueId places it last (max + 1024, or 1024). When the gap
--- to a neighbour falls below 0.001 the whole target column is renumbered to 1024 * i in its new order; each
--- other issue whose position changes gets its own version, issue.reranked event and processed outbox row.
+-- to a neighbour falls below 0.001 the column is rebalanced locally: at most 50 issues around the drop point
+-- (the mover and its neighbours, in the new order) are spread evenly between the nearest untouched issues
+-- below and above, or in 1024 steps at a column end. Only when that span is itself too dense (a gap below
+-- 0.001) is the whole column renumbered to 1024 * i. Each other renumbered issue whose position changes gets
+-- its own version, issue.reranked event and processed outbox row.
 CREATE FUNCTION spark.ws_update_issue(p_issue uuid, p_expected_version integer, p_patch jsonb)
 RETURNS TABLE(outcome text, issue_version integer)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
@@ -20,7 +23,8 @@ DECLARE actor uuid := spark.require_session_actor(); target_tenant uuid; target_
   new_points numeric; new_due date; new_phase uuid; new_archived boolean; new_position numeric(20,6);
   status_category text; capacity integer; positioned boolean := p_patch ? 'afterIssueId'; anchor uuid;
   anchor_position numeric(20,6); next_position numeric(20,6); rebalance boolean := false; column_ids uuid[];
-  slot integer; changed text[]; outbox_id uuid; actor_name text; item record; reranked spark.issues%ROWTYPE;
+  column_positions numeric[]; slot integer; total integer; span_start integer; span_end integer; span_size integer;
+  lower_bound numeric; upper_bound numeric; rerank_ids uuid[]; rerank_positions numeric[]; changed text[]; outbox_id uuid; actor_name text; item record; reranked spark.issues%ROWTYPE;
 BEGIN
   IF p_patch IS NULL OR jsonb_typeof(p_patch) <> 'object' OR p_patch = '{}'::jsonb
     OR (p_patch - ARRAY['title','description','type','priority','statusId','afterIssueId','assigneeUserId','storyPoints','dueDate','phaseId','archived']) <> '{}'::jsonb THEN
@@ -163,25 +167,45 @@ BEGIN
     END IF;
   END IF;
   IF rebalance THEN
-    -- Lock the whole target column by id, then renumber it in its new order with the issue placed after
-    -- the anchor.
-    PERFORM 1 FROM spark.issues i WHERE i.tenant_id = project.tenant_id AND i.project_id = project.id AND i.status_id = new_status
-      AND i.archived_at IS NULL ORDER BY i.id FOR UPDATE;
-    column_ids := ARRAY(SELECT i.id FROM spark.issues i WHERE i.tenant_id = project.tenant_id AND i.project_id = project.id
-      AND i.status_id = new_status AND i.archived_at IS NULL AND i.id <> cur.id ORDER BY i.position, i.id);
+    -- The target column in its new order, with the issue placed after the anchor (index slot + 1).
+    SELECT array_agg(i.id ORDER BY i.position, i.id), array_agg(i.position ORDER BY i.position, i.id) INTO column_ids, column_positions
+      FROM spark.issues i WHERE i.tenant_id = project.tenant_id AND i.project_id = project.id
+        AND i.status_id = new_status AND i.archived_at IS NULL AND i.id <> cur.id;
     slot := array_position(column_ids, anchor);
     column_ids := column_ids[1:slot] || cur.id || column_ids[slot + 1:];
-    new_position := 1024 * (slot + 1);
+    column_positions := column_positions[1:slot] || NULL::numeric || column_positions[slot + 1:];
+    total := cardinality(column_ids);
+    -- A window of at most 50 issues around the mover, bounded by the nearest untouched issues.
+    span_start := greatest(1, slot + 1 - 24);
+    span_end := least(total, span_start + 49);
+    span_start := greatest(1, span_end - 49);
+    lower_bound := CASE WHEN span_start > 1 THEN column_positions[span_start - 1] END;
+    upper_bound := CASE WHEN span_end < total THEN column_positions[span_end + 1] END;
+    span_size := span_end - span_start + 1;
+    IF lower_bound IS NOT NULL AND upper_bound IS NOT NULL AND (upper_bound - lower_bound) / (span_size + 1) < 0.001 THEN
+      span_start := 1; span_end := total; span_size := total; lower_bound := NULL; upper_bound := NULL;
+    END IF;
+    rerank_ids := column_ids[span_start:span_end];
+    rerank_positions := ARRAY(SELECT CASE
+        WHEN lower_bound IS NOT NULL AND upper_bound IS NOT NULL THEN round(lower_bound + (upper_bound - lower_bound) * g.n / (span_size + 1), 6)
+        WHEN upper_bound IS NOT NULL THEN upper_bound - 1024 * (span_size - g.n + 1)
+        WHEN lower_bound IS NOT NULL THEN lower_bound + 1024 * g.n
+        ELSE 1024 * g.n END
+      FROM generate_series(1, span_size) g(n) ORDER BY g.n);
+    PERFORM 1 FROM spark.issues i WHERE i.tenant_id = project.tenant_id AND i.project_id = project.id AND i.id = ANY (rerank_ids)
+      ORDER BY i.id FOR UPDATE;
+    new_position := rerank_positions[array_position(rerank_ids, cur.id)];
   END IF;
 
-  -- History lists changed fields only; position appears when the caller placed the issue.
+  -- History lists changed fields only; position appears when the caller placed the issue. A rebalance
+  -- always means the order changes (an issue already in place never rebalances), so it is always applied.
   changed := ARRAY(SELECT f FROM unnest(ARRAY[
     CASE WHEN new_title IS DISTINCT FROM cur.title THEN 'title' END,
     CASE WHEN new_description IS DISTINCT FROM cur.description THEN 'description' END,
     CASE WHEN new_type IS DISTINCT FROM cur.type THEN 'type' END,
     CASE WHEN new_priority IS DISTINCT FROM cur.priority THEN 'priority' END,
     CASE WHEN new_status IS DISTINCT FROM cur.status_id THEN 'statusId' END,
-    CASE WHEN positioned AND new_position IS DISTINCT FROM cur.position THEN 'position' END,
+    CASE WHEN positioned AND (rebalance OR new_position IS DISTINCT FROM cur.position) THEN 'position' END,
     CASE WHEN new_assignee IS DISTINCT FROM cur.assignee_user_id THEN 'assigneeUserId' END,
     CASE WHEN new_points IS DISTINCT FROM cur.story_points THEN 'storyPoints' END,
     CASE WHEN new_due IS DISTINCT FROM cur.due_date THEN 'dueDate' END,
@@ -206,9 +230,9 @@ BEGIN
     RETURNING id INTO outbox_id;
 
   IF rebalance THEN
-    FOR item IN SELECT u.id, u.ord FROM unnest(column_ids) WITH ORDINALITY u(id, ord) WHERE u.id <> cur.id ORDER BY u.ord LOOP
-      UPDATE spark.issues i SET position = 1024 * item.ord, version = i.version + 1
-        WHERE i.id = item.id AND i.position <> 1024 * item.ord RETURNING i.* INTO reranked;
+    FOR item IN SELECT u.id, u.target FROM unnest(rerank_ids, rerank_positions) u(id, target) WHERE u.id <> cur.id LOOP
+      UPDATE spark.issues i SET position = item.target, version = i.version + 1
+        WHERE i.id = item.id AND i.position <> item.target RETURNING i.* INTO reranked;
       IF FOUND THEN
         INSERT INTO spark.issue_events (tenant_id, project_id, issue_id, actor_user_id, event_type, from_version, to_version, changes)
           VALUES (project.tenant_id, project.id, reranked.id, actor, 'issue.reranked', reranked.version - 1, reranked.version, jsonb_build_object(

@@ -2184,6 +2184,76 @@ describe("Local PostgreSQL schema", () => {
     const positions = (await owner.query(`SELECT position::numeric AS position FROM ${table("issues")} WHERE status_id=$1 ORDER BY position,id`, [backlog])).rows.map((row) => Number(row.position));
     for (let index = 1; index < positions.length; index++) expect(positions[index]! - positions[index - 1]!).toBeGreaterThanOrEqual(0.001);
   });
+  it("applies a rebalancing reorder that keeps the mover's position", async () => {
+    const alice = await account("Rebalance Keeper");
+    const { project } = await kanbanProject(alice);
+    const backlog = await statusNamed(project, "Backlog");
+    const x = (await createIssue(alice, project, { title: "X" })).issue_id!;
+    const m = (await createIssue(alice, project, { title: "M" })).issue_id!;
+    const inserted: string[] = [];
+    for (let index = 0; index < 19; index++) {
+      const issue = (await createIssue(alice, project, { title: `I${index}` })).issue_id!;
+      expect(await updateIssue(alice, issue, 1, { afterIssueId: x })).toEqual({ outcome: "ok", issue_version: 2 });
+      inserted.unshift(issue);
+    }
+    expect(await countRows(`${table("issue_events")} WHERE project_id=$1 AND event_type='issue.reranked'`, [project])).toBe(0);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT position::text AS position FROM ${table("issues")} WHERE id=$1`, [m])).rows[0].position).toBe("2048.000000");
+    // M lands at slot 2 of the renumbered column, i.e. 2048 again, but the move and the rebalance still apply.
+    expect(await updateIssue(alice, m, 1, { afterIssueId: x })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect(await columnOrder(backlog)).toEqual([x, m, ...inserted]);
+    expect((await issueEvents(m))[1].changes.fields).toEqual(["position"]);
+    expect(await countRows(`${table("issue_events")} WHERE project_id=$1 AND event_type='issue.reranked'`, [project])).toBeGreaterThan(0);
+  });
+  it("rebalances only a bounded window of a long column", async () => {
+    const alice = await account("Long Column");
+    const { project } = await kanbanProject(alice);
+    const backlog = await statusNamed(project, "Backlog");
+    const ids: string[] = [];
+    for (let index = 0; index < 200; index++) ids.push((await createIssue(alice, project, { title: `L${index}` })).issue_id!);
+    const anchor = ids[100]!, movers = [ids[198]!, ids[199]!];
+    const intended = [...ids];
+    const events = () => countRows(`${table("issue_events")} WHERE project_id=$1`, [project]);
+    let rebalanced = 0;
+    for (let move = 0; move < 26; move++) {
+      const mover = movers[move % 2]!;
+      const before = await events();
+      expect((await updateIssue(alice, mover, await issueVersion(mover), { afterIssueId: anchor })).outcome).toBe("ok");
+      const written = (await events()) - before;
+      expect(written).toBeLessThanOrEqual(50);
+      if (written > 1) rebalanced++;
+      intended.splice(intended.indexOf(mover), 1);
+      intended.splice(intended.indexOf(anchor) + 1, 0, mover);
+    }
+    expect(rebalanced).toBeGreaterThan(0);
+    expect(await columnOrder(backlog)).toEqual(intended);
+    // Issues far from the drop point were never renumbered.
+    for (const issue of [...ids.slice(0, 50), ...ids.slice(160, 198)]) expect(await issueVersion(issue)).toBe(1);
+  });
+  it("falls back to renumbering the column when the local span is too dense", async () => {
+    const alice = await account("Dense Column");
+    const { workspace, project } = await kanbanProject(alice);
+    const backlog = await statusNamed(project, "Backlog");
+    const ids: string[] = [];
+    for (let index = 0; index < 60; index++) ids.push((await createIssue(alice, project, { title: `D${index}` })).issue_id!);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query("BEGIN");
+    try {
+      for (const [index, issue] of ids.entries()) {
+        await owner.query(`UPDATE ${table("issues")} SET position=$2,version=2 WHERE id=$1`, [issue, 1024 + index * 0.0005]);
+        await owner.query(`INSERT INTO ${table("issue_events")} (tenant_id,project_id,issue_id,actor_user_id,event_type,from_version,to_version,changes) VALUES ($1,$2,$3,$4,'issue.reranked',1,2,'{}')`, [workspace, project, issue, alice.id]);
+        await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload,processed_at) VALUES ($1,'issue.reranked','issue',$2,2,'{}',now())`, [workspace, issue]);
+      }
+      await owner.query("COMMIT");
+    } catch (error) { await owner.query("ROLLBACK"); throw error; }
+    const mover = ids[59]!;
+    expect(await updateIssue(alice, mover, 2, { afterIssueId: ids[30] })).toEqual({ outcome: "ok", issue_version: 3 });
+    const intended = [...ids.slice(0, 31), mover, ...ids.slice(31, 59)];
+    expect(await columnOrder(backlog)).toEqual(intended);
+    await owner.query("SET ROLE spark_owner");
+    const positions = (await owner.query(`SELECT i.position::text AS position FROM ${table("issues")} i WHERE i.status_id=$1 ORDER BY i.position,i.id`, [backlog])).rows;
+    expect(positions.map((row) => row.position)).toEqual(intended.map((_, index) => `${1024 * (index + 1)}.000000`));
+  });
   it("rejects a stale version once under concurrency", async () => {
     const alice = await account("Edit Racer A"), bob = await account("Edit Racer B");
     const { workspace, project } = await kanbanProject(alice);
