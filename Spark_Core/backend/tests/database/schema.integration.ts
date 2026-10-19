@@ -2504,4 +2504,65 @@ describe("Local PostgreSQL schema", () => {
       await expect(role.query(`SELECT ${fn("worker_record_email_delivery")}($1,'sent')`, [notice])).rejects.toMatchObject({ code: "42501" });
     }
   });
+  it("bounds assignment emails per recipient", async () => {
+    const alice = await account("Limit Assigner"), bob = await account("Limit Assignee"), carol = await account("Limit Other"), dave = await account("Limit Busy");
+    const { workspace, project } = await kanbanProject(alice);
+    for (const who of [bob, carol, dave]) await addMember(workspace, who, "member");
+    const noticesOf = async (issue: string, recipient: string) => {
+      await owner.query("SET ROLE spark_owner");
+      return (await owner.query(`SELECT n.id FROM ${table("notifications")} n JOIN ${table("outbox_events")} o ON o.id=n.outbox_event_id
+        WHERE n.resource_id=$1 AND n.recipient_user_id=$2 ORDER BY o.aggregate_version`, [issue, recipient])).rows.map((row) => row.id as string);
+    };
+    const statusOf = async (id: string) => (await workerRuntime.query(`SELECT status FROM ${fn("worker_task_assigned_email")}($1)`, [id])).rows[0]?.status as string | undefined;
+    const send = async (id: string) =>
+      (await workerRuntime.query(`SELECT ${fn("worker_record_email_delivery")}($1,'sent') AS recorded`, [id])).rows[0].recorded as boolean;
+    const deliveredAgo = async (id: string, minutes: number) => {
+      await owner.query("SET ROLE spark_owner");
+      await owner.query(`UPDATE ${table("notification_deliveries")} SET delivered_at=now()-make_interval(mins => $2) WHERE notification_id=$1`, [id, minutes]);
+    };
+
+    // Latest only: assigned B, then C, then B again before the worker ran: only the last notice to B is emailed.
+    const issue = (await createIssue(alice, project, { title: "Bounced", assignee: bob.id })).issue_id!;
+    expect((await updateIssue(alice, issue, 1, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    expect((await updateIssue(alice, issue, 2, { assigneeUserId: bob.id })).outcome).toBe("ok");
+    const [firstToBob, latestToBob] = await noticesOf(issue, bob.id) as [string, string];
+    expect(await statusOf(firstToBob)).toBe("skipped");
+    expect(await statusOf(latestToBob)).toBe("pending");
+
+    // Same issue window: a second email for the same issue within 10 minutes is skipped.
+    expect(await send(latestToBob)).toBe(true);
+    expect((await updateIssue(alice, issue, 3, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    expect((await updateIssue(alice, issue, 4, { assigneeUserId: bob.id })).outcome).toBe("ok");
+    const againToBob = (await noticesOf(issue, bob.id))[2]!;
+    expect(await statusOf(againToBob)).toBe("skipped");
+    await deliveredAgo(latestToBob, 9);
+    expect(await statusOf(againToBob)).toBe("skipped");
+    await deliveredAgo(latestToBob, 11);
+    expect(await statusOf(againToBob)).toBe("pending");
+    // A different issue is not affected by the per-issue window.
+    const other = (await createIssue(alice, project, { title: "Other issue", assignee: bob.id })).issue_id!;
+    expect(await statusOf((await noticesOf(other, bob.id))[0]!)).toBe("pending");
+
+    // Recipient window: at most 20 sent task-assigned emails per hour, across issues and workspaces.
+    const second = await kanbanProject(alice);
+    await addMember(second.workspace, dave, "member");
+    const daveNotices: string[] = [];
+    for (let index = 0; index < 21; index++) {
+      const target = index % 2 === 0 ? project : second.project;
+      const created = (await createIssue(alice, target, { title: `Busy ${index}`, assignee: dave.id })).issue_id!;
+      daveNotices.push((await noticesOf(created, dave.id))[0]!);
+    }
+    for (const notice of daveNotices.slice(0, 20)) {
+      expect(await statusOf(notice)).toBe("pending");
+      expect(await send(notice)).toBe(true);
+    }
+    const last = daveNotices[20]!;
+    expect(await statusOf(last)).toBe("skipped");
+    // Suppressed deliveries and deliveries older than an hour do not count.
+    await deliveredAgo(daveNotices[0]!, 59);
+    expect(await statusOf(last)).toBe("skipped");
+    await deliveredAgo(daveNotices[0]!, 61);
+    expect(await statusOf(last)).toBe("pending");
+    expect(await statusOf((await noticesOf(other, bob.id))[0]!)).toBe("pending");
+  });
 });

@@ -391,10 +391,21 @@ END $$;
 -- delivery is already recorded for the notification, or the recipient turned off (task_assigned, email)
 -- in notification_preferences (no row means enabled). A skipped row carries no details. Zero rows for an
 -- unknown notification or one of another kind.
+-- Abuse limits, so repeated assigning cannot flood one inbox or exhaust the shared SMTP quota (in-app
+-- notifications are unaffected; every skipped email is recorded as suppressed by the worker):
+--   latest only:        a newer issue_assigned notification for the same recipient and issue skips this one;
+--   same_issue_window:  at most one sent email per recipient and issue within 10 minutes;
+--   recipient_window /  at most 20 sent task-assigned emails per recipient within one hour, across all
+--   recipient_max:      issues and workspaces.
+-- Concurrent workers may each pass the counting limits once before either records its send, so a limit
+-- can be exceeded by at most the number of events sent in parallel.
 CREATE FUNCTION spark.worker_task_assigned_email(p_notification uuid)
 RETURNS TABLE(status text, email text, recipient_name text, actor_name text, workspace_name text, workspace_slug text,
   project_key text, project_name text, issue_number bigint, issue_title text)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
+  WITH limits AS (
+    SELECT interval '10 minutes' AS same_issue_window, interval '1 hour' AS recipient_window, 20 AS recipient_max
+  )
   SELECT CASE WHEN d.deliverable THEN 'pending' ELSE 'skipped' END,
     CASE WHEN d.deliverable THEN d.email END, CASE WHEN d.deliverable THEN d.recipient_name END,
     CASE WHEN d.deliverable THEN d.actor_name END, CASE WHEN d.deliverable THEN d.workspace_name END,
@@ -412,7 +423,22 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
         AND NOT EXISTS (SELECT 1 FROM spark.notification_deliveries nd
           WHERE nd.tenant_id = n.tenant_id AND nd.notification_id = n.id AND nd.channel = 'email')
         AND NOT EXISTS (SELECT 1 FROM spark.notification_preferences np
-          WHERE np.user_id = n.recipient_user_id AND np.kind = 'task_assigned' AND np.channel = 'email' AND NOT np.enabled) AS deliverable,
+          WHERE np.user_id = n.recipient_user_id AND np.kind = 'task_assigned' AND np.channel = 'email' AND NOT np.enabled)
+        -- Latest only: issue versions order the notifications of one issue exactly.
+        AND NOT EXISTS (SELECT 1 FROM spark.notifications n2
+          JOIN spark.outbox_events o2 ON o2.tenant_id = n2.tenant_id AND o2.id = n2.outbox_event_id
+          WHERE n2.tenant_id = n.tenant_id AND n2.recipient_user_id = n.recipient_user_id AND n2.kind = 'issue_assigned'
+            AND n2.resource_type = 'issue' AND n2.resource_id = n.resource_id AND o2.aggregate_type = 'issue'
+            AND o2.aggregate_id = o.aggregate_id AND o2.aggregate_version > o.aggregate_version)
+        AND NOT EXISTS (SELECT 1 FROM spark.notifications n2
+          JOIN spark.notification_deliveries nd2 ON nd2.tenant_id = n2.tenant_id AND nd2.notification_id = n2.id
+          WHERE n2.tenant_id = n.tenant_id AND n2.recipient_user_id = n.recipient_user_id AND n2.kind = 'issue_assigned'
+            AND n2.resource_type = 'issue' AND n2.resource_id = n.resource_id
+            AND nd2.channel = 'email' AND nd2.status = 'sent' AND nd2.delivered_at > now() - l.same_issue_window)
+        AND (SELECT count(*) FROM spark.notifications n2
+          JOIN spark.notification_deliveries nd2 ON nd2.tenant_id = n2.tenant_id AND nd2.notification_id = n2.id
+          WHERE n2.recipient_user_id = n.recipient_user_id AND n2.kind = 'issue_assigned'
+            AND nd2.channel = 'email' AND nd2.status = 'sent' AND nd2.delivered_at > now() - l.recipient_window) < l.recipient_max AS deliverable,
       e.normalized_email AS email, btrim(r.display_name) AS recipient_name, btrim(a.display_name) AS actor_name,
       w.name AS workspace_name, w.slug AS workspace_slug, p.key AS project_key, p.name AS project_name,
       i.number AS issue_number, i.title AS issue_title
@@ -425,6 +451,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
     JOIN spark.workspaces w ON w.id = n.tenant_id
     JOIN spark.users r ON r.id = n.recipient_user_id
     LEFT JOIN spark.user_emails e ON e.user_id = r.id AND e.is_primary
+    CROSS JOIN limits l
     WHERE n.id = p_notification AND n.kind = 'issue_assigned' AND n.resource_type = 'issue' AND o.aggregate_type = 'issue'
   ) d;
 $$;
