@@ -134,6 +134,13 @@
       "when": 1792320000000,
       "tag": "0018_project_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792330000000,
+      "tag": "0019_issue_create",
+      "breakpoints": true
     }
   ]
 }
