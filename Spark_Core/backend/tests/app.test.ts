@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Redis } from "ioredis";
 
 import { buildApp } from "../src/app.js";
-import { loadAuthConfig, loadConfig } from "../src/config.js";
+import { loadAuthConfig, loadConfig, loadWorkerConfig } from "../src/config.js";
 
 const config = loadConfig({ NODE_ENV: "test" });
 
@@ -114,6 +114,7 @@ describe("Spark API", () => {
     // The API process must never receive the login database credentials.
     expect(() => loadConfig({ ...base, AUTH_DATABASE_URL: "postgresql://spark_auth:secret@db.internal/spark" })).toThrow("must not be set for the API");
     expect(() => loadConfig({ ...base, MIGRATION_DATABASE_URL: "postgresql://spark_migrator:secret@db.internal/spark" })).toThrow("must not be set for the API");
+    expect(() => loadConfig({ ...base, WORKER_DATABASE_URL: "postgresql://spark_worker:secret@db.internal/spark" })).toThrow("must not be set for the API");
     // Off-host auth traffic carries passwords and tokens, so it must be encrypted.
     expect(() => loadConfig({ ...base, AUTH_SERVICE_URL: "http://auth.internal:4100" })).toThrow("must use HTTPS");
     expect(loadConfig({ ...base, AUTH_SERVICE_URL: "http://127.0.0.1:4100" }).authServiceUrl).toBe("http://127.0.0.1:4100");
@@ -139,5 +140,40 @@ describe("Spark API", () => {
     expect(() => loadAuthConfig({ ...base, DATABASE_SSL: "false" })).toThrow();
     expect(() => loadAuthConfig({ ...base, MIGRATION_DATABASE_URL: "postgresql://spark_migrator:secret@db.internal/spark" })).toThrow("must not be set for the auth process");
     expect(() => loadAuthConfig({ NODE_ENV: "test", DATABASE_URL: "postgresql://spark_auth:x@127.0.0.1/spark" })).toThrow("different database role");
+    expect(() => loadAuthConfig({ ...base, WORKER_DATABASE_URL: "postgresql://spark_worker:secret@db.internal/spark" })).toThrow("must not be set for the auth process");
+  });
+
+  it("gives the worker only its own credentials", () => {
+    expect(loadWorkerConfig({ NODE_ENV: "test" })).toMatchObject({
+      workerDatabaseUrl: "postgresql://spark_worker:spark_worker_local_only@127.0.0.1:5432/spark",
+      smtpUrl: "smtp://127.0.0.1:1025",
+      emailFrom: "Spark <no-reply@spark.local>",
+      appBaseUrl: "http://localhost:3000",
+    });
+    expect(loadWorkerConfig({ NODE_ENV: "test", APP_BASE_URL: "http://localhost:3000/" }).appBaseUrl).toBe("http://localhost:3000");
+    expect(() => loadWorkerConfig({ NODE_ENV: "test", APP_BASE_URL: "javascript:alert(1)" })).toThrow("APP_BASE_URL");
+    expect(() => loadWorkerConfig({ NODE_ENV: "test", SMTP_URL: "http://127.0.0.1:1025" })).toThrow("SMTP_URL");
+    expect(() => loadWorkerConfig({ NODE_ENV: "test", DATABASE_URL: "postgresql://spark_worker:x@127.0.0.1/spark" })).toThrow("different database role");
+    const base = {
+      NODE_ENV: "production",
+      WORKER_DATABASE_URL: "postgresql://spark_worker:secret@db.internal/spark",
+      DATABASE_SSL: "true",
+      SMTP_URL: "smtps://user:pass@smtp.example.com:465",
+      EMAIL_FROM: "Spark <no-reply@spark.example>",
+      APP_BASE_URL: "https://app.spark.example",
+    };
+    expect(loadWorkerConfig(base)).toMatchObject({ appBaseUrl: "https://app.spark.example", databaseSsl: true, smtpRequireTls: true });
+    // Production mail is always encrypted: smtps:// (implicit TLS) or smtp:// with STARTTLS required.
+    expect(loadWorkerConfig({ ...base, SMTP_URL: "smtp://user:pass@smtp.example.com:587" }).smtpRequireTls).toBe(true);
+    expect(() => loadWorkerConfig({ ...base, SMTP_URL: "smtp://smtp.example.com:587?ignoreTLS=true" })).toThrow("SMTP_URL");
+    expect(() => loadWorkerConfig({ ...base, SMTP_URL: "smtps://smtp.example.com:465?tls.rejectUnauthorized=false" })).toThrow("SMTP_URL");
+    expect(loadWorkerConfig({ NODE_ENV: "test" }).smtpRequireTls).toBe(false);
+    expect(() => loadWorkerConfig({ ...base, WORKER_DATABASE_URL: undefined })).toThrow();
+    expect(() => loadWorkerConfig({ ...base, SMTP_URL: undefined })).toThrow();
+    expect(() => loadWorkerConfig({ ...base, APP_BASE_URL: "http://app.spark.example" })).toThrow("HTTPS");
+    expect(() => loadWorkerConfig({ ...base, DATABASE_SSL: "false" })).toThrow();
+    for (const name of ["DATABASE_URL", "AUTH_DATABASE_URL", "MIGRATION_DATABASE_URL"]) {
+      expect(() => loadWorkerConfig({ ...base, [name]: "postgresql://other:secret@db.internal/spark" })).toThrow("must not be set for the worker process");
+    }
   });
 });

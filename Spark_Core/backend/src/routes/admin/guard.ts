@@ -2,8 +2,10 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 
 import { loadSessionPrincipal, readSessionTokenHash, withSessionContext } from "../../infrastructure/database/session.js";
-import { decodeCursor, type Cursor } from "../pagination.js";
 import { problem } from "../responses.js";
+import { MUTATION_RATE_LIMIT, databaseDenial, expectOutcome, idParams, invalidInputDetail, isInvalidParameter, pageQueryProperties, readCursor } from "../session-guard.js";
+
+export { MUTATION_RATE_LIMIT, expectOutcome, idParams, pageQueryProperties, readCursor };
 
 export const PLATFORM_ROLES = ["super_admin", "platform_admin", "community_moderator", "content_moderator", "campaign_moderator"] as const;
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
@@ -17,44 +19,13 @@ export const COMMUNITY_STAFF: readonly PlatformRole[] = ["super_admin", "platfor
 export const CAMPAIGN_STAFF: readonly PlatformRole[] = ["super_admin", "platform_admin", "campaign_moderator"];
 export const SUPER_ADMINS: readonly PlatformRole[] = ["super_admin"];
 
-export const MUTATION_RATE_LIMIT = { rateLimit: { max: 30, timeWindow: 60 * 1000 } } as const;
-
-export const idParams = {
-  type: "object",
-  required: ["id"],
-  properties: { id: { type: "string", format: "uuid" } },
-  additionalProperties: false,
-} as const;
-
 /** Every governance write needs a human-readable justification; the database enforces the same bounds. */
 export const reasonProperty = { type: "string", minLength: 3, maxLength: 500, pattern: "\\S" } as const;
-
-export const pageQueryProperties = {
-  cursor: { type: "string", maxLength: 200 },
-  limit: { type: "integer", minimum: 1, maximum: 100 },
-} as const;
 
 export interface StaffMember {
   userId: string;
   roles: string[];
   tokenHash: Buffer;
-}
-
-// Database outcomes are a closed set; anything unexpected must not be reported as success.
-export function expectOutcome(outcome: string | undefined, ...allowed: string[]): void {
-  if (!outcome || !allowed.includes(outcome)) throw new Error(`Unexpected governance outcome: ${outcome ?? "none"}`);
-}
-
-// Errors raised by spark.require_platform_role; other 42501 errors are real privilege bugs and stay 500s.
-function governanceError(error: unknown): "no_session" | "no_role" | null {
-  if (typeof error !== "object" || error === null || !("code" in error)) return null;
-  if (error.code === "28000" && "message" in error && error.message === "Live session required") return "no_session";
-  if (error.code === "42501" && "message" in error && error.message === "Platform role required") return "no_role";
-  return null;
-}
-
-function isInvalidParameter(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "22023";
 }
 
 // Messages our own governance functions raise with 22023. Anything else gets a generic message so
@@ -73,22 +44,8 @@ const KNOWN_INPUT_ERRORS = new Set([
   "Invalid invoice status", "Invalid plan kind",
 ]);
 
-function invalidInputDetail(error: unknown): string {
-  const message = typeof error === "object" && error !== null && "message" in error ? String(error.message) : "";
-  return KNOWN_INPUT_ERRORS.has(message) ? `${message}.` : "The request contains a value the server does not accept.";
-}
-
 export function forbidden(request: FastifyRequest, reply: FastifyReply, detail = "You do not have the platform role this action requires.") {
   return problem(request, reply, 403, "Forbidden", "insufficient_permissions", detail);
-}
-
-export function readCursor(request: FastifyRequest, reply: FastifyReply, value: string | undefined): Cursor | null | undefined {
-  const cursor = decodeCursor(value);
-  if (cursor === "invalid") {
-    void problem(request, reply, 400, "Bad Request", "invalid_cursor", "The cursor is not valid for this collection.");
-    return undefined;
-  }
-  return cursor;
 }
 
 export interface StaffGuard {
@@ -130,7 +87,7 @@ export function createStaffGuard(pool: Pool): StaffGuard {
           return work(client);
         });
       } catch (error) {
-        const denial = governanceError(error);
+        const denial = databaseDenial(error);
         if (denial === "no_session") {
           void problem(request, reply, 401, "Unauthorized", "session_expired", "Session expired or invalid.");
           return undefined;
@@ -142,7 +99,7 @@ export function createStaffGuard(pool: Pool): StaffGuard {
         // 22023 is raised by the governance functions for input the schema cannot express,
         // such as a reason that is too short once surrounding whitespace is trimmed.
         if (isInvalidParameter(error)) {
-          void problem(request, reply, 400, "Bad Request", "invalid_input", invalidInputDetail(error));
+          void problem(request, reply, 400, "Bad Request", "invalid_input", invalidInputDetail(error, KNOWN_INPUT_ERRORS));
           return undefined;
         }
         throw error;

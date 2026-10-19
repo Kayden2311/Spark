@@ -36,10 +36,28 @@ Filters at step 2: keyword, topic, location, and startup stage. The eventual API
 
 | Step | Route | Goal | Primary action | Mockup state |
 | --- | --- | --- | --- | --- |
-| 1 | `/workspace` | See work ownership and progress | Add task | Existing mockup |
-| 2 | `/schedule` | Coordinate member sessions and delivery dates | New event | Existing mockup |
-| 3 | `/notifications` | Review relevant activity | Mark all as read | Existing mockup |
-| 4 | `/billing` | Review workspace plan usage | Upgrade plan | Existing mockup |
+| 1 | `/signup` | Create an account | Create account | Implemented |
+| 2 | `/onboarding` | Name the first workspace and pick its address (`spark.app/w/{slug}`) | Create workspace; continues to the methodology picker | Implemented |
+| 3 | `/w/[slug]/projects/new?first=1` | "Your first project": pick Scrum, Kanban or Waterfall, then name the project (key derived live), choose a lead and sprint length (Scrum) or dates and phases (Waterfall). Plain members see "Only owners and admins can create projects" | Create project (or "Skip for now" to the workspace home) | Implemented |
+| 4 | `/w/[slug]/p/[key]` | Project overview: key, methodology, lead and dates; board columns with WIP limits ("The board arrives in the next update"); sprint length (Scrum), WIP summary (Kanban) or phase timeline with baseline and milestones (Waterfall); the methodology's practices. Owners, admins and the project lead open Settings; a stale save shows "Updated by a teammate — review the latest values and save again." | Settings | Implemented |
+| 5 | `/w/[slug]` | Workspace home: members, pending invitations (owners and admins), your role and the project cards (key, methodology, lead, progress); without projects, the three methodology tiles link to the picker | New project (owners and admins), Invite teammates | Implemented |
+| 6 | `/w/[slug]/members` | See who belongs, with roles and join dates. Owners change roles; owners and admins remove members, invite by email and resend or revoke pending invitations; everyone can leave. The last owner cannot be demoted or removed ("A workspace needs at least one owner.") | Invite people | Implemented |
+| 7 | `/schedule` | Coordinate member sessions and delivery dates | New event | Existing mockup |
+| 8 | `/notifications` | Review relevant activity | Mark all as read | Existing mockup |
+| 9 | `/billing` | Review workspace plan usage | Upgrade plan | Existing mockup |
+
+`/workspace` opens the last workspace the person used (or the first one), and sends people without a workspace to `/onboarding`. The workspace switcher in the sidebar lists every membership and offers "Create workspace". Inside a workspace the sidebar also lists up to 8 projects with a methodology-colored dot, plus "New project" for owners and admins.
+
+### Invitation journey
+
+| Step | Route | Goal | Primary action | Mockup state |
+| --- | --- | --- | --- | --- |
+| 1 | `/w/[slug]/members` (invite dialog) | Owner or admin invites an email as admin or member (admins invite members only) | Send invitation; the dialog confirms "Invitation sent to …" and never shows the link | Implemented |
+| 2 | Email | The worker emails a private link `/invitations/accept#token=…`; it works once and expires in 7 days. Resending sends a new link and the old one stops working | Accept invitation | Implemented |
+| 3 | `/invitations/accept` | See the workspace, inviter, role and masked recipient address. The token moves from the URL fragment to session storage and is removed from the address bar | Signed out: sign in or create an account, then return here. Signed in: Join | Implemented |
+| 4 | `/w/[slug]` | Land in the workspace after joining | — | Implemented |
+
+Expired, revoked, already used and unknown links get their own explanation with a link home. If the signed-in account is not the invited address, the page says "This invitation was sent to {masked email}. Sign out and use that account." and the invitation stays pending.
 
 ## Journey 4: Moderate content
 
@@ -55,7 +73,7 @@ Filters at step 2: keyword, topic, location, and startup stage. The eventual API
 | --- | --- | --- | --- | --- |
 | 1 | `/login` | Authenticate into Spark | Sign in with email/password or OAuth (GitHub, Google) | Implemented (UI/UX Pro Max) |
 | 2 | `/login` (Sign out) | Terminate current session | Revoke session & clear cookie | Implemented |
-| 3 | `/signup` | Register new user account | Submit credentials | Planned |
+| 3 | `/signup` | Register new user account; honors an on-site `?redirect=` (for example back to `/invitations/accept`) | Submit credentials | Implemented |
 | 4 | `/forgot-password` | Initiate password recovery | Request reset token | Planned |
 
 ## Journey 6: Platform governance and moderation

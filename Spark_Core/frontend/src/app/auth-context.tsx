@@ -39,6 +39,15 @@ export interface AuthContextType {
   refreshSession: () => Promise<void>;
 }
 
+/**
+ * Sessions list every membership in `workspaces`. Sign-up answers `workspace: null, workspaces: []` because a
+ * new account has none until onboarding; older single-workspace payloads are still accepted.
+ */
+function readWorkspaces(data: { workspaces?: unknown; workspace?: unknown }): AuthWorkspace[] {
+  if (Array.isArray(data.workspaces)) return data.workspaces as AuthWorkspace[];
+  return data.workspace ? [data.workspace as AuthWorkspace] : [];
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -58,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         const roles = data.platformRoles || data.user?.platformRoles || [];
-        const spaces = data.workspaces || (data.workspace ? [data.workspace] : []);
+        const spaces = readWorkspaces(data);
         setUser(data.user);
         setWorkspaces(spaces);
         setPlatformRoles(roles);
@@ -90,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (res.ok) {
           const data = await res.json();
           const roles = data.platformRoles || data.user?.platformRoles || [];
-          const spaces = data.workspaces || (data.workspace ? [data.workspace] : []);
+          const spaces = readWorkspaces(data);
           setUser(data.user);
           setWorkspaces(spaces);
           setPlatformRoles(roles);
@@ -136,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         const roles = data.platformRoles || data.user?.platformRoles || [];
-        const spaces = data.workspaces || (data.workspace ? [data.workspace] : []);
+        const spaces = readWorkspaces(data);
         setUser(data.user);
         setWorkspaces(spaces);
         setPlatformRoles(roles);
@@ -178,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (res.ok) {
         const data = await res.json();
-        const spaces = data.workspaces || (data.workspace ? [data.workspace] : []);
+        const spaces = readWorkspaces(data);
         setUser(data.user);
         setWorkspaces(spaces);
         setPlatformRoles([]);

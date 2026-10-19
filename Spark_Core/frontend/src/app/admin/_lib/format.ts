@@ -1,5 +1,7 @@
 import type { AuditAction, AuditEntry, CommunityState, PlatformRole, ReportStatus, ReviewStatus, UserStatus } from "./types";
 
+export { formatCount, formatPercent, shortDate, shortMonth } from "../../_ui/viz/format";
+
 export type Tone = "neutral" | "blue" | "green" | "amber" | "red" | "violet" | "navy";
 
 export const ROLE_LABELS: Record<PlatformRole, string> = {
@@ -118,14 +120,6 @@ export function humanize(code: string): string {
   return text ? text[0]!.toUpperCase() + text.slice(1) : code;
 }
 
-const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
-const whole = new Intl.NumberFormat("en-US");
-
-/** 1,234 below ten thousand; 12.3K above. */
-export function formatCount(value: number): string {
-  return Math.abs(value) >= 10_000 ? compact.format(value) : whole.format(value);
-}
-
 /** Minor units (cents) to a currency string; whole units once the amount is large. */
 export function formatMoney(minor: number, currency = "USD", options: { compact?: boolean } = {}): string {
   const major = minor / 100;
@@ -134,10 +128,6 @@ export function formatMoney(minor: number, currency = "USD", options: { compact?
   }
   const digits = Math.abs(major) >= 1000 ? 0 : 2;
   return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(major);
-}
-
-export function formatPercent(ratio: number, digits = 0): string {
-  return `${(ratio * 100).toFixed(digits)}%`;
 }
 
 export type ChangeDirection = "up" | "down" | "flat" | "none";
@@ -150,16 +140,6 @@ export function describeChange(current: number, previous: number | null | undefi
   if (Math.abs(change) < 0.005) return { text: "No change", direction: "flat" };
   const magnitude = Math.abs(change * 100).toFixed(Math.abs(change) < 0.1 ? 1 : 0);
   return { text: `${change > 0 ? "+" : "\u2212"}${magnitude}%`, direction: change > 0 ? "up" : "down" };
-}
-
-/** Axis label for an ISO date: "Oct 7". */
-export function shortDate(isoDay: string): string {
-  return new Date(`${isoDay.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-}
-
-/** Axis label for a month: "Oct 26". */
-export function shortMonth(isoDay: string): string {
-  return new Date(`${isoDay.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
 }
 
 export const SUBSCRIPTION_STATUS: Record<string, { label: string; tone: Tone }> = {

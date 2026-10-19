@@ -76,8 +76,9 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Visitor
 - **Priority**: Must
-- **Status**: Planned (`/signup`)
+- **Status**: Implemented (`POST /api/v1/auth/password/sign-up`, `/signup`)
 - **Story**: As a Visitor, I want to register with an email and password so that I can request membership and join workspaces.
+- **Note**: Sign-up creates the account and signs the user in; since migration `0014` it no longer creates a workspace. A new user creates one explicitly (US-E1) or joins through an invitation (US-E3). Email verification is not implemented yet.
 - **Acceptance criteria**:
   - Given a new email and a password meeting policy, when I submit, then the account is created with an Argon2id hash and I am signed in or asked to verify the email.
   - Given an email already registered, when I submit, then the response does not disclose that the email exists.
@@ -219,7 +220,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: User
 - **Priority**: Must
-- **Status**: Mockup (`/workspace`)
+- **Status**: Implemented (`POST /api/v1/workspaces`, `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{workspaceId}`, `GET /api/v1/workspaces/by-slug/{slug}`, `PATCH /api/v1/workspaces/{workspaceId}`)
 - **Story**: As a User, I want to create a workspace so that my team has a private place to collaborate.
 - **Acceptance criteria**:
   - Given a valid name, when I create it, then the workspace and my ownership are committed atomically.
@@ -228,25 +229,27 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 ### US-E2: Invite members
 
-- **Actor**: Workspace Owner
+- **Actor**: Workspace Owner or Admin
 - **Priority**: Must
-- **Status**: Planned
-- **Story**: As a Workspace Owner, I want to invite people by email so that my team can join.
+- **Status**: Implemented (`POST /api/v1/workspaces/{workspaceId}/invitations`, `GET /api/v1/workspaces/{workspaceId}/invitations`, `POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/resend`, `DELETE /api/v1/workspaces/{workspaceId}/invitations/{invitationId}`)
+- **Story**: As a Workspace Owner or Admin, I want to invite people by email so that my team can join.
 - **Acceptance criteria**:
-  - Given an email, when I send an invitation, then it is expiring and single-use.
+  - Given an email, when I send an invitation, then it is expiring (7 days) and single-use, and the link is emailed by the background worker; the API never returns the token.
   - Given I revoke a pending invitation, then it can no longer be accepted.
-  - Only the Workspace Owner may send or revoke invitations.
+  - Given I resend an invitation, then a new link is emailed and the previous link stops working.
+  - An owner may invite admins or members; an admin may invite members only. Plain members cannot list, send, resend, or revoke invitations.
 
 ### US-E3: Accept an invitation
 
 - **Actor**: User
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented (`POST /api/v1/invitations/preview`, `POST /api/v1/invitations/accept`)
 - **Story**: As an invited person, I want to accept my invitation so that I can join the workspace.
 - **Acceptance criteria**:
   - Given a valid token and a signed-in account matching the invited recipient, when I accept, then I become a Workspace Member of that tenant only.
   - Given an expired, used, or revoked token, then acceptance fails with a safe error.
-  - Given a different account than the intended recipient, then acceptance is refused.
+  - Given a different account than the intended recipient, then acceptance is refused with `403 recipient_mismatch` naming the masked invited email, and the invitation stays pending.
+  - Given the same account accepts twice, then the second call succeeds with `alreadyMember: true`.
   - Two simultaneous accepts of the same token result in exactly one membership.
 
 ### US-E4: Create and assign tasks
@@ -254,6 +257,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 - **Actor**: Workspace Member
 - **Priority**: Must
 - **Status**: Mockup (`/workspace` Add task)
+- **Note**: Projects now exist (US-E7): each project has a key, a methodology and its board columns, so tasks will be created inside a project's board. Task creation itself is still planned.
 - **Story**: As a Workspace Member, I want to create tasks and assign them so that ownership and progress are clear.
 - **Acceptance criteria**:
   - Given a title and optional assignee, then the task is created in the workspace's board.
@@ -278,6 +282,23 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 - **Status**: Mockup (`/schedule`)
 - **Story**: As a Workspace Member, I want to add events and delivery dates so that the team coordinates sessions.
 - **Acceptance criteria**: Persisted behavior is defined when this story is scheduled; until then the screen shows illustrative data only.
+
+### US-E7: Choose a methodology for a project
+
+- **Actor**: Workspace Owner or Admin (create); Owner, Admin or project lead (settings); any Workspace Member (read)
+- **Priority**: Must
+- **Status**: Implemented (`GET /api/v1/methodologies`, `POST /api/v1/workspaces/{workspaceId}/projects`, `GET /api/v1/workspaces/{workspaceId}/projects`, `GET /api/v1/workspaces/{workspaceId}/projects/by-key/{key}`, `GET /api/v1/projects/{projectId}`, `PATCH /api/v1/projects/{projectId}`; screens `/w/[slug]/projects/new` and `/w/[slug]/p/[key]`)
+- **Story**: As a Workspace Owner or Admin, I want to create a project with Scrum, Kanban or Waterfall so that its board, planning and reports match how the team works.
+- **Acceptance criteria**:
+  - Given the picker, when I choose a methodology, then the form shows that methodology's columns, practices and fields: sprint length (1–4 weeks) for Scrum, WIP limits for Kanban, and start/target dates with evenly spread, editable phases for Waterfall.
+  - Given a project key that is already used in this workspace, then creation fails with `409 key_taken` and the form says so; the same key in another workspace is allowed.
+  - Given Waterfall dates too short for the phases, or a target before the start, then the form shows an inline error and cannot be submitted, and the API answers `400` naming invalid dates.
+  - Given a plain member opens `/w/{slug}/projects/new`, then they see "Only owners and admins can create projects" instead of a form.
+  - The workspace home lists every project with its key, methodology pill, lead and progress (`done/total`, or "No tasks yet"); the sidebar lists up to 8 projects with a methodology-colored dot, and only owners and admins see "New project".
+  - The project overview shows the header, the board columns with WIP limits, the methodology section (Scrum sprint length; Kanban WIP summary; Waterfall phase timeline with baseline bars, milestone markers and a today marker) and the methodology's practices; an unknown key shows a not-found card.
+  - Owners, admins and the project lead can edit name, description, lead, dates and (Scrum) sprint length; saves send `If-Match`. Given a teammate saved first, then the save gets `412`, the dialog stays open with the teammate's values and says "Updated by a teammate — review the latest values and save again."
+  - Projects created before methodologies existed still list and open, shown as Kanban.
+  - The methodology cannot be changed yet; switching is planned for a later milestone.
 
 ## Epic F: Notifications (US-06)
 
@@ -407,7 +428,7 @@ Mentor matching, file uploads, rich realtime collaboration, AI summaries, and bi
 | US-02 | US-C1, US-C2, US-C3 | Journeys 1 and 2 |
 | US-03 | US-D1, US-D2, US-D3, US-D4 | Journey 2 |
 | US-04 | US-E1, US-E2, US-E3 | Journey 3 |
-| US-05 | US-E4, US-E5, US-E6 | Journey 3 |
+| US-05 | US-E4, US-E5, US-E6, US-E7 | Journey 3 |
 | US-06 | US-F1, US-F2 | Journey 3 |
 | US-07 | US-G1, US-G2, US-G3 | Journey 4 |
 | Auth and governance | US-A1 to US-A5, US-H1 to US-H4, US-I1 | Journeys 5 and 6 |

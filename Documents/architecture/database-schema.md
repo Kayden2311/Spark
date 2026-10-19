@@ -1,6 +1,6 @@
 # Proposed product database schema
 
-Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0013_report_preview.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`) and the platform governance API (`/api/v1/admin/*`) are implemented and verified locally. Write use cases for product domains, worker adapters, payment integration, and Supabase deployment are not implemented.
+Status: the local schema foundation, Drizzle migrations (`0000_product_tables.sql` to `0018_project_writes.sql`), baseline constraints, FORCE RLS, read-only runtime grants, authentication APIs (`/api/v1/auth/password/sign-up`, `/api/v1/auth/password/sign-in`, `/api/v1/me`, `/api/v1/auth/sign-out`), the platform governance API (`/api/v1/admin/*`), the workspace, member and invitation API (`/api/v1/workspaces/*`, `/api/v1/invitations/*`), the project create, read and settings API and the outbox email worker for invitation emails are implemented and verified locally. Other product write use cases, payment integration, and Supabase deployment are not implemented.
 
 Based on [product context](../context.md), [REST and Clean Architecture](rest-clean-compliance.md), and [verification policy](../automation/testing.md). The current implementation remains local-only until its reviewed migrations and tests pass. Supabase role provisioning and deployment require a separate target-specific runbook.
 
@@ -11,11 +11,11 @@ Migrations `0006_scoped_runtime_access.sql`, `0007_governance_corrections.sql`, 
 - `spark_app` has no INSERT, UPDATE, or DELETE grant on any table, and no direct read of credentials, sessions, tokens, reports, or platform roles.
 - `spark_auth` is a login-only role created by `pnpm db:bootstrap:local`. It has no table privileges and is the only role that can execute `auth_register_password`, `auth_password_login`, and `auth_start_session`. Only the auth process connects with it (see "Process boundary").
 - `auth_session_principal` and `auth_revoke_session` are executable by both roles because they require an existing session token hash.
-- Registration is one atomic transaction. `auth_start_session` creates the session and returns its principal in the same call, so no unclaimed session rows remain.
+- Registration is one atomic transaction that creates the user, primary email, credential and session only. Since `0014` it no longer creates a default workspace; `auth_register_password` keeps its return columns and returns NULL for `workspace_id`, `workspace_name` and `workspace_slug`. `auth_start_session` creates the session and returns its principal in the same call, so no unclaimed session rows remain.
 - Platform governance runs inside a transaction that sets `spark.session_token_hash`. Staff read policies and `staff_*` functions resolve the actor from a live, unexpired session of an active user, never from a user id argument. A missing session raises `28000` (HTTP 401); a missing role raises `42501` (HTTP 403).
 - Moderation actions may be recorded by community owners and moderators or by active platform content moderators.
 - Suspending a super admin and revoking the `super_admin` role take the same row locks, so concurrent requests cannot leave the platform without an active super admin.
-- Process boundary: the backend runs as two processes from one build. The public API (`src/server.ts`, port 4000) connects only as `spark_app` and forwards `POST /api/v1/auth/password/sign-up` and `/sign-in` to the private auth process (`src/auth-server.ts`, port 4100, loopback by default), which alone connects as `spark_auth`. `/api/v1/me` and sign-out stay in the API because they only need an existing token hash. Locally both processes read the same `.env` for convenience; in production each process refuses to start with the other's database URL or `MIGRATION_DATABASE_URL`, so secrets must be provisioned per process.
+- Process boundary: the backend runs as three processes from one build. The public API (`src/server.ts`, port 4000) connects only as `spark_app` and forwards `POST /api/v1/auth/password/sign-up` and `/sign-in` to the private auth process (`src/auth-server.ts`, port 4100, loopback by default), which alone connects as `spark_auth`. `/api/v1/me` and sign-out stay in the API because they only need an existing token hash. The background worker (`src/worker.ts`, no HTTP port) alone connects as `spark_worker` and sends outbox emails (see "Background worker and email"). Locally all processes read the same `.env` for convenience; in production each process refuses to start with another process's database URL or `MIGRATION_DATABASE_URL`, so secrets must be provisioned per process.
 - Startup probes fail closed: the API refuses a role that can execute any of the three credential functions, has role memberships, is a superuser, or bypasses RLS; the auth process refuses a role that is a superuser, bypasses RLS, has role memberships, or can read `spark.users`. In production `AUTH_SERVICE_URL` must use HTTPS unless it is a loopback address.
 - What the split guarantees: the API's database role cannot read password hashes or create a session for an existing user, so SQL injection or logic errors in the API cannot mint logins.
 - Residual risks (not solved by the split):
@@ -25,6 +25,81 @@ Migrations `0006_scoped_runtime_access.sql`, `0007_governance_corrections.sql`, 
   - The API waits up to 15 s for the auth process. A sign-up that commits after that is reported as `503 auth_unavailable`; retrying returns `409 email_already_exists` and the user signs in normally.
 - Accepted low-severity edge cases: lock contention beyond `lock_timeout` (2 s) on governance writes surfaces as HTTP 500; a super-admin grant committed between the status check and the update of a concurrent suspension is not covered by the row lock (it requires three simultaneous administrative operations).
 - Open product decision: sign-up returns `409 email_already_exists`, which reveals registered emails. A neutral response needs an email-delivery flow first.
+
+## Session-bound workspace RLS (`0014_workspace_session_rls.sql`)
+
+Workspace row access is bound to the live session, not to the transaction-local settings `spark.user_id` and `spark.tenant_id`, which any runtime caller could set.
+
+- `spark.session_workspace_ids(p_roles text[] DEFAULT ARRAY['owner','admin','member']) RETURNS uuid[]` (STABLE SECURITY DEFINER, executable by `spark_app`) returns the active workspaces where `spark.session_actor()` holds an active membership with one of `p_roles`. Without a live session it returns an empty array.
+- Policies `workspace_read` on `workspaces`, `workspace_members_read` on `workspace_memberships`, and `workspace_read` on the 16 tenant tables of `0002` (startup profiles, teams, projects, boards, issues and their children, calendar events and attendees) compare the row's workspace id with `session_workspace_ids()`, evaluated once per statement. A missing, revoked or expired session, a suspended or deleted user, a left or suspended membership, and an archived workspace all see no rows.
+- `spark.is_workspace_member(target, allowed_roles)` keeps its signature and now delegates to `session_workspace_ids`.
+- `users` policy `self_and_coworker_read` (replacing `own_user_read`) shows the session actor and users with an active membership in one of the actor's active workspaces, through `spark.is_coworker(uuid)`. Sharing only a community does not make users coworkers. The platform `staff_read` policy is unchanged.
+- `spark.require_session_actor()` returns the actor or raises `Live session required` (`28000`). It is internal to workspace write functions and not executable by `spark_app`.
+- `workspaces.version` (integer, default 1) is maintained by `maintain_record`: every update must advance it by exactly one.
+- Not yet migrated: community helpers (`is_community_member`, `can_read_community`, `can_read_post`) and `withDatabaseContext` still use `spark.user_id`/`spark.tenant_id`. They move to the session in a later phase.
+
+## Workspace, membership and invitation writes (`0015_workspace_membership_writes.sql`)
+
+The runtime role still has no INSERT, UPDATE or DELETE grant on these tables. Every write is a `spark.ws_*` SECURITY DEFINER function executable by `spark_app` that derives the actor from the live session (`28000` without one), raises `22023` with a fixed message for invalid input, returns a closed set of outcomes and writes one `audit_events` row in the same transaction. Non-members get `not_found`, members without the role get `forbidden`.
+
+- `ws_create_workspace`, `ws_update_workspace` (optimistic `version`), `ws_list_members` (active members, explicit columns, email only for owners and admins).
+- `ws_create_invitation`, `ws_resend_invitation`, `ws_revoke_invitation`, `ws_invitation_preview` (no session; masked email hint) and `ws_accept_invitation` (primary email must match; re-activates a `left` membership; outbox event and an `invitation_accepted` notification for the inviter). Owners manage all invitations, admins only `member` invitations. Invitation creation and resend enqueue `invitation.created`/`invitation.resent` outbox events. In `0015` the caller passed a token hash at creation; since `0016` the function generates an unknowable placeholder itself and only the worker issues real tokens.
+- `ws_set_member_role` (owners only) and `ws_remove_member` (self-leave, owners remove anyone, admins remove members). The last active owner cannot be demoted or removed (`last_owner`); the check is explicit because the deferred `workspace_owner` trigger only fires at commit.
+- Lock order in every function: workspace row, then invitation, then membership.
+- `workspace_invitations`: column-level `SELECT` for `spark_app` without `token_hash` and `accepted_by_user_id`, policy `invitation_admin_read` for owners and admins.
+- `notifications.kind` is limited to `invitation_accepted` (later milestones extend the list).
+- `is_coworker` additionally hides platform-suspended and soft-deleted coworkers.
+
+## Background worker and email (`0016_email_worker.sql`)
+
+The worker process (`src/worker.ts`) logs in as `spark_worker`. The role has no table privileges and no role memberships: it has `USAGE` on the `spark` schema and `EXECUTE` on five SECURITY DEFINER functions with a fixed `search_path`, which `spark_app` and `spark_auth` cannot execute. At startup the worker refuses a role that is a superuser, bypasses RLS, has memberships, can read `spark.users`, or cannot claim outbox events.
+
+- `worker_claim_outbox(lock_token uuid, limit integer, lease_seconds integer)` claims up to `limit` (1 to 100) due, unlocked events with `FOR UPDATE SKIP LOCKED`, sets `locked_until = now() + lease` (10 to 600 s), stores the lock token and increments `attempts`.
+- `worker_complete_outbox(id, lock_token) RETURNS boolean` marks the event processed; `false` when the lease was lost (expired and re-claimed, or already settled).
+- `worker_fail_outbox(id, lock_token, error_code, retry_at) RETURNS boolean` records a short error identifier (`^[a-z][a-z0-9_]{0,63}$`, never message text or addresses) and the retry time; after eight attempts the event is dead-lettered (`processed_at` set, `last_error_code` kept). `false` when the lease was lost.
+- `worker_invitation_email(invitation uuid)` returns only what the email needs: status (`unavailable` for an inactive or archived workspace, `expired` for a pending invitation past its expiry), recipient address, workspace name, inviter name, role and expiry.
+- `worker_issue_invitation_token(invitation uuid, token_hash bytea) RETURNS boolean` locks the workspace, then the invitation, and stores the SHA-256 hash of a freshly generated token for a pending, unexpired invitation of an active workspace, which invalidates any earlier link. The raw token never reaches the database: it exists only in worker memory and in the email, in the URL fragment.
+
+Worker behaviour (`src/modules/outbox/`):
+
+- Each batch claims at most 5 events under a 300 s lease; the worst case per event is about 45 s of database and SMTP timeouts.
+- An event is started only with at least 90 s of lease left, and a token is never issued with less than 60 s left. Unprocessed events stay claimed until the lease expires and are then claimed again.
+- A `false` from complete or fail is counted as `leaseLost`, not as sent or failed. Logs carry counts and error codes only.
+- Delivery is at least once: an event whose lease expires mid-send may be sent again by another worker. Every send issues a new token, so only the latest link works.
+- In production SMTP must be encrypted: `smtps://` (implicit TLS), or `smtp://` with STARTTLS required (nodemailer `requireTLS`). `SMTP_URL` query options are rejected in production because they could switch TLS off.
+
+Changes to the `0015` write functions:
+
+- `ws_create_invitation(uuid, text, text, timestamptz)` replaces the five-argument version: the caller no longer supplies a token hash, and the function stores an unknowable random placeholder until the worker issues the real token. A workspace may hold at most 100 unexpired pending invitations (abuse guard).
+- `ws_resend_invitation` revives an expired invitation (by status, or pending past its expiry) for another 7 days unless a newer invitation for the same address is already pending. Accepted and revoked invitations stay `not_pending`.
+- `ws_invitation_preview` minimizes settled invitations: a non-pending invitation previews its status only, without workspace or inviter details.
+- `ws_accept_invitation` looks the token up, locks the workspace, then re-locks the invitation by id and re-checks the hash under the lock, so a token the worker rotated in between is invalid. The inviter is notified only while still an active workspace member.
+- `ws_create_workspace`: archived workspaces no longer count toward the owned-workspace cap.
+- The `issue_change_set` constraint trigger on `outbox_events` now fires on insert, delete, and updates of `tenant_id`, `aggregate_type`, `aggregate_id` or `aggregate_version` only, so delivery bookkeeping (lease, attempts, errors) on older issue events is not mistaken for an issue change set.
+
+## Project methodology schema (`0017_project_methodology.sql`)
+
+Schema only: the project write functions (`ws_create_project`, `ws_update_project`) are added by `0018_project_writes.sql` (see [Project writes](#project-writes-0018_project_writessql)). The runtime role reads the new tables through the session-bound `workspace_read` policy (`tenant_id = ANY(session_workspace_ids())`) and has no write grants; each new table has FORCE RLS, `owner_maintenance` for `spark_owner` and composite `(tenant_id, project_id)` foreign keys with `ON DELETE RESTRICT`.
+
+- `projects` adds `methodology` (`scrum`/`kanban`/`waterfall`, default `kanban`), `start_date`, `target_date` (`target_date >= start_date`), `sprint_length_days` (7 to 28, Scrum only, otherwise NULL), `settings_version` (positive, default 1) and `baselined_at`. `projects` has no `version` column on purpose: `maintain_record` would force every update, including issue number allocation, to bump it. `settings_version` is advanced explicitly by the settings write function.
+- `issues` adds `started_at` and `phase_id` (FK `(tenant_id, project_id, phase_id)` to `project_phases`, so an issue cannot reference another project's phase). `guard_issue` stamps `started_at` the first time the issue enters an `in_progress` status and keeps it afterwards, also when the issue moves back; all earlier checks are unchanged.
+- `sprints` adds `version` (now enforced by `maintain_record`: every sprint update advances it by one), `started_at`, `completed_at` and the non-negative commitment metrics `committed_points`, `committed_count`, `completed_points`, `completed_count`.
+- `project_phases`: name stored trimmed (1 to 60), `position >= 1` unique per project, `planned_end >= planned_start`, baseline dates both NULL or both set with end >= start, status `planned`/`active`/`completed`, `version` maintained by `maintain_record`. UNIQUE `(tenant_id, project_id, id)` is the target of the phase foreign keys.
+- `project_milestones`: optional `phase_id` (same-project FK), name stored trimmed (1 to 80), `due_date`, `baseline_due_date`, `completed_at`, `version` maintained by `maintain_record`.
+- `sprint_commitments` (PK `tenant_id, sprint_id, issue_id`, `story_points`): the snapshot taken when a sprint starts. Append-only through `reject_history_change()` (`23514`).
+- `project_methodology_periods`: methodology, `started_at`, `ended_at` (> `started_at`), `changed_by_user_id`, `reason` (1 to 200). At most one open period (`ended_at IS NULL`) per project (partial unique index, `23505`). The `period_close_only` trigger allows only one update that sets `ended_at` from NULL; any other update or a delete raises `23514`.
+- Backfill: every project that existed before `0017` gets one open `kanban` period starting at the project's `created_at`, attributed to the workspace's `created_by_user_id` with reason `Backfilled at migration 0017`.
+
+## Project writes (`0018_project_writes.sql`)
+
+The runtime role still has no INSERT, UPDATE or DELETE grant on projects. Both functions are `spark.ws_*` SECURITY DEFINER functions executable by `spark_app` (`REVOKE ALL ... FROM PUBLIC`), derive the actor from the live session (`28000` without one), return a closed set of outcomes and write one `audit_events` row in the same transaction. Invalid input raises `22023` with a fixed message before any row is locked, so those errors reveal nothing about existence. Lock order: workspace, project, board, statuses, then phases and milestones.
+
+- `ws_create_project(workspace, key, name, description, methodology, lead, start, target, sprint_length, statuses jsonb, phases jsonb)` returns `(outcome, project_id, settings_version)`. Owners and admins only. Outcomes: `ok`, `not_found` (not a member), `forbidden`, `key_taken` (`ON CONFLICT (tenant_id, key) DO NOTHING`), `invalid_lead` (lead must be an active member with an active, non-deleted user) and `too_many_projects` (50 non-archived projects per workspace; the workspace row lock serializes concurrent creations against the cap).
+- `22023` messages for create: `Invalid project key` (`^[A-Z][A-Z0-9]{1,9}$`), `Invalid project name` (trimmed, 1 to 80), `Invalid project description` (at most 2000), `Invalid methodology`, `Invalid project dates` (finite, target not before start, both required for Waterfall), `Invalid sprint length` (Scrum 7 to 28, default 14; any value for other methodologies), `Invalid project statuses` (2 to 12 objects `{name, category, wipLimit}`, names unique case-insensitively, at least one `done` and one non-`done`, WIP an integer 1 to 99 or null) and `Invalid project phases` (empty unless Waterfall; Waterfall needs 1 to 12 objects `{name, plannedStart, plannedEnd}`, each inside the project dates and starting after the previous phase ends).
+- Seeded structure, all in one transaction: the `projects` row (`baselined_at` set for Waterfall), one `boards` row named after the project, the `issue_statuses` rows (position `1024 * n`), for Waterfall the `project_phases` rows (baseline equal to the planned dates) each with one `project_milestones` row named `<phase> sign-off` due on the phase end, and one open `project_methodology_periods` row with reason `Project created`. Audit action `project.created` with `methodology` and `key`. The returned `settings_version` is 1.
+- `ws_update_project(project, expected_version, patch jsonb)` returns `(outcome, settings_version)`. The patch accepts only `name`, `description`, `leadUserId`, `startDate`, `targetDate` and `sprintLengthDays`; methodology is not editable. Owners, admins and the project's current lead may call it. Outcomes: `ok`, `not_found` (unknown project or not a member), `forbidden`, `version_mismatch` (returns the current `settings_version`) and `invalid_lead`. Decision order is input validation, `not_found`, `forbidden`, `version_mismatch`, then lead and date checks, so the current version is only revealed to callers allowed to edit.
+- `22023` messages for update: `Invalid project name` (also the fallback for a non-object patch or an unknown key), `Invalid project description`, `Invalid project dates` (malformed date, target before start, or for Waterfall missing dates or dates that no longer contain every phase) and `Invalid sprint length` (7 to 28, Scrum projects only).
+- Versioning and audit: every successful update sets `settings_version = settings_version + 1`, including an update that changes nothing. `projects` has no `version` column, so issue number allocation never bumps it. Audit action `project.updated` lists the patch keys only, not the old or new values.
 
 ## Platform governance and audit (`0009_platform_governance.sql` to `0011_campaign_review_lock.sql`)
 
@@ -230,11 +305,11 @@ Each notification read/delivery, including unread counts, checks recipient and c
 
 Enable and force RLS when introducing tenant/user-private tables. Ordinary runtime role is not table owner, superuser or BYPASSRLS. Separate migration owner and narrow authentication/billing/worker adapters. Do not grant product runtime broad worker privileges.
 
-Backend derives actor from active opaque session and sets transaction-local user/tenant context on the same connection/transaction as queries. Missing context denies access; never trust actor/tenant headers as authorization. Custom settings assume trusted backend SQL and are not protection against arbitrary runtime SQL execution.
+Backend derives actor from active opaque session and sets the transaction-local session token hash (`spark.session_token_hash`) on the same connection/transaction as queries; workspace policies resolve the actor and its workspaces from that session (see `0014`). Missing context denies access; never trust actor/tenant headers as authorization. Custom settings assume trusted backend SQL and are not protection against arbitrary runtime SQL execution.
 
 Policies use both USING and WITH CHECK with operation-specific permissions:
 
-- Workspace resources require active workspace membership and selected tenant; administrative/billing writes require owner/admin.
+- Workspace resources require active workspace membership resolved from the live session (`session_workspace_ids()`). RLS shows rows of every workspace the session may read; narrowing to the selected workspace is an application-level filter, not a security boundary. Administrative/billing writes require owner/admin.
 - Community resources require exact-community membership or explicit public visibility path; workspace membership alone is insufficient.
 - Public discovery exposes only public nonarchived community fields and opted-in startup projection. An invoker-RLS view or narrowly reviewed projection function must not bypass visibility through owner privileges.
 - Membership roles cannot be self-escalated. Workspace bootstrap uses a narrowly scoped transaction that cannot create ownership in an existing tenant.

@@ -1,5 +1,5 @@
 import { sql, type InferInsertModel, type InferSelectModel, type Table } from "drizzle-orm";
-import { pgSchema, uuid, text, boolean, integer, bigint, numeric, timestamp, date, jsonb, customType } from "drizzle-orm/pg-core";
+import { pgSchema, uuid, text, boolean, integer, bigint, numeric, timestamp, date, jsonb, customType, primaryKey } from "drizzle-orm/pg-core";
 
 // A private schema keeps application data outside Supabase's default Data API.
 // Cross-table constraints, indexes, FORCE RLS, and grants live in reviewed SQL.
@@ -52,7 +52,7 @@ export const accountTokens = spark.table("account_tokens", {
 }).enableRLS();
 export const workspaces = spark.table("workspaces", {
   ...mutable(), slug: text("slug").notNull(), name: text("name").notNull(), status: state("status", ["active", "archived"]).notNull().default("active"),
-  createdByUserId: ref("created_by_user_id").notNull(), archivedAt: instant("archived_at"),
+  createdByUserId: ref("created_by_user_id").notNull(), archivedAt: instant("archived_at"), version: version(),
 }).enableRLS();
 export const workspaceMemberships = spark.table("workspace_memberships", {
   ...tenant(), userId: ref("user_id").notNull(), role: state("role", ["owner", "admin", "member"]).notNull().default("member"),
@@ -102,8 +102,11 @@ export const contentReports = spark.table("content_reports", {
 export const moderationActions = spark.table("moderation_actions", {
   ...base(), tenantId: ref("tenant_id").notNull(), communityId: ref("community_id").notNull(), reportId: ref("report_id"), postId: ref("post_id"), commentId: ref("comment_id"), actorUserId: ref("actor_user_id").notNull(), action: state("action", ["hide", "restore", "dismiss_report"]).notNull(), reason: text("reason").notNull(),
 }).enableRLS();
+export const methodologies = ["scrum", "kanban", "waterfall"] as const;
 export const projects = spark.table("projects", {
   ...tenant(), key: text("key").notNull(), name: text("name").notNull(), description: text("description"), leadUserId: ref("lead_user_id"), nextIssueNumber: amount("next_issue_number").notNull().default(sql`1`), archivedAt: instant("archived_at"),
+  methodology: state("methodology", methodologies).notNull().default("kanban"), startDate: date("start_date"), targetDate: date("target_date"), sprintLengthDays: integer("sprint_length_days"),
+  settingsVersion: integer("settings_version").notNull().default(1), baselinedAt: instant("baselined_at"),
 }).enableRLS();
 export const boards = spark.table("boards", { ...project(), name: text("name").notNull(), version: version() }).enableRLS();
 export const issueStatuses = spark.table("issue_statuses", {
@@ -112,11 +115,30 @@ export const issueStatuses = spark.table("issue_statuses", {
 export const workflowTransitions = spark.table("workflow_transitions", { ...project(), fromStatusId: ref("from_status_id").notNull(), toStatusId: ref("to_status_id").notNull() }).enableRLS();
 export const sprints = spark.table("sprints", {
   ...project(), name: text("name").notNull(), goal: text("goal"), startsAt: instant("starts_at"), endsAt: instant("ends_at"), status: state("status", ["planned", "active", "completed", "cancelled"]).notNull().default("planned"),
+  version: version(), startedAt: instant("started_at"), completedAt: instant("completed_at"), committedPoints: numeric("committed_points", { precision: 10, scale: 2 }), committedCount: integer("committed_count"),
+  completedPoints: numeric("completed_points", { precision: 10, scale: 2 }), completedCount: integer("completed_count"),
 }).enableRLS();
 export const issues = spark.table("issues", {
   ...project(), number: amount("number").notNull(), type: state("type", ["epic", "story", "task", "bug", "subtask"]).notNull().default("task"), parentIssueId: ref("parent_issue_id"), title: text("title").notNull(), description: text("description"),
   statusId: ref("status_id").notNull(), priority: state("priority", ["lowest", "low", "medium", "high", "highest"]).notNull().default("medium"), reporterUserId: ref("reporter_user_id").notNull(), assigneeUserId: ref("assignee_user_id"), teamId: ref("team_id"), sprintId: ref("sprint_id"),
   position: position(), storyPoints: numeric("story_points", { precision: 8, scale: 2 }), startDate: date("start_date"), dueDate: date("due_date"), completedAt: instant("completed_at"), version: version(), archivedAt: instant("archived_at"),
+  startedAt: instant("started_at"), phaseId: ref("phase_id"),
+}).enableRLS();
+export const projectPhases = spark.table("project_phases", {
+  ...project(), name: text("name").notNull(), position: integer("position").notNull(), plannedStart: date("planned_start").notNull(), plannedEnd: date("planned_end").notNull(),
+  baselineStart: date("baseline_start"), baselineEnd: date("baseline_end"), status: state("status", ["planned", "active", "completed"]).notNull().default("planned"), completedAt: instant("completed_at"), version: version(),
+}).enableRLS();
+export const projectMilestones = spark.table("project_milestones", {
+  ...project(), phaseId: ref("phase_id"), name: text("name").notNull(), dueDate: date("due_date").notNull(), baselineDueDate: date("baseline_due_date"), completedAt: instant("completed_at"), version: version(),
+}).enableRLS();
+// Append-only (0017_project_methodology).
+export const sprintCommitments = spark.table("sprint_commitments", {
+  tenantId: ref("tenant_id").notNull(), sprintId: ref("sprint_id").notNull(), issueId: ref("issue_id").notNull(), storyPoints: numeric("story_points", { precision: 8, scale: 2 }), createdAt: instant("created_at").notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.tenantId, table.sprintId, table.issueId] })]).enableRLS();
+// A period can only be closed (ended_at set once); never edited or deleted (0017_project_methodology).
+export const projectMethodologyPeriods = spark.table("project_methodology_periods", {
+  id: uuid("id").primaryKey().defaultRandom(), tenantId: ref("tenant_id").notNull(), projectId: ref("project_id").notNull(), methodology: state("methodology", methodologies).notNull(),
+  startedAt: instant("started_at").notNull().defaultNow(), endedAt: instant("ended_at"), changedByUserId: ref("changed_by_user_id").notNull(), reason: text("reason").notNull(),
 }).enableRLS();
 export const issueLabels = spark.table("issue_labels", { ...project(), name: text("name").notNull(), color: text("color").notNull() }).enableRLS();
 export const issueLabelLinks = spark.table("issue_label_links", { ...project(), issueId: ref("issue_id").notNull(), labelId: ref("label_id").notNull() }).enableRLS();

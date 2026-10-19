@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 
 import type { AppConfig, AuthConfig } from "./config.js";
 import { registerAdminRoutes } from "./routes/admin/index.js";
+import { registerWorkspaceRoutes } from "./routes/workspace/index.js";
 import { registerOriginGuard } from "./routes/origin-guard.js";
 import { registerCredentialRoutes } from "./routes/auth-credentials.js";
 import { registerAuthProxyRoutes } from "./routes/auth-proxy.js";
@@ -215,6 +216,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   if (options.pool) {
     registerAuthRoutes(app, { pool: options.pool });
     registerAdminRoutes(app, { pool: options.pool, redis: options.redis, metrics });
+    registerWorkspaceRoutes(app, { pool: options.pool });
   }
   return app;
 }

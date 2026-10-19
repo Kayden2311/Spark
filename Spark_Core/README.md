@@ -1,13 +1,13 @@
 # Spark Core
  
-This workspace contains two applications: a Next.js 16 frontend and a Fastify backend. The backend uses local PostgreSQL on port 5432 with Drizzle ORM migrations, while Redis runs through Docker Compose. Backend code must not be placed in Next.js API routes.
+This workspace contains two applications: a Next.js 16 frontend and a Fastify backend. The backend uses local PostgreSQL on port 5432 with Drizzle ORM migrations, while Redis and the Mailpit local SMTP catcher run through Docker Compose. Backend code must not be placed in Next.js API routes.
  
 ## Requirements
  
 - Node.js 26 (see `.node-version` / `.nvmrc`)
 - pnpm 11.19.0
-- PostgreSQL 18 running at `127.0.0.1:5432`; the bootstrap script creates the `spark` database and the `spark_owner`, `spark_migrator`, `spark_app`, and login-only `spark_auth` roles
-- Docker Engine or Docker Desktop for Redis
+- PostgreSQL 18 running at `127.0.0.1:5432`; the bootstrap script creates the `spark` database and the `spark_owner`, `spark_migrator`, `spark_app`, login-only `spark_auth`, and outbox-only `spark_worker` roles
+- Docker Engine or Docker Desktop for Redis and Mailpit
  
 ## Local development
  
@@ -26,7 +26,9 @@ pnpm dev
 - Sign In: `http://127.0.0.1:3000/login`
 - Platform Admin Console: `http://127.0.0.1:3000/admin`
 - Backend health: `http://127.0.0.1:4000/health`
-- Auth process health (private, loopback only): `http://127.0.0.1:4100/health`. `pnpm dev` starts both backend processes; the API forwards sign-up and sign-in to it.
+- Auth process health (private, loopback only): `http://127.0.0.1:4100/health`. `pnpm dev` starts all three backend processes (API, auth, worker); the API forwards sign-up and sign-in to the auth process.
+- Mailpit inbox (local email): `http://localhost:8025`. The background worker (`pnpm --filter @spark/backend dev:worker`, or `exec node --env-file=../.env --import tsx src/worker.ts --once` for a single pass) delivers outbox email such as workspace invitations to Mailpit on `127.0.0.1:1025`.
+- Existing local databases created before the worker existed: re-run `pnpm db:bootstrap:local` once to create `spark_worker`, then `pnpm infra:up` and `pnpm --filter @spark/backend db:migrate`.
 - OpenAPI: generated in-process by `@fastify/swagger` (`app.swagger()`); no documentation page is served yet.
 
 ### Running the auth process in production
@@ -41,6 +43,9 @@ The backend build has two entrypoints: `pnpm --filter @spark/backend start` (pub
 | `AUTH_SERVICE_URL` | required; HTTPS unless loopback | not used |
 | `AUTH_HOST` / `AUTH_PORT` | not used | private interface and port (default `127.0.0.1:4100`) |
 | `AUTH_TRUSTED_PROXIES` | not used | required: exactly the API hosts' addresses, so rate limits key on the real client IP |
+| `WORKER_DATABASE_URL` (`spark_worker`) | must not be set | must not be set |
+
+The background worker (`pnpm --filter @spark/backend start:worker`) serves no HTTP traffic. It requires `WORKER_DATABASE_URL` (`spark_worker`), `DATABASE_SSL=true`, `SMTP_URL` (`smtps://`, or `smtp://` which must upgrade with STARTTLS: the worker sets nodemailer `requireTLS` in production and rejects query options in the URL), `EMAIL_FROM` and an HTTPS `APP_BASE_URL` for email links, and refuses to start if `DATABASE_URL`, `AUTH_DATABASE_URL` or `MIGRATION_DATABASE_URL` is set. Delivery is at least once: failed sends retry with exponential backoff (2^attempts minutes, at most six hours) and are dead-lettered after eight attempts (`processed_at` set, `last_error_code` kept).
 
 Every API instance must be listed in `AUTH_TRUSTED_PROXIES`; an unlisted instance makes all its users share one rate-limit bucket. Allow only the API to reach the auth port.
 
@@ -48,7 +53,7 @@ The auth process listens on plain HTTP. When it runs on another host, put a TLS 
 
 The step-by-step deployment checklist lives in [Documents/deployment/hosting-checklist.md](../Documents/deployment/hosting-checklist.md).
  
-`pnpm infra:down` stops the Redis container and preserves its named volume. PostgreSQL runs as a Windows service and is unaffected by this command.
+`pnpm infra:down` stops the Redis and Mailpit containers and preserves the Redis volume (Mailpit keeps no messages across restarts). PostgreSQL runs as a Windows service and is unaffected by this command.
  
 `pnpm db:bootstrap:local` requests the PostgreSQL administrator password through a secure prompt and creates the `spark` database idempotently. It normalizes database ownership, role attributes and memberships, and database and schema privileges. Table, sequence, and function privileges belong to their corresponding migrations and require an allowlist or integration test.
  

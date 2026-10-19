@@ -99,6 +99,41 @@
       "when": 1792270000000,
       "tag": "0013_report_preview",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792280000000,
+      "tag": "0014_workspace_session_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792290000000,
+      "tag": "0015_workspace_membership_writes",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792300000000,
+      "tag": "0016_email_worker",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792310000000,
+      "tag": "0017_project_methodology",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792320000000,
+      "tag": "0018_project_writes",
+      "breakpoints": true
     }
   ]
 }

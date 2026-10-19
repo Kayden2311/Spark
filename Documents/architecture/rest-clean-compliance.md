@@ -8,7 +8,7 @@ This document is the backend contract for `Spark_Core/backend`. Apply each rule 
 - Model resources in URLs. Use HTTP methods for CRUD behavior and a meaningful subresource for a domain command.
 - `GET` is safe; `POST` creates or performs a non-idempotent command; `PUT` replaces; `PATCH` changes part of a resource; `DELETE` is idempotent in its final state.
 - Return `201` and `Location` after creation, `202` for accepted asynchronous work, and `204` only with no body.
-- Use `400`, `401`, `403`, `404`, `409`, `412`, `415`, `422`, and `429` consistently. Map dependency failures to `502`, `503`, or `504` only when their meaning is accurate.
+- Use `400`, `401`, `403`, `404`, `409`, `412`, `415`, `422`, `428`, and `429` consistently. A missing `If-Match` on a versioned update is `428 precondition_required`; a stale one is `412 version_mismatch` whose problem body also carries `current`, the up-to-date resource representation. Map dependency failures to `502`, `503`, or `504` only when their meaning is accurate.
 - Errors use `application/problem+json` with stable `type`, `title`, `status`, `code`, and `requestId`. Never expose stacks, SQL, secrets, or private fields.
 - Validate path, query, headers, and body before calling a use case. Serialize responses through an explicit schema.
 - Large collections use deterministic cursor pagination with an opaque cursor and bounded `limit`.

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { AuthProvider } from "./auth-context";
 import "./globals.css";
+import "./_ui/viz/viz.css";
 
 export const metadata: Metadata = {
   title: {

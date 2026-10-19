@@ -365,6 +365,19 @@ describe("console v2", () => {
     expect(screen.getByRole("button", { name: "Show chart" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("keeps the admin error banner with icon and Retry on chart errors", async () => {
+    const onRetry = vi.fn();
+    const { container } = render(
+      <ChartCard error="Could not load" onRetry={onRetry} title="Sign-ups">
+        <p>chart</p>
+      </ChartCard>,
+    );
+    expect(container.querySelector(".admError")).not.toBeNull();
+    expect(container.querySelector(".admError svg")).not.toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a reported comment under the post it replied to", async () => {
     navigation.pathname = "/admin/reports";
     const commentReport = { ...report, id: "r3", target: { kind: "comment", id: "c1", title: null, body: "You are an idiot", moderationStatus: "visible" } };

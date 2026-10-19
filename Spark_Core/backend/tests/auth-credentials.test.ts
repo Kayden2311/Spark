@@ -26,6 +26,15 @@ describe("auth process credential routes", () => {
     await otherConflict.close();
   });
 
+  it("signs up without creating a workspace", async () => {
+    const { pool } = fakePool([["auth_register_password", () => [{ user_id: principalRow.user_id, workspace_id: null, workspace_name: null, workspace_slug: null }]]]);
+    const app = await authApp(pool);
+    const response = await app.inject({ method: "POST", url: "/api/v1/auth/password/sign-up", payload: signUpBody });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ user: { role: "member", platformRoles: [] }, workspace: null, workspaces: [], platformRoles: [] });
+    await app.close();
+  });
+
   it("returns the same 401 for unknown emails and wrong passwords", async () => {
     const hash = await hashPassword("the-right-password");
     const app = await authApp(fakePool([
