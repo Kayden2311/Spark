@@ -18,6 +18,7 @@ export const TEAMMATE_MOVED = "Updated by a teammate — the board was refreshed
 export const TEAMMATE_MOVED_STALE = "Updated by a teammate. Reload the page to see the latest board.";
 const ARROWS: readonly string[] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
 const ISSUE_PARAM = "issue";
+export const TASK_NOT_LOADED = "That task isn't on the loaded board. Open it from the task list.";
 
 /** Sets or removes ?issue= without a navigation; Next.js syncs useSearchParams with history.replaceState. */
 function replaceIssueParam(key: string | null) {
@@ -73,7 +74,9 @@ export function ProjectBoard() {
   // the parameter is acted on when it changes, so opening and closing here only keep it in sync.
   const [drawer, setDrawer] = useState<{ id: string; key: string } | null>(null);
   const [seenParam, setSeenParam] = useState<string | null>(null);
-  const [missingLink, setMissingLink] = useState<{ key: string } | null>(null);
+  const [missingLink, setMissingLink] = useState<{ key: string; truncated: boolean } | null>(null);
+  // Where focus goes when the drawer closes after its card left the board (archived by a teammate).
+  const focusAfterCloseRef = useRef<string | null>(null);
   if (committed && issueParam !== seenParam) {
     setSeenParam(issueParam);
     if (issueParam !== null) {
@@ -81,7 +84,8 @@ export function ProjectBoard() {
       if (linked) {
         if (drawer?.id !== linked.id) setDrawer({ id: linked.id, key: linked.key });
       } else {
-        setMissingLink({ key: issueParam });
+        // A board cut at 500 cards may simply not include the task, so only a complete board can say it is gone.
+        setMissingLink({ key: issueParam, truncated: committed.truncated });
       }
     }
   }
@@ -89,7 +93,7 @@ export function ProjectBoard() {
   useEffect(() => {
     if (!missingLink) return;
     replaceIssueParam(null);
-    notify(TASK_GONE, "error");
+    notify(missingLink.truncated ? TASK_NOT_LOADED : TASK_GONE, missingLink.truncated ? "info" : "error");
   }, [missingLink, notify]);
 
   useEffect(() => {
@@ -282,10 +286,37 @@ export function ProjectBoard() {
   const closeDrawer = () => {
     setDrawer(null);
     replaceIssueParam(null);
+    const target = focusAfterCloseRef.current;
+    focusAfterCloseRef.current = null;
+    if (target) setFocusRequest((current) => ({ selector: target, serial: (current?.serial ?? 0) + 1 }));
+  };
+
+  /**
+   * Where focus should land once a card leaves the board: the next card in its column, else the previous
+   * one, else the column's quick-add, else any other card.
+   */
+  const focusTargetAfterRemoval = (issueId: string): string => {
+    const issue = committed.issues.find((item) => item.id === issueId);
+    const fallback = `[data-card-id]:not([data-card-id="${issueId}"])`;
+    if (!issue) return fallback;
+    const column = columnIssues(committed, issue.statusId);
+    const index = column.findIndex((item) => item.id === issueId);
+    const neighbour = column[index + 1] ?? column[index - 1];
+    if (neighbour) return `[data-card-id="${neighbour.id}"]`;
+    const status = committed.statuses.find((item) => item.id === issue.statusId);
+    return status && status.category !== "done" ? `[data-quick-add-for="${status.id}"]` : fallback;
   };
 
   /** A newer version of a task from the drawer: the card follows it, to the end of a new column when its status changed. */
   const onIssueChanged = (detail: IssueDetail) => {
+    if (detail.archivedAt) {
+      // A teammate archived it (seen on 412): the card leaves now, the read-only drawer stays until closed.
+      focusAfterCloseRef.current = focusTargetAfterRemoval(detail.id);
+      update(source, (current) => removeCard(current, detail.id));
+      reloadProject();
+      void refresh(false);
+      return;
+    }
     update(source, (current) => {
       const before = current.issues.find((item) => item.id === detail.id);
       if (!before) return current;
@@ -299,6 +330,7 @@ export function ProjectBoard() {
   };
 
   const onIssueArchived = (detail: IssueDetail) => {
+    focusAfterCloseRef.current = focusTargetAfterRemoval(detail.id);
     closeDrawer();
     update(source, (current) => removeCard(current, detail.id));
     reloadProject();
@@ -671,6 +703,7 @@ function QuickAdd({ status, blocked, describedBy, onCreate }: {
           aria-describedby={describedByIds}
           aria-invalid={error ? true : undefined}
           aria-label={`Add a task to ${status.name}`}
+          data-quick-add-for={status.id}
           disabled={blocked}
           maxLength={200}
           onChange={(event) => {

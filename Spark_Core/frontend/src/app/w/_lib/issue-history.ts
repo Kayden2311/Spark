@@ -52,7 +52,7 @@ export function describeEvent(event: IssueEvent, names: HistoryNames): string {
   if (fields.has("archived")) parts.push(after.archived ? "archived it" : "restored it");
   if (fields.has("statusId")) {
     const status = after.statusId ? names.status(after.statusId) : undefined;
-    parts.push(status ? `moved it to ${status}` : "moved it to another status");
+    parts.push(status ? `moved it to ${status}` : "moved it to a status that no longer exists");
   } else if (fields.has("position")) {
     parts.push("reordered it");
   }
@@ -73,7 +73,8 @@ export function describeEvent(event: IssueEvent, names: HistoryNames): string {
   if (fields.has("dueDate")) parts.push("changed the due date");
   if (fields.has("phaseId")) {
     const phase = after.phaseId ? names.phase(after.phaseId) : undefined;
-    parts.push(after.phaseId ? `moved it to the ${phase ?? "another"} phase` : "removed the phase");
+    if (!after.phaseId) parts.push("removed the phase");
+    else parts.push(phase ? `moved it to the ${phase} phase` : "moved it to a phase that no longer exists");
   }
   return `${actor} ${parts.length > 0 ? list(parts) : "updated it"}`;
 }

@@ -264,7 +264,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
   - Adding a task to a column whose WIP limit is reached is refused with `409 wip_limit_reached` and the column explains why.
   - In the task drawer the assignee is chosen from the workspace members or "Unassigned". An assignee who is not an active member of the same workspace is refused with `422 invalid_assignee`.
   - When someone else assigns me, I get one in-app `issue_assigned` notice and one email whose link opens the task's drawer (`/w/<slug>/p/<KEY>?issue=<KEY>-<n>`). Assigning myself sends nothing. Email limits: only the latest assignment per task and recipient is emailed, at most one email per task and recipient within 10 minutes, and at most 20 task-assigned emails per recipient per hour; the in-app notice is not limited. The `task_assigned` email preference is honoured.
-  - Archiving asks for confirmation, removes the card from the board and keeps the history. An unknown or archived task in a link shows "That task no longer exists."
+  - Archiving asks for confirmation, removes the card from the board and keeps the history. An unknown or archived task in a link shows "That task no longer exists."; when the board shows only its first 500 tasks, a task outside them shows "That task isn't on the loaded board. Open it from the task list." instead (a lookup by key is not built yet).
   - A member of another workspace cannot read or change the task (`404`).
 
 ### US-E5: Move tasks safely

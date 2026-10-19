@@ -233,9 +233,13 @@ describe("task drawer", () => {
     const drawer = await openDrawer();
     await userEvent.click(within(drawer).getByRole("button", { name: "Archive task" }));
     expect(requests("PATCH")).toHaveLength(0);
-    expect(within(drawer).getByText(/Archive OPS-2\?/u)).toBeInTheDocument();
+    // The confirmation is announced as an alert dialog and takes focus on its safe choice.
+    const confirmation = within(drawer).getByRole("alertdialog", { name: "Archive OPS-2?" });
+    expect(confirmation).toHaveAccessibleDescription(/It leaves the board/u);
+    expect(within(confirmation).getByRole("button", { name: "Keep task" })).toHaveFocus();
     await userEvent.click(within(drawer).getByRole("button", { name: "Keep task" }));
-    expect(within(drawer).queryByText(/Archive OPS-2\?/u)).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "Archive task" })).toHaveFocus();
 
     await userEvent.click(within(drawer).getByRole("button", { name: "Archive task" }));
     await userEvent.click(within(drawer).getByRole("button", { name: "Yes, archive" }));
@@ -247,6 +251,71 @@ describe("task drawer", () => {
     expect(screen.getByRole("group", { name: /^Ready column/ })).toHaveAccessibleName("Ready column, 1 task");
     expect(window.location.search).toBe("");
     expect(screen.queryByText("That task no longer exists.")).not.toBeInTheDocument();
+    // Focus moves to the neighbouring card in the column instead of falling to the page.
+    await waitFor(() => expect(card("OPS-1")).toHaveFocus());
+  });
+
+  it("returns focus to Archive task when archiving fails, and to quick-add when the column empties", async () => {
+    mockApi({
+      "PATCH /api/v1/issues/i2": problem(503, "database_unavailable", "Spark's database is unavailable."),
+      "PATCH /api/v1/issues/i0": json(issueDetail(cards[0] as Parameters<typeof issueDetail>[0], { version: 2, archivedAt: "2026-10-19T11:00:00.000Z" }), 200),
+    });
+    const drawer = await openDrawer();
+    await userEvent.click(within(drawer).getByRole("button", { name: "Archive task" }));
+    await userEvent.click(within(drawer).getByRole("button", { name: "Yes, archive" }));
+    expect(await within(drawer).findByText("Spark's database is unavailable.")).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "Archive task" })).toHaveFocus();
+    await userEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+
+    await userEvent.click(card("OPS-9"));
+    const backlogDrawer = await screen.findByRole("dialog", { name: "OPS-9" });
+    await within(backlogDrawer).findByDisplayValue("Collect feedback themes");
+    await userEvent.click(within(backlogDrawer).getByRole("button", { name: "Archive task" }));
+    await userEvent.click(within(backlogDrawer).getByRole("button", { name: "Yes, archive" }));
+    await screen.findByText("Archived OPS-9.");
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Add a task to Backlog" })).toHaveFocus());
+  });
+
+  it("shows a task a teammate archived meanwhile read-only and reloads its history", async () => {
+    let historyLoads = 0;
+    mockApi({
+      "PATCH /api/v1/issues/i2": (init) => {
+        // The teammate's archive already happened on the server.
+        server = removeCard(server, "i2");
+        return problem(412, "version_mismatch", "The resource changed since you loaded it.", { current: issueDetail(card2 as Parameters<typeof issueDetail>[0], { version: 3, archivedAt: "2026-10-19T11:00:00.000Z" }) })(init);
+      },
+      "GET /api/v1/issues/i2/events": () => {
+        historyLoads += 1;
+        return json({ items: [], nextCursor: null })(undefined);
+      },
+    });
+    const drawer = await openDrawer();
+    await userEvent.selectOptions(within(drawer).getByLabelText("Priority"), "high");
+    await userEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    const note = await within(drawer).findByText("This task was archived by a teammate.");
+    expect(note).toHaveFocus();
+    expect(within(drawer).queryByText("Updated by a teammate — review the latest values and save again.")).not.toBeInTheDocument();
+    expect(within(drawer).getByLabelText("Title")).toBeDisabled();
+    expect(within(drawer).getByLabelText("Priority")).toBeDisabled();
+    expect(within(drawer).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "Archive task" })).not.toBeInTheDocument();
+    await waitFor(() => expect(historyLoads).toBe(2));
+    // The card leaves the board; closing lands focus on the neighbouring card.
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^OPS-2:/ })).not.toBeInTheDocument());
+    await userEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(card("OPS-1")).toHaveFocus());
+  });
+
+  it("names unknown phases and statuses in plain English", async () => {
+    const after = { statusId: "gone", category: "todo", assigneeUserId: "u-left", storyPoints: null, phaseId: "ph-gone", sprintId: null, archived: false };
+    mockApi({
+      "GET /api/v1/issues/i2/events": json({
+        items: [{ id: "e9", type: "issue.updated", actor: null, fromVersion: 4, toVersion: 5, changes: { fields: ["assigneeUserId", "phaseId", "statusId"], after }, createdAt: new Date().toISOString() }],
+        nextCursor: null,
+      }),
+    });
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText("Someone moved it to a status that no longer exists, assigned it to a former member and moved it to a phase that no longer exists")).toBeInTheDocument();
   });
 
   it("tells the history in sentences and loads more", async () => {
@@ -311,6 +380,16 @@ describe("task deep link", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(window.location.pathname).toBe("/w/northstar-labs/p/OPS");
+    expect(window.location.search).toBe("");
+  });
+
+  it("does not claim a task is gone when the board was cut at 500 cards", async () => {
+    mockApi({}, KANBAN, { ...KANBAN_BOARD, truncated: true });
+    navigation.search = "?issue=OPS-612";
+    window.history.replaceState(null, "", "/w/northstar-labs/p/OPS?issue=OPS-612");
+    await renderBoard();
+    expect(await screen.findByText("That task isn't on the loaded board. Open it from the task list.")).toBeInTheDocument();
+    expect(screen.queryByText("That task no longer exists.")).not.toBeInTheDocument();
     expect(window.location.search).toBe("");
   });
 

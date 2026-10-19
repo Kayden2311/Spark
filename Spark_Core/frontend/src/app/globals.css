@@ -4475,6 +4475,10 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsModal[data-variant="drawer"] .wsModalHeader h2 { padding: .2rem .55rem; border-radius: .45rem; color: #1e3a8a; background: #e8efff; font-size: .82rem; font-weight: 800; letter-spacing: .02em; }
 @keyframes ws-slide-in { from { opacity: .4; transform: translateX(2.5rem); } to { opacity: 1; transform: none; } }
 .wsDrawerForm { display: grid; gap: 1rem; }
+.wsDrawerFields { display: grid; gap: 1rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+.wsDrawerFields:disabled .wsField label { color: var(--muted); }
+.wsConflict:focus { outline: none; }
+.wsConflict:focus-visible { outline: 3px solid rgba(37, 99, 235, .55); outline-offset: 2px; }
 .wsField textarea.wsDrawerTitle { min-height: 0; field-sizing: content; padding: .55rem .7rem; font-size: 1.15rem; font-weight: 650; line-height: 1.35; letter-spacing: -.02em; resize: none; }
 .wsDrawerGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
 .wsDrawerGrid .wsField .wsSelect, .wsDrawerGrid .wsField input { min-height: 2.75rem; padding-top: .55rem; padding-bottom: .55rem; font-size: .9rem; }

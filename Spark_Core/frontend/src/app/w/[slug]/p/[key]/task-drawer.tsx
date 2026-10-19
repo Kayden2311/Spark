@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { initials } from "../../../../components";
 import { Modal } from "../../../_components/modal";
@@ -21,6 +21,7 @@ const INVALID_ASSIGNEE = "The assignee must be an active member of the workspace
 const POINTS_ERROR = "Use a number from 0 to 100 with at most two decimals.";
 const DUE_ERROR = "Pick a date between 2000 and 2100.";
 export const TASK_GONE = "That task no longer exists.";
+export const ARCHIVED_BY_TEAMMATE = "This task was archived by a teammate.";
 
 interface Values {
   title: string;
@@ -107,8 +108,21 @@ export function TaskDrawer({ issueId, issueKey, board, project, workspaceId, onC
   const [conflict, setConflict] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // Where focus goes after the archive confirmation opens or closes, so it never falls to the page.
+  const [focusRequest, setFocusRequest] = useState<{ target: "keep" | "archive" | "note"; serial: number } | null>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const archiveRef = useRef<HTMLButtonElement>(null);
+  const noteRef = useRef<HTMLParagraphElement>(null);
   const methodology = methodologyOf(project.methodology);
   const events = useHistory(issueId);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const element = { keep: keepRef, archive: archiveRef, note: noteRef }[focusRequest.target].current;
+    element?.focus();
+  }, [focusRequest]);
+
+  const focusOn = (target: "keep" | "archive" | "note") => setFocusRequest((current) => ({ target, serial: (current?.serial ?? 0) + 1 }));
 
   let content;
   if (!base) {
@@ -148,6 +162,10 @@ export function TaskDrawer({ issueId, issueKey, board, project, workspaceId, onC
         adopt(current);
         setConflict(true);
         setConfirming(false);
+        events.reload();
+        // A teammate who archived the task leaves it read-only; otherwise the confirmation (if open) closes.
+        if (current.archivedAt) focusOn("note");
+        else if ("archived" in body) focusOn("archive");
         return;
       }
       setConflict(false);
@@ -204,6 +222,7 @@ export function TaskDrawer({ issueId, issueKey, board, project, workspaceId, onC
         setSaving(false);
         setConfirming(false);
         fail(error, { archived: true });
+        if (!(error instanceof ApiError && error.status === 412)) focusOn("archive");
       }
     };
 
@@ -213,9 +232,15 @@ export function TaskDrawer({ issueId, issueKey, board, project, workspaceId, onC
     });
     const fieldError = (name: keyof FieldErrors) => errors[name] && <p className="wsFieldError" id={`drawer-${name}-error`} role="alert">{errors[name]}</p>;
 
+    const archived = Boolean(base.archivedAt);
     content = (
       <form className="wsDrawerForm" noValidate onSubmit={onSubmit}>
-        {conflict && <p className="wsConflict" role="alert">{TEAMMATE_UPDATE}</p>}
+        {archived ? (
+          <p className="wsConflict" ref={noteRef} role="alert" tabIndex={-1}>{ARCHIVED_BY_TEAMMATE}</p>
+        ) : conflict && <p className="wsConflict" role="alert">{TEAMMATE_UPDATE}</p>}
+
+        {/* An archived task is shown read-only: a disabled fieldset disables every field inside it. */}
+        <fieldset className="wsDrawerFields" disabled={archived}>
 
         <div className="wsField">
           <label htmlFor="drawer-title">Title</label>
@@ -306,20 +331,22 @@ export function TaskDrawer({ issueId, issueKey, board, project, workspaceId, onC
             </div>
           )}
         </div>
+        </fieldset>
 
         {formError && <p className="wsAlert" role="alert">{formError}</p>}
 
-        {confirming ? (
-          <div className="wsDrawerConfirm" role="group" aria-labelledby="drawer-archive-title">
-            <p id="drawer-archive-title"><strong>Archive {base.key}?</strong> It leaves the board and stops counting toward progress. Its history is kept.</p>
+        {archived ? null : confirming ? (
+          // An alert dialog is announced when it appears; focus starts on the safe choice.
+          <div aria-describedby="drawer-archive-detail" aria-labelledby="drawer-archive-title" className="wsDrawerConfirm" role="alertdialog">
+            <p><strong id="drawer-archive-title">Archive {base.key}?</strong> <span id="drawer-archive-detail">It leaves the board and stops counting toward progress. Its history is kept.</span></p>
             <div className="wsModalActions">
-              <button className="sparkSecondary" disabled={saving} onClick={() => setConfirming(false)} type="button">Keep task</button>
+              <button className="sparkSecondary" disabled={saving} onClick={() => { setConfirming(false); focusOn("archive"); }} ref={keepRef} type="button">Keep task</button>
               <button className="wsDangerButton" disabled={saving} onClick={() => void archive()} type="button">{saving ? "Archiving…" : "Yes, archive"}</button>
             </div>
           </div>
         ) : (
           <div className="wsDrawerActions">
-            <button className="wsDrawerArchive" disabled={saving} onClick={() => setConfirming(true)} type="button">
+            <button className="wsDrawerArchive" disabled={saving} onClick={() => { setConfirming(true); focusOn("keep"); }} ref={archiveRef} type="button">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7M9 4h6M10 11v5M14 11v5" /></svg>
               Archive task
             </button>
