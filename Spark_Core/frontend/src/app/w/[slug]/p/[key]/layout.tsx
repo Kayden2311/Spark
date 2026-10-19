@@ -43,7 +43,8 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
   const project = replaced?.project ?? loaded.data;
   const etag = replaced?.etag ?? loaded.etag ?? (project ? projectEtag(project.version) : "");
   const ready = project && project.key === key ? project : null;
-  const value = useMemo(() => (ready ? { project: ready, etag, notify, announce } : null), [ready, etag, notify, announce]);
+  const reloadProject = loaded.reload;
+  const value = useMemo(() => (ready ? { project: ready, etag, notify, announce, reloadProject } : null), [ready, etag, notify, announce, reloadProject]);
 
   let content: ReactNode;
   if (!valid || loaded.errorStatus === 404) {

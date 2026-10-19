@@ -24,8 +24,11 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 
+import type { BoardState } from "../src/app/w/_lib/issues";
+import { columnIssues, moveCard } from "../src/app/w/_lib/board-moves";
 import WorkspaceLayout from "../src/app/w/[slug]/layout";
 import ProjectLayout from "../src/app/w/[slug]/p/[key]/layout";
+import ProjectOverviewPage from "../src/app/w/[slug]/p/[key]/overview/page";
 import ProjectBoardPage from "../src/app/w/[slug]/p/[key]/page";
 
 const workspace = { id: "w1", slug: "northstar-labs", name: "Northstar Labs", role: "owner", memberCount: 2, version: 2, createdAt: "2026-10-18T10:00:00.000Z" };
@@ -39,15 +42,32 @@ const problem = (status: number, code: string, detail: string, extra: Record<str
   new Response(JSON.stringify({ status, code, detail, ...extra }), { status, headers: { "content-type": "application/problem+json" } });
 
 const BOARD_KEY = "GET /api/v1/projects/p-ops/board";
+const PATCH_ISSUE = /^PATCH \/api\/v1\/issues\/([^/]+)$/u;
+
+/** A tiny fake of the API's board: successful moves change it, so a refetch returns what the server would. */
+let server: BoardState;
+
+function serverMove(issueId: string, init: RequestInit | undefined): Response {
+  const body = JSON.parse(String(init?.body)) as { statusId?: string; afterIssueId?: string | null };
+  const issue = server.issues.find((item) => item.id === issueId);
+  if (!issue) return new Response(JSON.stringify({ code: "issue_not_found", detail: "Issue does not exist." }), { status: 404 });
+  const statusId = body.statusId ?? issue.statusId;
+  const after = "afterIssueId" in body ? body.afterIssueId ?? null : columnIssues(server, statusId).filter((item) => item.id !== issueId).at(-1)?.id ?? null;
+  server = moveCard(server, issueId, statusId, after);
+  server = { ...server, issues: server.issues.map((item) => (item.id === issueId ? { ...item, version: item.version + 1 } : item)) };
+  const moved = server.issues.find((item) => item.id === issueId)!;
+  return new Response(JSON.stringify(issueDetail(moved)), { status: 200, headers: { "content-type": "application/json", ETag: `"v${moved.version}"` } });
+}
 
 function mockApi(extra: Record<string, Handler> = {}, project: { key: string } = KANBAN) {
   calls = [];
+  server = structuredClone(KANBAN_BOARD) as BoardState;
   const routes: Record<string, Handler> = {
     "GET /api/v1/workspaces/by-slug/northstar-labs": json(workspace),
     "GET /api/v1/workspaces/w1/projects": json({ items: LIST }),
     "GET /api/v1/methodologies": json({ items: CATALOG }),
     [`GET /api/v1/workspaces/w1/projects/by-key/${project.key}`]: json(project, 200, { ETag: "\"v3\"" }),
-    [BOARD_KEY]: json(KANBAN_BOARD),
+    [BOARD_KEY]: () => json(server)(undefined),
     ...extra,
   };
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -55,7 +75,9 @@ function mockApi(extra: Record<string, Handler> = {}, project: { key: string } =
     const headers = new Headers(init?.headers);
     calls.push({ key, body: init?.body ? JSON.parse(String(init.body)) : undefined, ifMatch: headers.get("If-Match"), idempotencyKey: headers.get("Idempotency-Key") });
     const handler = routes[key];
-    return handler ? handler(init) : new Response(JSON.stringify({ code: "not_found", detail: "Not found." }), { status: 404 });
+    if (handler) return handler(init);
+    const patch = PATCH_ISSUE.exec(key);
+    return patch ? serverMove(patch[1], init) : new Response(JSON.stringify({ code: "not_found", detail: "Not found." }), { status: 404 });
   }));
 }
 
@@ -140,7 +162,7 @@ describe("project board", () => {
   });
 
   it("moves a card with the keyboard and announces each step", async () => {
-    mockApi({ "PATCH /api/v1/issues/i1": json(issueDetail(card1, { statusId: "s3", version: 2 }), 200, { ETag: "\"v2\"" }) });
+    mockApi();
     await renderBoard();
     await pickUpFirst();
     expect(liveRegion()).toHaveTextContent("Picked up OPS-1. Use arrow keys to move, Enter to drop, Escape to cancel.");
@@ -160,8 +182,23 @@ describe("project board", () => {
     expect(card("OPS-1")).toHaveFocus();
   });
 
+  it("silently refetches the board after a successful move and sends the new version next time", async () => {
+    mockApi();
+    await renderBoard();
+    await pickUpFirst();
+    await userEvent.keyboard("{ArrowRight}{Enter}");
+    await waitFor(() => expect(requests(BOARD_KEY)).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
+    expect(cardsIn("In progress")).toEqual(["OPS-1"]);
+
+    card("OPS-1").focus();
+    await userEvent.keyboard(" {ArrowLeft}{Enter}");
+    await waitFor(() => expect(requests("PATCH")).toHaveLength(2));
+    expect(requests("PATCH")[1]).toMatchObject({ ifMatch: "\"v2\"", body: { statusId: "s2", afterIssueId: null } });
+  });
+
   it("reorders inside a column with only afterIssueId", async () => {
-    mockApi({ "PATCH /api/v1/issues/i1": json(issueDetail(card1, { version: 2 }), 200, { ETag: "\"v2\"" }) });
+    mockApi();
     await renderBoard();
     await pickUpFirst();
     await userEvent.keyboard("{ArrowDown}");
@@ -204,6 +241,8 @@ describe("project board", () => {
     expect(cardsIn("Ready")).toEqual(["OPS-1", "OPS-2"]);
     expect(cardsIn("In progress")).toEqual([]);
     expect(column("In progress")).toHaveAccessibleName("In progress column, 0 tasks");
+    // Our counts were stale, so the board is refetched quietly.
+    await waitFor(() => expect(requests(BOARD_KEY)).toHaveLength(2));
   });
 
   it("rolls back with the API message on other errors", async () => {
@@ -235,11 +274,82 @@ describe("project board", () => {
     expect(cardsIn("Ready")).toEqual(["OPS-1", "OPS-2"]);
   });
 
+  it("says to reload when the board cannot be refetched after a teammate's change", async () => {
+    let boards = 0;
+    mockApi({
+      [BOARD_KEY]: () => {
+        boards += 1;
+        return boards === 1 ? json(KANBAN_BOARD)(undefined) : problem(503, "database_unavailable", "Spark's database is unavailable.")(undefined);
+      },
+      "PATCH /api/v1/issues/i1": problem(412, "version_mismatch", "The resource changed since you loaded it.", { current: issueDetail(card1, { version: 2 }) }),
+    });
+    await renderBoard();
+    await pickUpFirst();
+    await userEvent.keyboard("{ArrowRight}{Enter}");
+    expect(await screen.findByText("Updated by a teammate. Reload the page to see the latest board.")).toBeInTheDocument();
+    expect(screen.queryByText("Updated by a teammate — the board was refreshed.")).not.toBeInTheDocument();
+    expect(cardsIn("Ready")).toEqual(["OPS-1", "OPS-2"]);
+  });
+
+  it("renders the Move to menu outside the scrolling board and keeps it keyboard operable", async () => {
+    mockApi();
+    await renderBoard();
+    const button = await screen.findByRole("button", { name: "Move to… (OPS-1)" });
+    // Label in name: the accessible name starts with the visible text.
+    expect(button).toHaveTextContent("Move to…");
+    expect(button).toHaveAccessibleName(/^Move to…/u);
+
+    await userEvent.click(button);
+    let menu = screen.getByRole("menu", { name: "Move OPS-1 to" });
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.closest(".wsBoardScroller")).toBeNull();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(within(menu).getByRole("menuitemradio", { name: "Backlog" })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(button).toHaveFocus();
+
+    // Scrolling the board would leave the fixed menu behind, so it closes.
+    await userEvent.click(button);
+    fireEvent.scroll(document.querySelector(".wsBoardScroller") as HTMLElement);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    await userEvent.click(button);
+    menu = screen.getByRole("menu", { name: "Move OPS-1 to" });
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    await waitFor(() => expect(requests("PATCH")).toHaveLength(1));
+    expect(requests("PATCH")[0].body).toEqual({ statusId: "s3", afterIssueId: null });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(cardsIn("In progress")).toEqual(["OPS-1"]);
+  });
+
+  it("refreshes the overview's progress after board changes", async () => {
+    let details = 0;
+    const PROJECT_KEY = "GET /api/v1/workspaces/w1/projects/by-key/OPS";
+    mockApi({
+      [PROJECT_KEY]: () => {
+        details += 1;
+        return json(details === 1 ? KANBAN : { ...KANBAN, progress: { total: 8, done: 1, open: 7 } }, 200, { ETag: "\"v3\"" })(undefined);
+      },
+      "POST /api/v1/projects/p-ops/issues": json(issueDetail({ ...KANBAN_BOARD.issues[0], id: "i10", number: 10, key: "OPS-10", title: "Renew certificates" }), 201),
+    });
+    navigation.params = { slug: "northstar-labs", key: "OPS" };
+    navigation.pathname = "/w/northstar-labs/p/OPS";
+    const { rerender } = render(<WorkspaceLayout><ProjectLayout><ProjectBoardPage /></ProjectLayout></WorkspaceLayout>);
+    await userEvent.type(await screen.findByRole("textbox", { name: "Add a task to Backlog" }), "Renew certificates{Enter}");
+    await waitFor(() => expect(requests(PROJECT_KEY)).toHaveLength(2));
+
+    navigation.pathname = "/w/northstar-labs/p/OPS/overview";
+    rerender(<WorkspaceLayout><ProjectLayout><ProjectOverviewPage /></ProjectLayout></WorkspaceLayout>);
+    const facts = await screen.findByRole("region", { name: "Project details" });
+    expect(within(facts).getByText("1/8 done")).toBeInTheDocument();
+  });
+
   it("offers a Move to menu with the current column marked and full columns disabled", async () => {
-    mockApi({ "PATCH /api/v1/issues/i1": json(issueDetail(card1, { statusId: "s5", version: 2 }), 200, { ETag: "\"v2\"" }) });
+    mockApi();
     await renderBoard();
     await screen.findByRole("button", { name: /^OPS-1:/ });
-    await userEvent.click(screen.getByRole("button", { name: "Move OPS-1 to…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move to… (OPS-1)" }));
     const menu = screen.getByRole("menu", { name: "Move OPS-1 to" });
     expect(within(menu).getByRole("menuitemradio", { name: "Ready (current)" })).toHaveAttribute("aria-checked", "true");
     expect(within(menu).getByRole("menuitemradio", { name: "Review (full)" })).toHaveAttribute("aria-disabled", "true");
@@ -253,7 +363,7 @@ describe("project board", () => {
   });
 
   it("moves a card by dragging it onto another column", async () => {
-    mockApi({ "PATCH /api/v1/issues/i2": json(issueDetail(KANBAN_BOARD.issues[2], { statusId: "s1", version: 2 }), 200, { ETag: "\"v2\"" }) });
+    mockApi();
     await renderBoard();
     const dragged = await screen.findByRole("button", { name: /^OPS-2:/ });
     const target = within(column("Backlog")).getByRole("list", { name: "Backlog tasks" });

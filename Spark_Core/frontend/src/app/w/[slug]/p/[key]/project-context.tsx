@@ -14,6 +14,8 @@ interface ProjectContextValue {
   notify(text: string, tone?: ToastTone): void;
   /** Speaks a message to screen readers through the same live region, without a visible toast. */
   announce(text: string): void;
+  /** Refetches the project in the background (for example its progress after board changes). */
+  reloadProject(): void;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);

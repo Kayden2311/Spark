@@ -4427,7 +4427,7 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsBoardMoveButton:hover { border-color: #b9cbe6; color: var(--blue); }
 .wsBoardMoveButton:focus-visible { outline: 3px solid rgba(37, 99, 235, .55); outline-offset: 1px; }
 .wsBoardMoveButton:disabled { cursor: progress; opacity: .5; }
-.wsBoardMenu { position: absolute; z-index: 30; top: calc(100% + .3rem); right: 0; display: grid; min-width: 12rem; padding: .3rem; border: 1px solid var(--line); border-radius: .7rem; background: #fff; box-shadow: 0 18px 40px -16px rgba(9, 38, 90, .4); animation: ws-pop .14s ease-out both; }
+.wsBoardMenu { position: fixed; z-index: 90; top: 0; left: 0; display: grid; min-width: 12rem; padding: .3rem; border: 1px solid var(--line); border-radius: .7rem; background: #fff; box-shadow: 0 18px 40px -16px rgba(9, 38, 90, .4); animation: ws-pop .14s ease-out both; }
 .wsBoardMenuItem { display: flex; align-items: center; gap: .45rem; padding: .5rem .6rem; border: 0; border-radius: .45rem; color: var(--ink); background: transparent; font-size: .84rem; font-weight: 600; text-align: left; }
 .wsBoardMenuItem:hover, .wsBoardMenuItem:focus-visible { outline: none; background: #f1f5fb; }
 .wsBoardMenuItem[aria-checked="true"] { color: var(--blue); }
@@ -4451,6 +4451,11 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 .wsBoardState p { color: var(--muted); }
 .wsBoardSkeleton { display: grid; grid-auto-columns: minmax(16.5rem, 1fr); grid-auto-flow: column; gap: .9rem; overflow: hidden; }
 .wsBoardSkeleton span:not(.wsSrOnly) { display: block; height: 22rem; border-radius: 1rem; background: linear-gradient(90deg, #eaf0f8 0%, #f5f8fc 50%, #eaf0f8 100%); background-size: 200% 100%; animation: ws-shimmer 1.4s linear infinite; }
+
+/* Touch screens have no hover, so the Move button stays visible at every width. */
+@media (hover: none) {
+  .wsBoardMoveButton { opacity: 1; }
+}
 
 @media (max-width: 767px) {
   .wsBoardScroller { grid-auto-columns: minmax(82%, 1fr); scroll-snap-type: x mandatory; }

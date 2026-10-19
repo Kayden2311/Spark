@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { initials } from "../../../../components";
-import { ApiError, messageOf } from "../../../_lib/api";
+import { ApiError, messageOf, workspaceApi } from "../../../_lib/api";
 import { addCard, columnIssues, currentTarget, keyboardTarget, moveCard, positionOf, replaceCard, wipBlocked, type ArrowKey, type MoveTarget } from "../../../_lib/board-moves";
 import { boardPath, createIssue, moveIssue, priorityLabel, toCard, typeLabel, type BoardState, type BoardStatus, type IssueCard, type IssueMove } from "../../../_lib/issues";
 import { formatDay, methodologyOf, todayIso } from "../../../_lib/projects";
@@ -11,6 +12,7 @@ import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useProject } from "./project-context";
 
 export const TEAMMATE_MOVED = "Updated by a teammate — the board was refreshed.";
+export const TEAMMATE_MOVED_STALE = "Updated by a teammate. Reload the page to see the latest board.";
 const ARROWS: readonly string[] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
 
 /** The inline explanation a full column shows. `fallback` is the API's sentence when the local copy has no limit yet. */
@@ -42,7 +44,7 @@ interface Drag {
 type MoveSource = "keyboard" | "pointer" | "menu";
 
 export function ProjectBoard() {
-  const { project, notify, announce } = useProject();
+  const { project, notify, announce, reloadProject } = useProject();
   const path = boardPath(project.id);
   const loaded = useWorkspaceData<BoardState>(path);
   const base = loaded.dataPath === path ? loaded.data : null;
@@ -50,6 +52,8 @@ export function ProjectBoard() {
   const [local, setLocal] = useState<{ source: BoardState; board: BoardState } | null>(null);
   const committed = base && local?.source === base ? local.board : base;
   const baseRef = useRef<BoardState | null>(null);
+  // Moves still waiting for the API; the silent refresh after a move waits until none are left.
+  const pendingRef = useRef(0);
   const [pickup, setPickup] = useState<Pickup | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -74,6 +78,24 @@ export function ProjectBoard() {
   const update = (source: BoardState, change: (board: BoardState) => BoardState) => {
     if (baseRef.current !== null && source !== baseRef.current) return;
     setLocal((previous) => ({ source, board: change(previous && previous.source === source ? previous.board : source) }));
+  };
+
+  /**
+   * Refetches the board without a loading state and puts it in place of the local copy, so versions
+   * reranked by the server and counts stay current. A silent refresh is skipped while other moves are
+   * in flight (the last one to settle refreshes again); `force` applies it regardless. Resolves false
+   * when the board could not be fetched.
+   */
+  const refresh = async (force: boolean): Promise<boolean> => {
+    const source = baseRef.current;
+    if (!source) return false;
+    try {
+      const { data } = await workspaceApi<BoardState>(path);
+      if (baseRef.current === source && (force || pendingRef.current === 0)) setLocal({ source, board: data });
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const setNotice = (statusId: string, text: string | null) =>
@@ -136,29 +158,43 @@ export function ProjectBoard() {
     setNotice(status.id, null);
     announce(`${how === "keyboard" ? "Dropped" : "Moved"} ${issue.key} ${how === "keyboard" ? "in" : "to"} ${describe(next, issue)}.`);
     setBusy((current) => ({ ...current, [issueId]: true }));
+    pendingRef.current += 1;
+    let outcome: "moved" | "wip" | "stale" | "failed" = "failed";
     const body: IssueMove = target.statusId === issue.statusId ? { afterIssueId: target.afterIssueId } : { statusId: target.statusId, afterIssueId: target.afterIssueId };
     moveIssue(issue, body)
-      .then((detail) => update(source, (current) => replaceCard(current, toCard(detail))))
+      .then((detail) => {
+        outcome = "moved";
+        update(source, (current) => replaceCard(current, toCard(detail)));
+        // The overview's progress counts depend on where tasks are.
+        reloadProject();
+      })
       .catch((error: unknown) => {
         update(source, (current) => moveCard(current, issueId, origin.statusId, origin.afterIssueId));
         if (error instanceof ApiError && error.code === "wip_limit_reached") {
+          outcome = "wip";
           const message = wipMessage(status, error.message);
           setNotice(status.id, message);
           announce(message);
         } else if (error instanceof ApiError && error.status === 412) {
-          loaded.reload();
-          notify(TEAMMATE_MOVED, "info");
+          outcome = "stale";
         } else {
           notify(messageOf(error), "error");
         }
       })
-      .finally(() =>
+      .finally(() => {
+        pendingRef.current -= 1;
         setBusy((current) => {
           const next = { ...current };
           delete next[issueId];
           return next;
-        }),
-      );
+        });
+        if (outcome === "stale") {
+          void refresh(true).then((ok) => notify(ok ? TEAMMATE_MOVED : TEAMMATE_MOVED_STALE, "info"));
+        } else if (outcome === "moved" || outcome === "wip") {
+          // A move can rerank neighbours (new versions) and a 409 means our counts were stale.
+          void refresh(false);
+        }
+      });
   };
 
   const onCardKeyDown = (event: KeyboardEvent<HTMLDivElement>, issue: IssueCard) => {
@@ -245,6 +281,7 @@ export function ProjectBoard() {
     try {
       const detail = await createIssue(project.id, { title, statusId: status.id }, idempotencyKey);
       update(source, (current) => addCard(current, toCard(detail)));
+      reloadProject();
       setNotice(status.id, null);
       announce(`Added ${detail.key} to ${status.name}.`);
     } catch (error) {
@@ -405,7 +442,7 @@ function BoardCardItem({ issue, helpId, picked, busy, dragging, overdue, phaseNa
           </div>
         </div>
         <div className="wsBoardMove">
-          <button aria-expanded={menuOpen} aria-haspopup="menu" aria-label={`Move ${issue.key} to…`} className="wsBoardMoveButton" data-move-for={issue.id} disabled={busy} onClick={onToggleMenu} type="button">
+          <button aria-expanded={menuOpen} aria-haspopup="menu" aria-label={`Move to… (${issue.key})`} className="wsBoardMoveButton" data-move-for={issue.id} disabled={busy} onClick={onToggleMenu} type="button">
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             Move to…
           </button>
@@ -430,15 +467,41 @@ function MoveMenu({ issue, board, onClose, onPick }: {
     closeRef.current = onClose;
   }, [onClose]);
 
+  // The board scrolls sideways, which clips anything inside it, so the menu lives in <body> with fixed
+  // coordinates taken from its button: below it, or above it when the viewport has no room below.
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    const anchor = document.querySelector<HTMLElement>(`[data-move-for="${issue.id}"]`);
+    if (!menu || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const margin = 8;
+    const below = window.innerHeight - rect.bottom;
+    const top = below >= menu.offsetHeight + margin || rect.top < menu.offsetHeight + margin ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
+    const left = Math.min(Math.max(margin, rect.right - menu.offsetWidth), window.innerWidth - menu.offsetWidth - margin);
+    menu.style.top = `${Math.max(margin, top)}px`;
+    menu.style.left = `${Math.max(margin, left)}px`;
+  }, [issue.id]);
+
   useEffect(() => {
-    ref.current?.querySelector<HTMLElement>("[role=\"menuitemradio\"]:not([aria-disabled=\"true\"])")?.focus();
-    const onPointerDown = (event: MouseEvent) => {
-      const container = ref.current?.parentElement;
-      if (container && !container.contains(event.target as Node)) closeRef.current(false);
+    ref.current?.querySelector<HTMLElement>("[role=\"menuitemradio\"]:not([aria-disabled=\"true\"])")?.focus({ preventScroll: true });
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      const anchor = document.querySelector(`[data-move-for="${issue.id}"]`);
+      if (!ref.current?.contains(target) && !anchor?.contains(target)) closeRef.current(false);
     };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, []);
+    // Fixed coordinates go stale when anything scrolls or the viewport changes.
+    const onMoved = (event: Event) => {
+      if (!(event.target instanceof Node && ref.current?.contains(event.target))) closeRef.current(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("scroll", onMoved, true);
+    window.addEventListener("resize", onMoved);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("scroll", onMoved, true);
+      window.removeEventListener("resize", onMoved);
+    };
+  }, [issue.id]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=\"menuitemradio\"]") ?? []);
@@ -447,7 +510,9 @@ function MoveMenu({ issue, board, onClose, onPick }: {
       event.preventDefault();
       onClose(true);
     } else if (event.key === "Tab") {
-      onClose(false);
+      // The menu sits at the end of <body>; return to the button so Tab continues from the card.
+      event.preventDefault();
+      onClose(true);
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const step = event.key === "ArrowDown" ? 1 : -1;
@@ -458,7 +523,7 @@ function MoveMenu({ issue, board, onClose, onPick }: {
     }
   };
 
-  return (
+  return createPortal(
     <div aria-label={`Move ${issue.key} to`} className="wsBoardMenu" onKeyDown={onKeyDown} ref={ref} role="menu">
       {board.statuses.map((status) => {
         const current = status.id === issue.statusId;
@@ -472,7 +537,8 @@ function MoveMenu({ issue, board, onClose, onPick }: {
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
