@@ -307,7 +307,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(21);
+    expect(result.rows[0].count).toBe(22);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -1475,7 +1475,8 @@ describe("Local PostgreSQL schema", () => {
     expect(workerTables.rows).toEqual([]);
     const workerFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname=$1 AND has_function_privilege('spark_worker',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
-    const expected = ["worker_claim_outbox", "worker_complete_outbox", "worker_fail_outbox", "worker_invitation_email", "worker_issue_invitation_token"];
+    const expected = ["worker_claim_outbox", "worker_complete_outbox", "worker_fail_outbox", "worker_invitation_email", "worker_issue_invitation_token",
+      "worker_record_email_delivery", "worker_task_assigned_email"];
     expect(workerFunctions.rows.map((row) => row.proname)).toEqual(expected);
     for (const role of ["spark_app", "spark_auth"]) {
       const reachable = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
@@ -2418,5 +2419,89 @@ describe("Local PostgreSQL schema", () => {
     // Validation and the version check still run first.
     expect(await updateProject(alice, project, 1, { name: "Loud" })).toEqual({ outcome: "version_mismatch", settings_version: 2 });
     await expect(updateProject(alice, project, 2, { name: " " })).rejects.toMatchObject({ code: "22023", message: "Invalid project name" });
+  });
+  it("queues one assignment email per notification", async () => {
+    const alice = await account("Mail Assigner"), bob = await account("Mail Assignee"), carol = await account("Mail Other");
+    const { workspace, project, key } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const slug = (await owner.query(`SELECT slug FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows[0].slug as string;
+    const outboxOf = async (issue: string, version: number) => {
+      await owner.query("SET ROLE spark_owner");
+      return (await owner.query(`SELECT payload,processed_at IS NULL AS pending FROM ${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=$2`,
+        [issue, version])).rows[0] as { payload: Record<string, unknown>; pending: boolean };
+    };
+    const noticeOf = async (issue: string, recipient: string) => {
+      await owner.query("SET ROLE spark_owner");
+      return (await owner.query(`SELECT n.id,o.aggregate_version FROM ${table("notifications")} n JOIN ${table("outbox_events")} o ON o.id=n.outbox_event_id
+        WHERE n.resource_id=$1 AND n.recipient_user_id=$2 ORDER BY o.aggregate_version DESC LIMIT 1`, [issue, recipient])).rows[0].id as string;
+    };
+    const view = async (id: string) => (await workerRuntime.query(`SELECT * FROM ${fn("worker_task_assigned_email")}($1)`, [id])).rows;
+    const statusOf = async (id: string) => (await view(id))[0]?.status as string | undefined;
+    const record = async (id: string, status: string) =>
+      (await workerRuntime.query(`SELECT ${fn("worker_record_email_delivery")}($1,$2) AS recorded`, [id, status])).rows[0].recorded as boolean;
+
+    // Creating with another member as assignee leaves exactly that outbox row for the worker.
+    const assigned = (await createIssue(alice, project, { title: "Ship the <b>deck</b>", assignee: bob.id })).issue_id!;
+    const notice = await noticeOf(assigned, bob.id);
+    expect(await outboxOf(assigned, 1)).toEqual({ pending: true,
+      payload: { issueId: assigned, projectId: project, actorUserId: alice.id, assigneeUserId: bob.id, version: 1, notificationId: notice } });
+    const self = (await createIssue(alice, project, { title: "Mine", assignee: alice.id })).issue_id!;
+    expect(await outboxOf(self, 1)).toEqual({ pending: false, payload: { issueId: self, projectId: project, actorUserId: alice.id, assigneeUserId: alice.id } });
+    const unassigned = (await createIssue(alice, project, { title: "Nobody" })).issue_id!;
+    expect((await outboxOf(unassigned, 1)).pending).toBe(false);
+
+    const details = { email: bob.email.toLowerCase(), recipient_name: "Mail Assignee", actor_name: "Mail Assigner", workspace_name: "Acme", workspace_slug: slug,
+      project_key: key, project_name: "Project", issue_number: "1", issue_title: "Ship the <b>deck</b>" };
+    expect(await view(notice)).toEqual([{ status: "pending", ...details }]);
+    expect(await view(randomUUID())).toEqual([]);
+    await expect(record(notice, "failed")).rejects.toMatchObject({ code: "22023" });
+    expect(await record(randomUUID(), "sent")).toBe(false);
+    expect(await record(notice, "sent")).toBe(true);
+    expect(await record(notice, "sent")).toBe(false);
+    expect(await record(notice, "suppressed")).toBe(false);
+    expect(await view(notice)).toEqual([{ status: "skipped", ...Object.fromEntries(Object.keys(details).map((name) => [name, null])) }]);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT channel,status,delivered_at IS NOT NULL AS delivered FROM ${table("notification_deliveries")} WHERE notification_id=$1`, [notice])).rows)
+      .toEqual([{ channel: "email", status: "sent", delivered: true }]);
+
+    // Updates: a new assignee gets a pending row; self-assignment and other edits stay processed.
+    expect((await updateIssue(alice, unassigned, 1, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    const carolNotice = await noticeOf(unassigned, carol.id);
+    expect(await outboxOf(unassigned, 2)).toEqual({ pending: true,
+      payload: { issueId: unassigned, projectId: project, actorUserId: alice.id, assigneeUserId: carol.id, version: 2, notificationId: carolNotice } });
+    expect((await updateIssue(alice, self, 1, { title: "Still mine" })).outcome).toBe("ok");
+    expect((await outboxOf(self, 2)).pending).toBe(false);
+    expect((await updateIssue(carol, self, 2, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    expect(await outboxOf(self, 3)).toEqual({ pending: false, payload: { issueId: self, projectId: project, actorUserId: carol.id, assigneeUserId: carol.id } });
+
+    // A disabled preference suppresses the email; no row or an enabled row means enabled.
+    expect(await statusOf(carolNotice)).toBe("pending");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("notification_preferences")} (user_id,kind,channel,enabled) VALUES ($1,'task_assigned','email',false)`, [carol.id]);
+    expect(await statusOf(carolNotice)).toBe("skipped");
+    await owner.query(`UPDATE ${table("notification_preferences")} SET enabled=true WHERE user_id=$1`, [carol.id]);
+    expect(await statusOf(carolNotice)).toBe("pending");
+
+    // Reassigned or archived in the meantime: nothing to send.
+    const moving = (await createIssue(alice, project, { title: "Moving target", assignee: bob.id })).issue_id!;
+    const movingNotice = await noticeOf(moving, bob.id);
+    expect(await statusOf(movingNotice)).toBe("pending");
+    expect((await updateIssue(alice, moving, 1, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    expect(await statusOf(movingNotice)).toBe("skipped");
+    expect((await updateIssue(alice, unassigned, 2, { archived: true })).outcome).toBe("ok");
+    expect(await statusOf(carolNotice)).toBe("skipped");
+
+    // A recipient who left the workspace gets nothing.
+    const leaving = (await createIssue(alice, project, { title: "Before leaving", assignee: bob.id })).issue_id!;
+    const leavingNotice = await noticeOf(leaving, bob.id);
+    expect(await statusOf(leavingNotice)).toBe("pending");
+    expect(await outcome(alice, "ws_remove_member($1,$2)", [workspace, bob.id])).toBe("ok");
+    expect(await statusOf(leavingNotice)).toBe("skipped");
+
+    for (const role of [runtime, authRuntime]) {
+      await expect(role.query(`SELECT * FROM ${fn("worker_task_assigned_email")}($1)`, [notice])).rejects.toMatchObject({ code: "42501" });
+      await expect(role.query(`SELECT ${fn("worker_record_email_delivery")}($1,'sent')`, [notice])).rejects.toMatchObject({ code: "42501" });
+    }
   });
 });
