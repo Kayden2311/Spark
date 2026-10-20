@@ -39,6 +39,33 @@ export function visibleSections(roles: readonly string[]): Section[] {
   return SECTIONS.filter((section) => canAccess(roles, section.id));
 }
 
+/**
+ * The roles each dashboard read accepts, keyed by its path under `/api/v1/admin`. Mirrors the role list each
+ * backend route passes to `guard.authorize` (`routes/admin/*.ts`). A read can differ from the section that
+ * shows it: `analytics/top-communities` is open to community moderators although Analytics is not.
+ */
+export const READ_ROLES = {
+  overview: PLATFORM_ROLES,
+  system: ADMINS,
+  "analytics/activity": ADMINS,
+  "analytics/engagement": ADMINS,
+  "analytics/retention": ADMINS,
+  "analytics/top-communities": [...ADMINS, "community_moderator"],
+  "communities/stats": [...ADMINS, "community_moderator"],
+  "reports/stats": [...ADMINS, "content_moderator"],
+  "audit-logs": ADMINS,
+  "billing/overview": ADMINS,
+  "billing/mrr": ADMINS,
+} as const satisfies Record<string, readonly PlatformRole[]>;
+
+export type AdminRead = keyof typeof READ_ROLES;
+
+/** Whether the viewer's roles can open a read, so a tile never requests what the API would refuse. */
+export function canRead(roles: readonly string[], read: AdminRead): boolean {
+  const allowed: readonly string[] = READ_ROLES[read];
+  return roles.some((role) => allowed.includes(role));
+}
+
 /** Only super admins grant or revoke platform roles. */
 export function canManageRoles(roles: readonly string[]): boolean {
   return roles.includes("super_admin");

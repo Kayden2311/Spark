@@ -9,7 +9,7 @@ import { ChartCard, ChartLegend, TrendChart } from "./_components/charts";
 import { ApiHealthTile, NeedsAttentionTile, RevenueTile, StaffActivityTile, StickinessTile, adminTrendCards, moderatorTrendCards } from "./_components/overview-tiles";
 import { TrendCards } from "./_components/trend-cards";
 import { PageHeader, RangePicker, SkeletonRows } from "./_components/ui";
-import { canAccess } from "./_lib/access";
+import { canRead } from "./_lib/access";
 import { formatCount, shortDate } from "./_lib/format";
 import { SERIES } from "./_lib/palette";
 import { useRange } from "./_lib/range";
@@ -27,11 +27,12 @@ type Rows = Array<Record<string, unknown>>;
 function CommandCenter() {
   const { user } = useAuth();
   const { roles, overview, overviewError, refreshOverview } = useAdmin();
-  // Each read is requested only when the viewer's role can open the section that owns it.
-  const analytics = canAccess(roles, "analytics");
-  const reports = canAccess(roles, "reports");
-  const billingAccess = canAccess(roles, "billing");
-  const audit = canAccess(roles, "audit");
+  // Each read is requested, and its tile shown, only when the viewer's role can open that read.
+  const analytics = canRead(roles, "analytics/activity");
+  const systemAccess = canRead(roles, "system");
+  const reports = canRead(roles, "reports/stats");
+  const billingAccess = canRead(roles, "billing/overview") && canRead(roles, "billing/mrr");
+  const audit = canRead(roles, "audit-logs");
   const [range, setRange] = useRange(30);
 
   const activity = useAdminData<ActivityResponse>(analytics ? `/analytics/activity?days=${range}` : null);
@@ -39,7 +40,7 @@ function CommandCenter() {
   const billing = useAdminData<BillingOverview>(billingAccess ? "/billing/overview" : null);
   const reportStats = useAdminData<ReportStats>(reports ? `/reports/stats?days=${range}` : null);
   const feed = useAdminData<Page<AuditEntry>>(audit ? "/audit-logs?limit=6" : null);
-  const system = useAdminData<SystemStatus>(analytics ? "/system" : null);
+  const system = useAdminData<SystemStatus>(systemAccess ? "/system" : null);
 
   const series = activity.data?.series ?? [];
   const flow = reportStats.data?.series ?? [];
@@ -90,7 +91,8 @@ function CommandCenter() {
             </ChartCard>
           </Tile>
         )}
-        <Tile span={analytics ? 4 : reports ? 5 : 12}>
+        {/* Without analytics, Needs attention and Moderation flow share a row (5 + 7), and half each on tablets. */}
+        <Tile span={analytics ? 4 : reports ? 5 : 12} spanMd={analytics || !reports ? undefined : 6}>
           <NeedsAttentionTile error={overviewError} onRetry={refreshOverview} overview={overview} roles={roles} />
         </Tile>
         {analytics && (
@@ -111,7 +113,7 @@ function CommandCenter() {
           </Tile>
         )}
         {reports && (
-          <Tile span={analytics ? 6 : 7}>
+          <Tile span={analytics ? 6 : 7} spanMd={6}>
             <ChartCard
               empty={noReports}
               emptyText="No reports opened or closed in this period yet."
@@ -137,7 +139,7 @@ function CommandCenter() {
             <StickinessTile activity={activity} />
           </Tile>
         )}
-        {analytics && (
+        {systemAccess && (
           <Tile span={3}>
             <ApiHealthTile system={system} />
           </Tile>

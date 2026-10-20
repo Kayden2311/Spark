@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { canAccess } from "../_lib/access";
+import { canAccess, canRead } from "../_lib/access";
 import { AUDIT_ACTIONS, describeAction, formatCount, formatDateTime, formatDuration, formatMoney, formatRelative } from "../_lib/format";
 import { SERIES, VIZ } from "../_lib/palette";
 import type { ActivityResponse, AuditEntry, BillingOverview, MrrResponse, Overview, Page, ReportStats, SystemStatus } from "../_lib/types";
@@ -37,7 +37,7 @@ function mrrMonths(mrr: MrrResponse | null) {
 /** Admins: platform activity and revenue. Each card is built only from a read the viewer's role can open. */
 export function adminTrendCards({ roles, activity, mrr }: { roles: readonly string[]; activity: Read<ActivityResponse>; mrr: Read<MrrResponse> }): TrendCardItem[] {
   const items: TrendCardItem[] = [];
-  if (canAccess(roles, "analytics")) {
+  if (canRead(roles, "analytics/activity")) {
     const series = activity.data?.series ?? [];
     const current = activity.data?.current;
     const previous = activity.data?.previous ?? null;
@@ -71,7 +71,7 @@ export function adminTrendCards({ roles, activity, mrr }: { roles: readonly stri
       },
     );
   }
-  if (canAccess(roles, "billing")) {
+  if (canRead(roles, "billing/mrr")) {
     const { currency, months } = mrrMonths(mrr.data);
     const last = months[months.length - 1];
     const before = months[months.length - 2];
@@ -93,13 +93,13 @@ export function moderatorTrendCards({ roles, overview, overviewError, reportStat
   const items: TrendCardItem[] = [];
   // A failed overview read reads "–" (the Needs attention tile offers Retry) instead of a skeleton forever.
   const count = (value: number | undefined) => (value !== undefined ? formatCount(value) : overviewError ? "–" : undefined);
-  if (canAccess(roles, "reports")) {
+  if (canRead(roles, "reports/stats")) {
     items.push(
       {
         label: "Open reports",
         value: count(overview?.reports.open),
-        dot: SERIES.reportsOpened.color,
-        color: SERIES.reportsOpened.color,
+        dot: SERIES.reportBacklog.color,
+        color: SERIES.reportBacklog.color,
         series: reportStats.data?.series.map((point) => point.backlog),
         href: "/admin/reports",
         valueTone: (overview?.reports.open ?? 0) > 0 ? "bad" : "default",

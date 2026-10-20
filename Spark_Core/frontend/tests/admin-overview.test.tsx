@@ -139,7 +139,12 @@ describe("overview dashboard", () => {
     expect(await screen.findByText(/^Reports closed: 2$/u)).toBeInTheDocument();
     expect(requests.filter((url) => /\/admin\/(analytics|billing)\//u.test(url))).toEqual([]);
     expect(requests.some((url) => url.includes("/admin/reports/stats?days=30"))).toBe(true);
+    // Needs attention (5) and Moderation flow (7) share a row; on tablets they take half each, not 6 + 12.
+    const tileOf = (name: string) => screen.getByRole("region", { name }).closest(".admTile") as HTMLElement;
+    expect(tileOf("Needs attention").style.getPropertyValue("--tile-span-md")).toBe("6");
+    expect(tileOf("Moderation flow").style.getPropertyValue("--tile-span-md")).toBe("6");
   });
+
   it("shows an error with Retry when the overview read fails, and Retry refetches it", async () => {
     auth.platformRoles = ["community_moderator"];
     let fail = true;

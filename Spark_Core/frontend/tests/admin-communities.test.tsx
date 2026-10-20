@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +28,8 @@ vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 
 import AdminLayout from "../src/app/admin/layout";
 import CommunitiesAdminPage from "../src/app/admin/communities/page";
-import { healthOf } from "../src/app/admin/_components/community-actions";
+import { HEALTH_TONE, healthOf } from "../src/app/admin/_components/community-actions";
+import { TONE_DOT, type Tone } from "../src/app/admin/_lib/format";
 import { HEALTH_GROUPS } from "../src/app/admin/communities/community-insights";
 
 const overview = {
@@ -173,7 +177,7 @@ describe("communities dashboard", () => {
     expect(requests.some((url) => url.includes("/admin/analytics/engagement?days=30"))).toBe(true);
   });
 
-  it("gives a community moderator no analytics or report tiles and no requests for them", async () => {
+  it("gives a community moderator most active communities, but no admin-only or report tiles and no requests for them", async () => {
     auth.platformRoles = ["community_moderator"];
     mockApi(routes);
     render(<AdminLayout><CommunitiesAdminPage /></AdminLayout>);
@@ -184,11 +188,15 @@ describe("communities dashboard", () => {
     expect(within(cards).queryByText(/^Open reports/u)).not.toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "Health mix" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Flagged communities" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Most active communities" })).not.toBeInTheDocument();
+    // The top-communities read is open to community moderators (COMMUNITY_STAFF), unlike the rest of Analytics.
+    const ranked = screen.getByRole("region", { name: "Most active communities" });
+    expect(await within(ranked).findByRole("link", { name: "Makers" })).toHaveAttribute("href", "/admin/communities/c1");
     expect(screen.queryByRole("region", { name: "When members are active" })).not.toBeInTheDocument();
     await screen.findByRole("table");
     await waitFor(() => expect(requests.some((url) => url.includes("/admin/communities/stats"))).toBe(true));
-    expect(requests.filter((url) => /\/admin\/(analytics|reports)\//u.test(url))).toEqual([]);
+    // The only analytics or report read requested is the one this role can open.
+    const gated = requests.filter((url) => /\/admin\/(analytics|reports)\//u.test(url));
+    expect(gated).toEqual(["/api/v1/admin/analytics/top-communities?days=30&limit=6"]);
   });
 
   it("offers 7, 30 and 90 days and asks every period read for the chosen range", async () => {
@@ -232,6 +240,60 @@ describe("communities dashboard", () => {
     const tile = await screen.findByRole("region", { name: "Health mix" });
     expect(await within(tile).findByText("No communities yet.")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Flagged communities" })).not.toBeInTheDocument();
+  });
+});
+
+describe("health colours", () => {
+  it("keeps the tone dot colours equal to the admTone-* badge dots in admin.css", () => {
+    const css = readFileSync(path.resolve(__dirname, "../src/app/admin/admin.css"), "utf8");
+    for (const [tone, hex] of Object.entries(TONE_DOT)) {
+      const rule = new RegExp(String.raw`\.admTone-${tone}\s*\{[^}]*--tone-dot:\s*(#[0-9a-f]{6})`, "u").exec(css);
+      expect({ tone, dot: rule?.[1] }).toEqual({ tone, dot: hex });
+    }
+  });
+
+  it("draws each Health mix slice in its table badge's dot colour", () => {
+    const expected: Record<string, { tone: Tone; hex: string }> = {
+      "Needs review": { tone: "red", hex: "#ef4444" },
+      Growing: { tone: "green", hex: "#10b981" },
+      Slowing: { tone: "amber", hex: "#f59e0b" },
+      Steady: { tone: "blue", hex: "#2563eb" },
+      Quiet: { tone: "violet", hex: "#8b5cf6" },
+      Archived: { tone: "neutral", hex: "#94a3b8" },
+    };
+    for (const group of HEALTH_GROUPS) {
+      expect({ label: group.label, tone: HEALTH_TONE[group.key], color: group.color }).toEqual({ label: group.label, tone: expected[group.label]!.tone, color: expected[group.label]!.hex });
+    }
+    // Every badge healthOf produces for the shared fixtures matches its group's slice colour.
+    for (const entry of fixtures.cases) {
+      const weeklyActivity = [0, 0, 0, 0, 0, 0, 0, 0];
+      weeklyActivity[2] = entry.earlierPosts;
+      weeklyActivity[5] = entry.recentPosts;
+      const badge = healthOf({ state: entry.archived ? "archived" : "active", openReports: entry.openReports, weeklyActivity });
+      expect(TONE_DOT[badge.tone]).toBe(HEALTH_GROUPS.find((group) => group.label === badge.label)?.color);
+    }
+  });
+
+  it("renders the Health mix legend in the badge colours", async () => {
+    mockApi(routes);
+    render(<AdminLayout><CommunitiesAdminPage /></AdminLayout>);
+    const tile = await screen.findByRole("region", { name: "Health mix" });
+    await within(tile).findByText("Needs review");
+    // jsdom normalises colours, so compare through the same style property.
+    const colour = (hex: string) => {
+      const probe = document.createElement("span");
+      probe.style.background = hex;
+      return probe.style.background;
+    };
+    const swatches = Object.fromEntries([...tile.querySelectorAll(".vizDonutLegend li")].map((item) => [item.querySelector(".vizDonutName")!.textContent, (item.querySelector(".vizLegendSwatch") as HTMLElement).style.background]));
+    expect(swatches).toEqual({
+      Growing: colour(TONE_DOT.green),
+      Steady: colour(TONE_DOT.blue),
+      Slowing: colour(TONE_DOT.amber),
+      Quiet: colour(TONE_DOT.violet),
+      "Needs review": colour(TONE_DOT.red),
+      Archived: colour(TONE_DOT.neutral),
+    });
   });
 });
 

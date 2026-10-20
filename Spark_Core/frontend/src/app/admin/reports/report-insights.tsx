@@ -28,8 +28,8 @@ function reportTrendCards(stats: Read<ReportStats>): TrendCardItem[] {
     {
       label: "Open now",
       value: valueOf(stats, (data) => formatCount(data.backlog)),
-      dot: VIZ.orange,
-      color: VIZ.orange,
+      dot: SERIES.reportBacklog.color,
+      color: SERIES.reportBacklog.color,
       series: series.map((point) => point.backlog),
       valueTone: backlog > REPORT_BACKLOG_TARGET ? "bad" : "default",
     },
@@ -48,7 +48,7 @@ function reportTrendCards(stats: Read<ReportStats>): TrendCardItem[] {
       series: series.map((point) => point.closed),
     },
     {
-      label: "Time to decision",
+      label: "Median time to decision",
       value: valueOf(stats, (data) => (data.medianHoursToClose === null ? "–" : hours(data.medianHoursToClose))),
       dot: VIZ.blue,
       color: VIZ.blue,

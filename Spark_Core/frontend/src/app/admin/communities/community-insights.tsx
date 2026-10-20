@@ -6,12 +6,13 @@ import { useEffect } from "react";
 import { useAdmin } from "../_components/admin-context";
 import { Bento, Tile } from "../_components/bento";
 import { BarList, ChartCard, DonutChart, Gauge } from "../_components/charts";
+import { HEALTH_TONE } from "../_components/community-actions";
 import { EngagementHeatmapCard } from "../_components/engagement-heatmap";
 import { valueOf, type Read } from "../_components/overview-tiles";
 import { TrendCards, type TrendCardItem } from "../_components/trend-cards";
 import type { RangeDays } from "../_components/ui";
-import { canAccess } from "../_lib/access";
-import { formatCount } from "../_lib/format";
+import { canRead } from "../_lib/access";
+import { TONE_DOT, formatCount } from "../_lib/format";
 import { SERIES, VIZ } from "../_lib/palette";
 import type { ActivityResponse, CommunityHealthCounts, CommunityStats, EngagementResponse, Overview, ReportStats, TopCommunity } from "../_lib/types";
 import { useAdminData } from "../_lib/use-admin-data";
@@ -21,15 +22,15 @@ export const COMMUNITY_RANGES = [7, 30, 90] as const satisfies readonly RangeDay
 
 /**
  * The health groups in display order: the server's count key, the SQL column name, the `healthOf`
- * label the table badges use, and one categorical colour each (never relied on alone: legend and table).
+ * label the table badges use, and the dot colour of that badge's tone (never relied on alone: legend and table).
  */
 export const HEALTH_GROUPS: ReadonlyArray<{ key: keyof CommunityHealthCounts; sqlKey: string; label: string; words: string; color: string }> = [
-  { key: "growing", sqlKey: "growing", label: "Growing", words: "growing", color: VIZ.aqua },
-  { key: "steady", sqlKey: "steady", label: "Steady", words: "steady", color: VIZ.blue },
-  { key: "slowing", sqlKey: "slowing", label: "Slowing", words: "slowing", color: VIZ.yellow },
-  { key: "quiet", sqlKey: "quiet", label: "Quiet", words: "quiet", color: VIZ.violet },
-  { key: "needsReview", sqlKey: "needs_review", label: "Needs review", words: "need review", color: VIZ.magenta },
-  { key: "archived", sqlKey: "archived", label: "Archived", words: "archived", color: "#94a3b8" },
+  { key: "growing", sqlKey: "growing", label: "Growing", words: "growing", color: TONE_DOT[HEALTH_TONE.growing] },
+  { key: "steady", sqlKey: "steady", label: "Steady", words: "steady", color: TONE_DOT[HEALTH_TONE.steady] },
+  { key: "slowing", sqlKey: "slowing", label: "Slowing", words: "slowing", color: TONE_DOT[HEALTH_TONE.slowing] },
+  { key: "quiet", sqlKey: "quiet", label: "Quiet", words: "quiet", color: TONE_DOT[HEALTH_TONE.quiet] },
+  { key: "needsReview", sqlKey: "needs_review", label: "Needs review", words: "need review", color: TONE_DOT[HEALTH_TONE.needsReview] },
+  { key: "archived", sqlKey: "archived", label: "Archived", words: "archived", color: TONE_DOT[HEALTH_TONE.archived] },
 ];
 
 function plural(count: number, one: string, many: string): string {
@@ -68,7 +69,7 @@ function communityCards({ roles, overview, overviewError, stats, activity, repor
       change: data ? { current: data.current.newMembers, previous: data.previous.newMembers } : undefined,
     },
   ];
-  if (canAccess(roles, "analytics")) {
+  if (canRead(roles, "analytics/activity")) {
     const current = activity.data?.current;
     const previous = activity.data?.previous;
     items.push({
@@ -80,13 +81,13 @@ function communityCards({ roles, overview, overviewError, stats, activity, repor
       change: current ? { current: current.posts + current.comments, previous: previous ? previous.posts + previous.comments : null } : undefined,
     });
   }
-  if (canAccess(roles, "reports")) {
+  if (canRead(roles, "reports/stats")) {
     // The report read has no previous-period totals, so this card carries no change chip.
     items.push({
       label: "Open reports",
       value: valueOf(reportStats, (value) => formatCount(value.backlog)),
-      dot: SERIES.reportsOpened.color,
-      color: SERIES.reportsOpened.color,
+      dot: SERIES.reportBacklog.color,
+      color: SERIES.reportBacklog.color,
       series: reportStats.data?.series.map((point) => point.backlog),
       href: "/admin/reports",
       valueTone: (reportStats.data?.backlog ?? 0) > 0 ? "bad" : "default",
@@ -95,8 +96,11 @@ function communityCards({ roles, overview, overviewError, stats, activity, repor
   return items;
 }
 
-/** Every community by health (server counts, same rules as the table badges), with what needs a decision. */
-function HealthMixTile({ stats }: { stats: Read<CommunityStats> }) {
+/**
+ * Every community by health (server counts, same rules as the table badges), with what needs a decision.
+ * `tall` is the two-row tile: a larger donut and a one-column legend fill its height instead of leaving a gap.
+ */
+function HealthMixTile({ stats, tall = false }: { stats: Read<CommunityStats>; tall?: boolean }) {
   const health = stats.data?.health;
   const groups = HEALTH_GROUPS.map((group) => ({ ...group, value: health?.[group.key] ?? 0 }));
   const total = groups.reduce((sum, group) => sum + group.value, 0);
@@ -113,13 +117,13 @@ function HealthMixTile({ stats }: { stats: Read<CommunityStats> }) {
       table={{ columns: ["Health", "Communities"], rows: groups.map((group) => [group.label, group.value]) }}
       title="Health mix"
     >
-      <div className="admHealthMix">
+      <div className={`admHealthMix${tall ? " admHealthMixTall" : ""}`}>
         <p className="admSrOnly">{`${plural(total, "community", "communities")}: ${groups.map((group) => `${formatCount(group.value)} ${group.words}`).join(", ")}.`}</p>
         <DonutChart
           centerLabel="communities"
           centerValue={formatCount(total)}
           data={groups.filter((group) => group.value > 0).map((group) => ({ label: group.label, value: group.value, color: group.color }))}
-          height={220}
+          height={tall ? 260 : 220}
         />
         {needsReview > 0 ? (
           <p className="admHealthCallout" data-tone="bad">
@@ -199,19 +203,21 @@ function FlaggedShareTile({ stats }: { stats: Read<CommunityStats> }) {
 }
 
 /**
- * The Communities dashboard above the table: trend cards and a bento of tiles. Each read is requested
- * only when the viewer's role can open the section that owns it, and each tile loads on its own.
+ * The Communities dashboard above the table: trend cards and a bento of tiles. Each read is requested,
+ * and its tile shown, only when the viewer's role can open that read (`canRead`); each tile loads on its own.
  */
 export function CommunityInsights({ range, refreshKey = 0 }: { range: RangeDays; refreshKey?: number }) {
   const { roles, overview, overviewError } = useAdmin();
-  const analytics = canAccess(roles, "analytics");
-  const reports = canAccess(roles, "reports");
+  const canActivity = canRead(roles, "analytics/activity");
+  const canReports = canRead(roles, "reports/stats");
+  const canTop = canRead(roles, "analytics/top-communities");
+  const canEngagement = canRead(roles, "analytics/engagement");
 
   const stats = useAdminData<CommunityStats>(`/communities/stats?days=${range}`);
-  const activity = useAdminData<ActivityResponse>(analytics ? `/analytics/activity?days=${range}` : null);
-  const reportStats = useAdminData<ReportStats>(reports ? `/reports/stats?days=${range}` : null);
-  const top = useAdminData<{ items: TopCommunity[] }>(analytics ? `/analytics/top-communities?days=${range}&limit=6` : null);
-  const engagement = useAdminData<EngagementResponse>(analytics ? `/analytics/engagement?days=${range}` : null);
+  const activity = useAdminData<ActivityResponse>(canActivity ? `/analytics/activity?days=${range}` : null);
+  const reportStats = useAdminData<ReportStats>(canReports ? `/reports/stats?days=${range}` : null);
+  const top = useAdminData<{ items: TopCommunity[] }>(canTop ? `/analytics/top-communities?days=${range}&limit=6` : null);
+  const engagement = useAdminData<EngagementResponse>(canEngagement ? `/analytics/engagement?days=${range}` : null);
 
   // A table action (archive, restore, …) can move a community between health groups.
   const reloadStats = stats.reload;
@@ -226,20 +232,20 @@ export function CommunityInsights({ range, refreshKey = 0 }: { range: RangeDays;
     <>
       <TrendCards items={cards} label="Community numbers" />
       <Bento label="Community charts">
-        <Tile rowSpan={analytics && showFlagged ? 2 : 1} span={analytics ? 6 : showFlagged ? 8 : 12}>
-          <HealthMixTile stats={stats} />
+        <Tile rowSpan={canTop && showFlagged ? 2 : 1} span={canTop ? 6 : showFlagged ? 8 : 12} spanMd={canTop || showFlagged ? 6 : 12}>
+          <HealthMixTile stats={stats} tall={canTop && showFlagged} />
         </Tile>
-        {analytics && (
+        {canTop && (
           <Tile span={6}>
             <MostActiveTile range={range} top={top} />
           </Tile>
         )}
         {showFlagged && (
-          <Tile span={analytics ? 6 : 4}>
+          <Tile span={canTop ? 6 : 4}>
             <FlaggedShareTile stats={stats} />
           </Tile>
         )}
-        {analytics && (
+        {canEngagement && (
           <Tile span={12}>
             <EngagementHeatmapCard engagement={engagement} subtitle="Sign-ins, posts and comments by weekday and hour (UTC). Use it to plan moderation cover." />
           </Tile>

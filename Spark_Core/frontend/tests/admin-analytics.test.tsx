@@ -23,6 +23,7 @@ vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 
 import AdminLayout from "../src/app/admin/layout";
 import AnalyticsPage from "../src/app/admin/analytics/page";
+import { VIZ } from "../src/app/_ui/viz/palette";
 
 const overview = {
   communities: { active: 3, featured: 1, frozen: 0, archived: 0, flagged: 0 },
@@ -134,6 +135,16 @@ describe("analytics: system health", () => {
     expect(processTile.querySelectorAll(".vizGauge").length).toBeGreaterThan(0);
     const database = within(bento).getByRole("region", { name: "Database" });
     expect(database.querySelector(".vizGauge")).not.toBeNull();
+  });
+
+  it("keeps the heap gauge in its series colour at 95% of the committed heap (normal for Node.js)", async () => {
+    mockApi({ ...routes, "GET /api/v1/admin/system/health": json({ ...health, process: { ...health.process, heapUsedMb: 38, heapTotalMb: 40 } }) });
+    render(<AdminLayout><AnalyticsPage /></AdminLayout>);
+    const processTile = await screen.findByRole("region", { name: "API process" });
+    const heap = within(processTile).getByText("Heap used").closest(".admMetricTile")!;
+    expect(within(heap as HTMLElement).getByText("95%")).toBeInTheDocument();
+    const ring = heap.querySelectorAll(".vizGauge circle")[1]!;
+    expect(ring.getAttribute("stroke")).toBe(VIZ.violet);
   });
 
   it("keeps the trend cards on screen while the health read is still loading", () => {

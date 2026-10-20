@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
-import { canAccess, canManageRoles, isStaff, sectionForPath, visibleSections } from "../src/app/admin/_lib/access";
+import { canAccess, canManageRoles, canRead, isStaff, sectionForPath, visibleSections } from "../src/app/admin/_lib/access";
 import { ApiError, SESSION_EXPIRED_EVENT, adminApi, query } from "../src/app/admin/_lib/api";
 import { healthOf } from "../src/app/admin/_components/community-actions";
 import { toCsv } from "../src/app/admin/_lib/csv";
@@ -21,6 +21,19 @@ describe("console access", () => {
     expect(canAccess(["content_moderator"], "users")).toBe(false);
     expect(canManageRoles(["platform_admin"])).toBe(false);
     expect(canManageRoles(["super_admin"])).toBe(true);
+  });
+
+  it("gates each dashboard read on the roles its backend route accepts, not on the section", () => {
+    // analytics/top-communities is COMMUNITY_STAFF in routes/admin/analytics.ts; the other analytics reads are ADMINS.
+    expect(canRead(["community_moderator"], "analytics/top-communities")).toBe(true);
+    expect(canAccess(["community_moderator"], "analytics")).toBe(false);
+    for (const read of ["analytics/activity", "analytics/engagement", "analytics/retention", "system", "reports/stats", "audit-logs", "billing/mrr"] as const) {
+      expect({ read, allowed: canRead(["community_moderator"], read) }).toEqual({ read, allowed: false });
+    }
+    expect(canRead(["content_moderator"], "reports/stats")).toBe(true);
+    expect(canRead(["content_moderator"], "analytics/top-communities")).toBe(false);
+    expect(canRead(["campaign_moderator"], "overview")).toBe(true);
+    expect(canRead(["platform_admin"], "analytics/engagement")).toBe(true);
   });
 
   it("highlights the deepest matching section", () => {

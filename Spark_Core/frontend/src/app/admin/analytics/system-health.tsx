@@ -304,7 +304,8 @@ export function SystemHealthPanel() {
             <div className="admMetricTiles">
               <MetricTile
                 hint="of the JavaScript heap in use"
-                icon={<Gauge ratio={heapRatio} tone={heapRatio > 0.9 ? STATUS_HEX.amber : VIZ.violet} valueText={formatPercent(heapRatio)} />}
+                // No warning colour: V8 grows the committed heap (heapTotal) only as needed, so 85–95% in use is normal.
+                icon={<Gauge ratio={heapRatio} tone={VIZ.violet} valueText={formatPercent(heapRatio)} />}
                 label="Heap used"
                 value={`${data.process.heapUsedMb} / ${data.process.heapTotalMb} MB`}
               />

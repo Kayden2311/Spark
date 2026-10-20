@@ -617,8 +617,10 @@
 .admStickiness p, .admGaugeTile p { margin: 0; color: var(--adm-muted); font-size: var(--adm-text-xs); text-align: center; }
 .admStickiness strong, .admGaugeTile strong { color: var(--adm-ink); font-variant-numeric: tabular-nums; }
 
-/* Communities: health mix donut with the "needs a decision" call-out under it. */
-.admHealthMix { display: grid; flex: 1; align-content: center; gap: 20px; }
+/* Communities: health mix donut with the "needs a decision" call-out under it. The donut and legend sit at
+   the top; in a two-row tile the call-out is pushed to the bottom, so no band opens up above the donut. */
+.admHealthMix { display: flex; flex: 1; flex-direction: column; gap: 20px; }
+.admHealthMix > .admHealthCallout { margin-top: auto; }
 /* In a half-width tile the donut sits above a two-column legend, so the tile fills the height of the two
    tiles beside it; a wide tile keeps the donut and legend side by side. */
 .admHealthMix { container-type: inline-size; }
@@ -629,6 +631,8 @@
 @container (max-width: 380px) {
   .admHealthMix .vizDonutLegend { grid-template-columns: minmax(0, 1fr); }
 }
+/* The two-row tile beside Most active and Flagged: one legend row per group fills the height. */
+.admHealthMixTall .vizDonutLegend { grid-template-columns: minmax(0, 1fr); }
 .admHealthCallout { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 0; padding: 10px 12px; border: 1px solid var(--adm-line); border-radius: 8px; color: var(--adm-muted); font-size: var(--adm-text-xs); background: var(--adm-surface-alt); }
 .admHealthCallout[data-tone="bad"] { border-color: #f1c0c0; color: var(--adm-red-dark); background: #fef3f2; }
 .admHealthCallout strong { font-weight: 700; }

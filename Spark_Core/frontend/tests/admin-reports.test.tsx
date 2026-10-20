@@ -98,7 +98,9 @@ describe("reports dashboard", () => {
     expect(await within(cards).findByText(/^Open now: 20, needs attention$/u)).toBeInTheDocument();
     expect(within(cards).getByText(/^Opened: 24$/u)).toBeInTheDocument();
     expect(within(cards).getByText(/^Closed: 6$/u)).toBeInTheDocument();
-    expect(within(cards).getByText(/^Time to decision: 5\.5 h$/u)).toBeInTheDocument();
+    expect(within(cards).getByText(/^Median time to decision: 5\.5 h$/u)).toBeInTheDocument();
+    // The visible label says "median" too, so 5.5 h never reads as an average or a total.
+    expect(within(cards).getByText("Median time to decision", { selector: ".admTrendCardLabel" })).toBeInTheDocument();
     // Every card has a series of at least two points (the median skips days with no closures).
     expect(cards.querySelectorAll(".vizSpark")).toHaveLength(4);
     expect(requests.some((url) => url.includes("/admin/reports/stats?days=30"))).toBe(true);
@@ -150,7 +152,7 @@ describe("reports dashboard", () => {
     renderPage();
     const cards = screen.getByRole("list", { name: "Report numbers" });
     expect(await within(cards).findByText(/^Open now: 0$/u)).toBeInTheDocument();
-    expect(within(cards).getByText(/^Time to decision: –$/u)).toBeInTheDocument();
+    expect(within(cards).getByText(/^Median time to decision: –$/u)).toBeInTheDocument();
     expect(cards.querySelectorAll(".vizSpark")).toHaveLength(0);
     expect(await within(screen.getByRole("region", { name: "Backlog" })).findByRole("img", { name: "Open reports: 0, Within target" })).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Reports by reason" })).getByText("No open reports.")).toBeInTheDocument();

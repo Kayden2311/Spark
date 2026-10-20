@@ -42,6 +42,17 @@ describe("bento grid", () => {
     expect(small.style.getPropertyValue("--tile-span-md")).toBe("6");
   });
 
+  it("lets a tile set its tablet width, so a 5 + 7 row splits into halves instead of leaving one empty", () => {
+    render(
+      <Bento label="Tiles">
+        <Tile span={5} spanMd={6}><p>Queues</p></Tile>
+        <Tile span={7} spanMd={6}><p>Flow</p></Tile>
+      </Bento>,
+    );
+    expect(screen.getByText("Queues").parentElement!.style.getPropertyValue("--tile-span-md")).toBe("6");
+    expect(screen.getByText("Flow").parentElement!.style.getPropertyValue("--tile-span-md")).toBe("6");
+  });
+
   it("renders no element for a tile without content", () => {
     const { container } = render(
       <Bento label="Tiles">

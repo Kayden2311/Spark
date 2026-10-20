@@ -4,6 +4,17 @@ export { formatCount, formatPercent, shortDate, shortMonth } from "../../_ui/viz
 
 export type Tone = "neutral" | "blue" | "green" | "amber" | "red" | "violet" | "navy";
 
+/** The dot colour of each tone. Mirrors `--tone-dot` in admin.css `.admTone-*` (a test keeps them equal). */
+export const TONE_DOT: Record<Tone, string> = {
+  neutral: "#94a3b8",
+  blue: "#2563eb",
+  green: "#10b981",
+  amber: "#f59e0b",
+  red: "#ef4444",
+  violet: "#8b5cf6",
+  navy: "#0f2a4f",
+};
+
 export const ROLE_LABELS: Record<PlatformRole, string> = {
   super_admin: "Super admin",
   platform_admin: "Platform admin",
