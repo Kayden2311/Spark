@@ -165,6 +165,25 @@ function TooltipBox({ active, payload, label, labelFormat, valueFormat, series }
   );
 }
 
+/** Room on the right for the last date tick, which is centred on the final point. */
+const CHART_MARGIN = { top: 8, right: 22, bottom: 0, left: 0 } as const;
+
+/**
+ * Y-axis width that fits the widest tick label (for example "1,000 ms"). Ticks are rounded up from the
+ * largest value, so the estimate formats that value rounded up to its leading digit.
+ */
+function axisWidth(data: Array<Record<string, unknown>>, series: ChartSeries[], stacked: boolean, valueFormat: Formatter) {
+  let max = 0;
+  for (const row of data) {
+    const values = series.map((item) => Number(row[item.key] ?? 0)).filter(Number.isFinite);
+    const top = stacked ? values.reduce((sum, value) => sum + value, 0) : Math.max(0, ...values);
+    if (top > max) max = top;
+  }
+  const step = max > 0 ? 10 ** Math.floor(Math.log10(max)) : 1;
+  const label = valueFormat(Math.ceil(max / step) * step);
+  return Math.min(84, Math.max(44, label.length * 7 + 12));
+}
+
 interface TrendChartProps {
   data: Array<Record<string, unknown>>;
   series: ChartSeries[];
@@ -185,7 +204,7 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
     <>
       <CartesianGrid stroke={CHART_INK.grid} strokeDasharray="0" vertical={false} />
       <XAxis axisLine={false} dataKey={xKey} minTickGap={28} tick={axis} tickFormatter={(value: string) => xFormat(String(value))} tickLine={false} tickMargin={8} />
-      <YAxis allowDecimals={false} axisLine={false} tick={axis} tickFormatter={(value: number) => valueFormat(value)} tickLine={false} width={52} />
+      <YAxis allowDecimals={false} axisLine={false} tick={axis} tickFormatter={(value: number) => valueFormat(value)} tickLine={false} width={axisWidth(data, series, stacked, valueFormat)} />
       <Tooltip
         content={(props) => <TooltipBox {...(props as unknown as { active?: boolean; payload?: TooltipEntry[]; label?: string })} labelFormat={xFormat} series={series} valueFormat={valueFormat} />}
         cursor={kind === "bar" ? { fill: "rgba(148, 163, 184, .12)" } : { stroke: CHART_INK.cursor, strokeWidth: 1 }}
@@ -197,7 +216,7 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
     <div className="vizChartCanvas" style={{ height }}>
       <ResponsiveContainer debounce={180} height="100%" initialDimension={{ width: 640, height }} width="100%">
         {kind === "bar" ? (
-          <BarChart barCategoryGap="18%" data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <BarChart barCategoryGap="18%" data={data} margin={CHART_MARGIN}>
             {shared}
             {series.map((item, index) => (
               <Bar
@@ -215,14 +234,14 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
             ))}
           </BarChart>
         ) : kind === "line" ? (
-          <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <LineChart data={data} margin={CHART_MARGIN}>
             {shared}
             {series.map((item) => (
               <Line activeDot={{ r: 4, stroke: CHART_INK.surface, strokeWidth: 2 }} dataKey={item.key} dot={false} isAnimationActive={!reduced} key={item.key} name={item.label} stroke={item.color} strokeWidth={2} type="monotone" />
             ))}
           </LineChart>
         ) : (
-          <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <AreaChart data={data} margin={CHART_MARGIN}>
             <defs>
               {series.map((item) => (
                 <linearGradient id={`${gradientBase}-${item.key}`} key={item.key} x1="0" x2="0" y1="0" y2="1">
@@ -413,7 +432,7 @@ export function Gauge({ ratio, valueText, tone, size = 56, thickness = 6 }: { ra
           strokeDashoffset={Number((1 - clamped).toFixed(4))}
           strokeLinecap="round"
           strokeWidth={thickness}
-          style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: "stroke-dashoffset .3s ease" }}
+          style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: reduced ? undefined : "stroke-dashoffset .3s ease" }}
         />
       </svg>
       <span className="vizGaugeValue">{valueText}</span>

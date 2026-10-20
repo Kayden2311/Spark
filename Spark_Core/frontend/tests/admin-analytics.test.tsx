@@ -102,10 +102,10 @@ describe("analytics: system health", () => {
     const cards = screen.getByRole("list", { name: "Traffic numbers" });
     expect(within(cards).getAllByRole("listitem")).toHaveLength(4);
     expect(await within(cards).findByText(/^Requests, 1h: 60$/u)).toBeInTheDocument();
-    expect(within(cards).getByText(/^Server errors: 5\.00%$/u)).toBeInTheDocument();
+    expect(within(cards).getByText(/^Error rate: 5\.00%$/u)).toBeInTheDocument();
     expect(within(cards).getByText(/^Response p95: 120 ms$/u)).toBeInTheDocument();
     expect(within(cards).getByText(/^Active sessions: 9$/u)).toBeInTheDocument();
-    for (const label of ["Requests, 1h", "Server errors", "Response p95"]) {
+    for (const label of ["Requests, 1h", "Error rate", "Response p95"]) {
       expect(cardNamed(cards, label).querySelector(".admTrendCardSpark")).not.toBeNull();
     }
     expect(cardNamed(cards, "Active sessions").querySelector(".admTrendCardSpark")).toBeNull();

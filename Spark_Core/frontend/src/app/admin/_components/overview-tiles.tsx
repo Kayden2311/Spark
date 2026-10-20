@@ -61,7 +61,7 @@ export function adminTrendCards({ roles, activity, mrr }: { roles: readonly stri
         href: "/admin/users",
       },
       {
-        label: "Posts, comments",
+        label: "Posts & comments",
         value: valueOf(activity, (data) => formatCount(data.current.posts + data.current.comments)),
         dot: SERIES.posts.color,
         color: SERIES.posts.color,
@@ -139,6 +139,7 @@ export function NeedsAttentionTile({ roles, overview, error, onRetry }: { roles:
   const waiting = rows.reduce((total, row) => total + row.count, 0);
   return (
     <ChartCard
+      className="admNeedsAttention"
       height={120}
       error={error}
       loading={!overview && !error}

@@ -59,9 +59,14 @@
 /* ---------- Chart cards ---------- */
 .vizChartCard { overflow: visible; }
 .vizChartHead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; padding: 16px 20px 0; }
+/* The title takes the row and the tools keep to the right, also when a narrow card wraps them below. */
+.vizChartTitle { flex: 1 1 160px; min-width: 0; }
+/* In a narrow card the subtitle keeps the full width and the tools drop to their own row on the right. */
+.vizChartCard { container-type: inline-size; }
+@container (max-width: 400px) { .vizChartTitle { flex-basis: 100%; } }
 .vizChartTitle h2 { margin: 0; color: var(--viz-ink); font-size: var(--viz-text-md); font-weight: 600; letter-spacing: -.005em; }
 .vizChartTitle p { margin: 2px 0 0; color: var(--viz-subtle); font-size: var(--viz-text-xs); }
-.vizChartTools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vizChartTools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .vizChartLegendRow { padding: 10px 20px 0; }
 .vizChartBody { padding: 12px 16px 16px 8px; }
 .vizChartBody > .vizError { margin: 0 8px; }

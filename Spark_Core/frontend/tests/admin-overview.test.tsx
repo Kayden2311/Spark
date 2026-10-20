@@ -91,7 +91,7 @@ describe("overview dashboard", () => {
     expect(within(cards).getAllByRole("listitem")).toHaveLength(4);
     expect(await within(cards).findByText(/^Avg\. daily users: 42, \+100% vs previous period, improving$/u)).toBeInTheDocument();
     expect(within(cards).getByText(/^New sign-ups: 12, \+100% vs previous period/u)).toBeInTheDocument();
-    expect(within(cards).getByText(/^Posts, comments: 50, \+100% vs previous period/u)).toBeInTheDocument();
+    expect(within(cards).getByText(/^Posts & comments: 50, \+100% vs previous period/u)).toBeInTheDocument();
     expect(await within(cards).findByText(/^MRR: \$129\.00, \+29% vs previous period, improving$/u)).toBeInTheDocument();
     expect(requests.some((url) => url.includes("/admin/billing/mrr"))).toBe(true);
   });

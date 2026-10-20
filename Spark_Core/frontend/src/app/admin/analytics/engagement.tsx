@@ -66,7 +66,7 @@ export function EngagementPanel() {
         </Tile>
         <Tile span={4}>
           <ChartCard
-            actions={<Segmented label="Rank communities by" onChange={setRank} options={[{ value: "activity", label: "Activity" }, { value: "growth", label: "Members" }]} value={rank} />}
+            actions={<Segmented label="Rank communities by" onChange={setRank} options={[{ value: "activity", label: "Activity" }, { value: "growth", label: "New members" }]} value={rank} />}
             empty={top.data?.items.length === 0}
             emptyText="No community activity in this period."
             error={top.error}

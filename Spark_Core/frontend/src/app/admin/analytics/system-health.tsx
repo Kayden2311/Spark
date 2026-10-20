@@ -86,7 +86,7 @@ function trafficCards(data: SystemHealth | null, failed: boolean, window: number
       series: buckets.map((point) => point.requests),
     },
     {
-      label: "Server errors",
+      label: "Error rate",
       value: value(() => formatPercent(errorRate, 2)),
       dot: VIZ.orange,
       color: VIZ.orange,

@@ -72,7 +72,7 @@ function communityCards({ roles, overview, overviewError, stats, activity, repor
     const current = activity.data?.current;
     const previous = activity.data?.previous;
     items.push({
-      label: "Posts, comments",
+      label: "Posts & comments",
       value: valueOf(activity, (value) => formatCount(value.current.posts + value.current.comments)),
       dot: SERIES.posts.color,
       color: SERIES.posts.color,

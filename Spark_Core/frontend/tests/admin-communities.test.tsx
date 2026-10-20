@@ -131,7 +131,7 @@ describe("communities dashboard", () => {
     // No live-community history: the current count, the new-community change, and no sparkline.
     expect(await within(cards).findByText(/^Live communities: 12, \+50% new communities vs previous period, improving$/u)).toBeInTheDocument();
     expect(await within(cards).findByText(/^New members: 10, −50% vs previous period, worsening$/u)).toBeInTheDocument();
-    expect(await within(cards).findByText(/^Posts, comments: 50, \+100% vs previous period, improving$/u)).toBeInTheDocument();
+    expect(await within(cards).findByText(/^Posts & comments: 50, \+100% vs previous period, improving$/u)).toBeInTheDocument();
     expect(await within(cards).findByText(/^Open reports: 4, needs attention$/u)).toBeInTheDocument();
     const items = within(cards).getAllByRole("listitem");
     expect(items[0]!.querySelector(".admTrendCardSpark")).toBeNull();
@@ -180,7 +180,7 @@ describe("communities dashboard", () => {
     const cards = screen.getByRole("list", { name: "Community numbers" });
     expect(await within(cards).findByText(/^Live communities: 12/u)).toBeInTheDocument();
     expect(within(cards).getAllByRole("listitem")).toHaveLength(2);
-    expect(within(cards).queryByText(/^Posts, comments/u)).not.toBeInTheDocument();
+    expect(within(cards).queryByText(/^Posts & comments/u)).not.toBeInTheDocument();
     expect(within(cards).queryByText(/^Open reports/u)).not.toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "Health mix" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Flagged communities" })).toBeInTheDocument();
