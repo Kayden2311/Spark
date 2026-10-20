@@ -3,26 +3,26 @@
    token values match the admin console's so both surfaces render charts identically. */
 
 :root {
-  --viz-ink: #0f172a;
+  --viz-ink: #17233d;
   --viz-text: #1e293b;
-  --viz-muted: #475569;
+  --viz-muted: #53627a;
   --viz-subtle: #64748b;
   --viz-faint: #94a3b8;
-  --viz-line: #e2e8f0;
-  --viz-line-soft: #edf1f6;
+  --viz-line: #dce5f1;
+  --viz-line-soft: #edf2f8;
   --viz-line-strong: #cbd5e1;
   --viz-surface: #ffffff;
   --viz-surface-alt: #f8fafc;
-  --viz-hover: #f4f6fa;
+  --viz-hover: #f3f6fb;
   --viz-blue: #2563eb;
-  --viz-blue-dark: #1d4ed8;
+  --viz-blue-dark: #174bb8;
   --viz-blue-soft: #eef4ff;
   --viz-ring: 0 0 0 2px #ffffff, 0 0 0 4px rgba(37, 99, 235, .55);
-  --viz-radius: 10px;
+  --viz-radius: 12px;
   --viz-radius-sm: 8px;
-  --viz-shadow-xs: 0 1px 2px rgba(15, 23, 42, .05);
-  --viz-shadow-md: 0 4px 12px -2px rgba(15, 23, 42, .08), 0 2px 4px -2px rgba(15, 23, 42, .06);
-  --viz-shadow-lg: 0 18px 40px -12px rgba(15, 23, 42, .25);
+  --viz-shadow-xs: 0 1px 2px rgba(23, 35, 61, .04), 0 6px 16px -10px rgba(37, 99, 235, .14);
+  --viz-shadow-md: 0 2px 4px -2px rgba(23, 35, 61, .06), 0 14px 30px -16px rgba(37, 99, 235, .26);
+  --viz-shadow-lg: 0 24px 50px -22px rgba(7, 20, 37, .45);
   --viz-text-3xs: 11px;
   --viz-text-2xs: 12px;
   --viz-text-xs: 13px;
@@ -87,21 +87,33 @@
 .vizChartTable tbody tr:last-child > * { border-bottom: 0; }
 
 /* Donut */
-.vizDonut { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 28px; padding: 4px 8px 0 12px; }
-.vizDonutCanvas { position: relative; z-index: 0; flex: none; }
-/* The center label sits above the ring but below the tooltip, which recharts also positions
-   absolutely inside this same canvas — without this, the label paints over the tooltip on hover. */
-.vizDonutCanvas .recharts-tooltip-wrapper { z-index: 2; }
-.vizDonutCenter { position: absolute; z-index: 1; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
-.vizDonutCenter strong { color: var(--viz-ink); font-size: var(--viz-text-2xl); font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.vizDonutCenter span { color: var(--viz-subtle); font-size: var(--viz-text-2xs); }
-.vizDonutActiveSlice { filter: drop-shadow(0 2px 6px rgba(15, 23, 42, .25)); }
-.vizDonutLegend { display: grid; flex: 1; gap: 2px; min-width: 200px; margin: 0; padding: 0; list-style: none; }
-.vizDonutLegend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 42px; align-items: center; gap: 10px; padding: 4px 6px; border-radius: 6px; font-size: var(--viz-text-xs); cursor: pointer; transition: background .15s ease; }
+.vizDonut { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 32px; padding: 4px 8px 0 12px; }
+.vizDonutCanvas { position: relative; flex: none; }
+/* A soft blue halo under the ring and a faint disc in the hole: depth without touching the data marks. */
+.vizDonutCanvas::before { content: ""; position: absolute; inset: 6%; border-radius: 50%; background: radial-gradient(circle, rgba(37, 99, 235, .07) 0, rgba(37, 99, 235, .03) 52%, rgba(37, 99, 235, 0) 70%); pointer-events: none; }
+.vizDonutCanvas .recharts-wrapper svg { overflow: visible; filter: drop-shadow(0 10px 18px rgba(37, 99, 235, .16)); }
+/* Segments scale from the chart's center (the SVG viewport center), so the hovered one lifts outward. */
+.vizDonutSlice { transform-box: view-box; transform-origin: center; cursor: pointer; transition: transform .25s cubic-bezier(.2, .8, .2, 1), opacity .2s ease; }
+.vizDonutSliceActive { transform: scale(1.06); }
+.vizDonutSliceDim { opacity: .3; }
+.vizDonutCenter { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 1px; padding: 0 24%; text-align: center; pointer-events: none; }
+.vizDonutCenter strong { color: var(--viz-ink); font-size: var(--viz-text-2xl); font-weight: 700; line-height: 1.15; letter-spacing: -.03em; font-variant-numeric: tabular-nums; animation: viz-donut-swap .22s ease both; }
+.vizDonutCenter span { max-width: 100%; overflow: hidden; color: var(--viz-subtle); font-size: var(--viz-text-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.vizDonutCenter .vizDonutCenterKey { display: inline-flex; align-items: center; gap: 5px; color: var(--viz-muted); font-weight: 600; }
+.vizDonutCenterKey i { width: 7px; height: 7px; flex: none; border-radius: 50%; }
+@keyframes viz-donut-swap { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.vizDonutLegend { display: grid; flex: 1; gap: 2px; min-width: 220px; max-width: 440px; margin: 0; padding: 0; list-style: none; }
+.vizDonutLegend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 38px; align-items: center; gap: 4px 10px; padding: 7px 8px; border-radius: 8px; font-size: var(--viz-text-xs); cursor: default; transition: background .15s ease; }
 .vizDonutLegend li:hover, .vizDonutLegendActive { background: var(--viz-hover); }
 .vizDonutName { overflow: hidden; color: var(--viz-text); text-overflow: ellipsis; white-space: nowrap; }
 .vizDonutLegend strong { color: var(--viz-ink); font-variant-numeric: tabular-nums; }
 .vizDonutShare { color: var(--viz-subtle); text-align: right; font-variant-numeric: tabular-nums; }
+.vizDonutBar { grid-column: 2 / -1; height: 4px; overflow: hidden; border-radius: 2px; background: var(--viz-line-soft); }
+.vizDonutBar span { display: block; width: var(--viz-bar-w); height: 100%; border-radius: 2px; animation: viz-bar-grow .6s var(--viz-bar-delay, 0ms) cubic-bezier(.16, 1, .3, 1) both; transform-origin: left; }
+@media (prefers-reduced-motion: reduce) {
+  .vizDonutSlice, .vizDonutCenter strong, .vizDonutBar span { transition: none; animation: none; }
+  .vizDonutSliceActive { transform: none; }
+}
 
 /* Ranked bars */
 .vizBarList { display: grid; gap: 2px; margin: 0; padding: 4px; list-style: none; }

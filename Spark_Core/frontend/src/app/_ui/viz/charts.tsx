@@ -265,9 +265,12 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
   );
 }
 
-/** Part-to-whole for a handful of categories. More than six categories should fold into "Other". A
- * hovered slice (from the ring itself or its legend row) pops out slightly and dims the rest, with the
- * tooltip layered above the center label so the two never visually collide. */
+/**
+ * Part-to-whole for a handful of categories (six at most; fold the rest into "Other"). A thin ring of
+ * rounded segments separated by surface gaps. Hovering a segment or its legend row lifts that segment,
+ * dims the rest, and swaps the center readout to its value and share — the readout replaces a floating
+ * tooltip, so nothing can cover it. Legend rows carry a share bar, so the ring is never the only read.
+ */
 export function DonutChart({ data, centerValue, centerLabel, valueFormat = formatCount, height = 220 }: {
   data: Array<{ label: string; value: number; color: string }>;
   centerValue: string;
@@ -278,56 +281,46 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
   const reduced = useReducedMotion();
   const [active, setActive] = useState<number | null>(null);
   const total = data.reduce((sum, item) => sum + item.value, 0);
+  const share = (value: number) => (total ? Math.round((value / total) * 100) : 0);
+  const focus = active === null ? null : data[active];
+  const sliceClass = (index: number) => `vizDonutSlice${active === index ? " vizDonutSliceActive" : active === null ? "" : " vizDonutSliceDim"}`;
   return (
-    <div className="vizDonut">
+    <div className="vizDonut" onMouseLeave={() => setActive(null)}>
       <div className="vizDonutCanvas" style={{ height, width: height }}>
         <ResponsiveContainer height="100%" initialDimension={{ width: height, height }} width="100%">
           <PieChart>
             <Pie
+              animationDuration={700}
+              cornerRadius={5}
               data={data}
               dataKey="value"
-              innerRadius="68%"
+              endAngle={-270}
+              innerRadius="72%"
               isAnimationActive={!reduced}
               nameKey="label"
               onMouseEnter={(_, index) => setActive(index)}
-              onMouseLeave={() => setActive(null)}
-              outerRadius="98%"
-              paddingAngle={data.length > 1 ? 1.5 : 0}
-              stroke={CHART_INK.surface}
-              strokeWidth={2}
+              outerRadius="92%"
+              paddingAngle={data.length > 1 ? 3 : 0}
+              startAngle={90}
+              stroke="none"
             >
-              {data.map((item, index) => (
-                <Cell
-                  className={active === index ? "vizDonutActiveSlice" : undefined}
-                  fill={item.color}
-                  fillOpacity={active === null || active === index ? 1 : 0.4}
-                  key={item.label}
-                  stroke={active === index ? "#0f172a" : CHART_INK.surface}
-                  strokeWidth={active === index ? 2.5 : 2}
-                  style={{ transition: "fill-opacity .15s ease, stroke .15s ease", cursor: "pointer" }}
-                />
-              ))}
+              {data.map((item, index) => <Cell className={sliceClass(index)} fill={item.color} key={item.label} />)}
             </Pie>
-            <Tooltip
-              content={(props) => {
-                const entry = (props as unknown as { active?: boolean; payload?: TooltipEntry[] }).payload?.[0];
-                if (!(props as { active?: boolean }).active || !entry) return null;
-                const value = Number(entry.value ?? 0);
-                return (
-                  <div className="vizTooltip">
-                    <p className="vizTooltipLabel">{String(entry.name)}</p>
-                    <p className="vizTooltipValue">{valueFormat(value)} · {total ? Math.round((value / total) * 100) : 0}%</p>
-                  </div>
-                );
-              }}
-              isAnimationActive={false}
-              wrapperStyle={{ zIndex: 20 }}
-            />
           </PieChart>
         </ResponsiveContainer>
-        <div className="vizDonutCenter">
-          <strong>{centerValue}</strong>
-          <span>{centerLabel}</span>
+        <div aria-live="polite" className="vizDonutCenter">
+          {focus ? (
+            <>
+              <span className="vizDonutCenterKey"><i aria-hidden="true" style={{ background: focus.color }} />{focus.label}</span>
+              <strong>{valueFormat(focus.value)}</strong>
+              <span>{share(focus.value)}% of {valueFormat(total)}</span>
+            </>
+          ) : (
+            <>
+              <strong>{centerValue}</strong>
+              <span>{centerLabel}</span>
+            </>
+          )}
         </div>
       </div>
       <ul className="vizDonutLegend">
@@ -336,12 +329,14 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
             className={active === index ? "vizDonutLegendActive" : undefined}
             key={item.label}
             onMouseEnter={() => setActive(index)}
-            onMouseLeave={() => setActive(null)}
           >
             <span aria-hidden="true" className="vizLegendSwatch" style={{ background: item.color }} />
             <span className="vizDonutName">{item.label}</span>
             <strong>{valueFormat(item.value)}</strong>
-            <span className="vizDonutShare">{total ? Math.round((item.value / total) * 100) : 0}%</span>
+            <span className="vizDonutShare">{share(item.value)}%</span>
+            <span aria-hidden="true" className="vizDonutBar">
+              <span style={{ "--viz-bar-w": `${Math.max(2, share(item.value))}%`, "--viz-bar-delay": `${Math.min(index, 8) * 60}ms`, background: item.color } as CSSProperties} />
+            </span>
           </li>
         ))}
       </ul>

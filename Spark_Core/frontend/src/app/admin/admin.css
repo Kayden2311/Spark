@@ -6,29 +6,33 @@
 .admCentered,
 .admToasts {
   --adm-font-stack: var(--adm-font, "Plus Jakarta Sans"), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --adm-ink: #0f172a;
+  /* Ink, lines and blues follow the landing page (globals.css --landing-*), so the console reads as
+     the same product: same navy ink, same cool hairlines, same blue and its pressed shade. */
+  --adm-ink: #17233d;
   --adm-text: #1e293b;
-  --adm-muted: #475569;
+  --adm-muted: #53627a;
   --adm-subtle: #64748b;
   --adm-faint: #94a3b8;
-  --adm-line: #e2e8f0;
-  --adm-line-soft: #edf1f6;
+  --adm-line: #dce5f1;
+  --adm-line-soft: #edf2f8;
   --adm-line-strong: #cbd5e1;
   --adm-canvas: #f8fafc;
   --adm-surface: #ffffff;
   --adm-surface-alt: #f8fafc;
-  --adm-hover: #f4f6fa;
+  --adm-hover: #f3f6fb;
   --adm-blue: #2563eb;
-  --adm-blue-dark: #1d4ed8;
+  --adm-blue-dark: #174bb8;
   --adm-blue-soft: #eef4ff;
   --adm-navy: #071425;
   --adm-red: #dc2626;
   --adm-red-dark: #b91c1c;
   --adm-ring: 0 0 0 2px #ffffff, 0 0 0 4px rgba(37, 99, 235, .55);
-  --adm-shadow-xs: 0 1px 2px rgba(15, 23, 42, .05);
-  --adm-shadow-md: 0 4px 12px -2px rgba(15, 23, 42, .08), 0 2px 4px -2px rgba(15, 23, 42, .06);
-  --adm-shadow-lg: 0 18px 40px -12px rgba(15, 23, 42, .25);
-  --adm-radius: 10px;
+  --adm-shadow-xs: 0 1px 2px rgba(23, 35, 61, .04), 0 6px 16px -10px rgba(37, 99, 235, .14);
+  --adm-shadow-md: 0 2px 4px -2px rgba(23, 35, 61, .06), 0 14px 30px -16px rgba(37, 99, 235, .26);
+  --adm-shadow-lg: 0 24px 50px -22px rgba(7, 20, 37, .45);
+  --adm-glow: 0 8px 20px rgba(37, 99, 235, .2);
+  --adm-glow-strong: 0 10px 25px rgba(37, 99, 235, .28);
+  --adm-radius: 12px;
   --adm-radius-sm: 8px;
   --adm-sidebar: 248px;
   --adm-rail: #0b1730;
@@ -60,11 +64,22 @@
 }
 
 .admShell {
+  position: relative;
   display: grid;
   grid-template-columns: var(--adm-sidebar) minmax(0, 1fr);
   min-height: 100dvh;
   background: var(--adm-canvas);
+  isolation: isolate;
 }
+
+/* The landing page's breathing dot field and blue glows, kept quieter here so data stays the focus.
+   Cards stay opaque on purpose: the field shows in the gutters, never through text. */
+/* z-index -1 inside the shell's isolated stacking context: above the canvas color, below everything
+   else, without making .admBody a stacking context (its drawers and dialogs must still cover the sidebar). */
+.admBackdrop { position: fixed; z-index: -1; inset: 0; width: 100vw; height: 100vh; pointer-events: none; opacity: .85; }
+.admGlow { position: fixed; z-index: -1; inset: 0; pointer-events: none; background:
+  radial-gradient(42rem 42rem at 92% -8%, rgba(37, 99, 235, .13), rgba(37, 99, 235, 0) 70%),
+  radial-gradient(36rem 36rem at 18% 112%, rgba(124, 58, 237, .07), rgba(124, 58, 237, 0) 70%); }
 
 .admShell *:focus-visible { outline: none; box-shadow: var(--adm-ring); }
 .admShell svg { width: 16px; height: 16px; flex: none; }
@@ -142,7 +157,7 @@
 .admMain { width: 100%; max-width: 1320px; margin: 0 auto; padding: 28px 28px 64px; outline: none; }
 .admPageHeader { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; margin-bottom: 20px; }
 .admPageHeading { min-width: 0; max-width: 720px; }
-.admPageHeader h1 { margin: 0; color: var(--adm-ink); font-size: var(--adm-text-3xl); font-weight: 700; line-height: 1.3; letter-spacing: -.015em; }
+.admPageHeader h1 { margin: 0; color: var(--adm-ink); font-size: var(--adm-text-3xl); font-weight: 700; line-height: 1.25; letter-spacing: -.03em; }
 .admPageLead { margin: 4px 0 0; color: var(--adm-muted); font-size: var(--adm-text-sm); }
 .admPageMeta { margin-top: 8px; }
 .admPageActions { display: flex; gap: 8px; }
@@ -151,8 +166,9 @@
 .admBtn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--adm-radius-sm); font: inherit; font-size: var(--adm-text-xs); font-weight: 600; line-height: 1; text-decoration: none; white-space: nowrap; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease; }
 .admBtn:disabled { opacity: .45; cursor: not-allowed; }
 .admBtnSm { height: 30px; padding: 0 11px; font-size: var(--adm-text-xs); }
-.admBtnPrimary { color: #fff; background: var(--adm-blue); box-shadow: var(--adm-shadow-xs), inset 0 1px 0 rgba(255, 255, 255, .12); }
-.admBtnPrimary:hover:not(:disabled) { background: var(--adm-blue-dark); }
+.admBtnPrimary { color: #fff; background: var(--adm-blue); box-shadow: var(--adm-glow), inset 0 1px 0 rgba(255, 255, 255, .14); transition: background .18s ease, box-shadow .18s ease, transform .18s ease; }
+.admBtnPrimary:hover:not(:disabled) { background: var(--adm-blue-dark); box-shadow: var(--adm-glow-strong), inset 0 1px 0 rgba(255, 255, 255, .14); transform: translateY(-1px); }
+.admBtnPrimary:active:not(:disabled) { transform: translateY(0); }
 .admBtnSecondary { border-color: var(--adm-line-strong); color: var(--adm-ink); background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); }
 .admBtnSecondary:hover:not(:disabled) { background: var(--adm-hover); }
 .admBtnDanger { color: #fff; background: var(--adm-red); box-shadow: var(--adm-shadow-xs); }
@@ -488,6 +504,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .admShell *, .admShell *::before, .admShell *::after, .admOverlay *, .admDrawerOverlay * { transition: none !important; animation: none !important; }
+  .admKpiCardLink:hover, .admBtnPrimary:hover:not(:disabled) { transform: none !important; }
 }
 
 /* ======================================================================
@@ -506,10 +523,9 @@
 
 /* KPI cards */
 .admKpiCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 0 0 16px; padding: 0; list-style: none; }
-.admKpiCard { display: grid; gap: 12px; height: 100%; padding: 16px 18px; border: 1px solid var(--adm-line); border-radius: 12px; color: inherit; text-decoration: none; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); transition: box-shadow .15s ease; }
+.admKpiCard { display: grid; gap: 12px; height: 100%; padding: 16px 18px; border: 1px solid var(--adm-line); border-radius: 12px; color: inherit; text-decoration: none; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease; }
 .admKpiCard:hover { box-shadow: var(--adm-shadow-md); }
-.admKpiCardLink { transition: border-color .15s ease, box-shadow .15s ease; }
-.admKpiCardLink:hover { border-color: #c7d4ea; box-shadow: var(--adm-shadow-md); }
+.admKpiCardLink:hover { border-color: #bfd3fb; box-shadow: var(--adm-shadow-md); transform: translateY(-2px); }
 .admKpiCardTop { display: flex; align-items: center; gap: 10px; }
 .admKpiChip { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border-radius: 8px; color: var(--tone-fg); background: var(--tone-bg); }
 .admKpiChip svg { width: 16px; height: 16px; }

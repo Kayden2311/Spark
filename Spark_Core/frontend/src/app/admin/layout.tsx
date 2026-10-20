@@ -16,6 +16,7 @@ import { adminFont } from "./_lib/font";
 import { ROLE_LABELS } from "./_lib/format";
 import type { Overview, PlatformRole } from "./_lib/types";
 import { SparkLogo as SparkMark } from "../brand/spark-logo";
+import { SignalParticles } from "../signal-particles";
 
 const SECTION_ICONS: Record<SectionId, ReactNode> = {
   overview: <OverviewIcon />,
@@ -231,6 +232,8 @@ function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className={`admShell ${adminFont.variable}`} data-rail={collapsed ? "collapsed" : "expanded"}>
+      <SignalParticles className="admBackdrop" />
+      <div aria-hidden="true" className="admGlow" />
       <a className="admSkip" href="#admin-main">Skip to content</a>
       <Sidebar collapsed={collapsed} onNavigate={() => setMenuOpen(false)} onToggle={toggleRail} open={menuOpen} />
       {menuOpen && <button aria-label="Close navigation" className="admScrim" onClick={() => setMenuOpen(false)} type="button" />}
