@@ -1,9 +1,10 @@
 "use client";
 
-import { useId, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { formatCount, shortDate } from "./format";
+import { motionClass, useReducedMotion } from "./motion";
 import { CHART_INK, sequential } from "./palette";
 
 export { Sparkline } from "./sparkline";
@@ -20,19 +21,6 @@ export interface TableSpec {
 }
 
 type Formatter = (value: number) => string;
-
-const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-
-function subscribeReducedMotion(onChange: () => void): () => void {
-  if (typeof window.matchMedia !== "function") return () => undefined;
-  const query = window.matchMedia(REDUCED_MOTION);
-  query.addEventListener?.("change", onChange);
-  return () => query.removeEventListener?.("change", onChange);
-}
-
-function useReducedMotion(): boolean {
-  return useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia?.(REDUCED_MOTION).matches ?? false, () => false);
-}
 
 /** Series key: a swatch plus the name, so identity never relies on color alone. */
 export function ChartLegend({ series }: { series: Array<{ label: string; color: string; value?: ReactNode }> }) {
@@ -345,13 +333,15 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
 }
 
 /** Ranked magnitudes as horizontal bars, labelled with names and values (no legend needed). Bars grow
- * in on mount and highlight on hover, with the exact value and its share of the total as a tooltip. */
+ * in from the left on mount (unless reduced motion is set) and highlight on hover, with the exact value
+ * and its share of the total as a tooltip. */
 export function BarList({ items, color, valueFormat = formatCount, emptyText = "Nothing to rank yet." }: {
   items: Array<{ key: string; label: ReactNode; value: number; hint?: ReactNode }>;
   color: string;
   valueFormat?: Formatter;
   emptyText?: string;
 }) {
+  const reduced = useReducedMotion();
   const max = Math.max(1, ...items.map((item) => item.value));
   const total = items.reduce((sum, item) => sum + item.value, 0);
   if (items.length === 0) return <p className="vizChartEmpty">{emptyText}</p>;
@@ -370,7 +360,7 @@ export function BarList({ items, color, valueFormat = formatCount, emptyText = "
               <span className="vizBarListPercent">{share}%</span>
             </span>
             <span aria-hidden="true" className="vizBarListTrack">
-              <span style={{ "--viz-bar-w": `${Math.max(2, (item.value / max) * 100)}%`, "--viz-bar-delay": `${Math.min(index, 8) * 45}ms`, background: color } as CSSProperties} />
+              <span className={reduced ? undefined : "admGrowIn"} style={{ "--viz-bar-w": `${Math.max(2, (item.value / max) * 100)}%`, "--viz-bar-delay": `${Math.min(index, 8) * 45}ms`, background: color } as CSSProperties} />
             </span>
           </li>
         );
@@ -418,10 +408,56 @@ export function Gauge({ ratio, valueText, tone, size = 56, thickness = 6 }: { ra
   );
 }
 
+const GAUGE = { cx: 60, cy: 60, r: 48 } as const;
+const TARGET_TONES = { within: "#047857", over: "#dc2626" } as const;
+
+/** The half arc from the left end to `ratio` (0–1) of the way round to the right end, over the top. */
+function halfArc(ratio: number): string {
+  const angle = Math.PI * (1 - ratio);
+  const x = GAUGE.cx + GAUGE.r * Math.cos(angle);
+  const y = GAUGE.cy - GAUGE.r * Math.sin(angle);
+  return `M${GAUGE.cx - GAUGE.r} ${GAUGE.cy} A${GAUGE.r} ${GAUGE.r} 0 0 1 ${Number(x.toFixed(2))} ${Number(y.toFixed(2))}`;
+}
+
+/** "Within target", or how many times over it, to one decimal ("2× over target", "1.5× over target"). */
+export function targetStatus(value: number, target: number): { over: boolean; text: string } {
+  if (target <= 0) return value > 0 ? { over: true, text: "Over target" } : { over: false, text: "Within target" };
+  if (value <= target) return { over: false, text: "Within target" };
+  return { over: true, text: `${Number((value / target).toFixed(1))}× over target` };
+}
+
+/**
+ * A half-arc gauge for a count measured against a target (e.g. the report backlog). The arc is full at
+ * twice the target; green with "Within target" up to the target, red with "N× over target" beyond it, so
+ * the status is always stated in words as well as colour. The fill draws in unless reduced motion is set.
+ */
+export function TargetGauge({ value, target, label, valueFormat = formatCount }: { value: number; target: number; label: string; valueFormat?: Formatter }) {
+  const reduced = useReducedMotion();
+  const status = targetStatus(value, target);
+  const ratio = target > 0 ? Math.max(0, Math.min(value / (2 * target), 1)) : value > 0 ? 1 : 0;
+  const tone = status.over ? TARGET_TONES.over : TARGET_TONES.within;
+  return (
+    <div aria-label={`${label}: ${valueFormat(value)}, ${status.text}`} className={`vizTargetGauge${status.over ? " vizTargetGaugeOver" : ""}`} role="img">
+      <svg aria-hidden="true" className="vizTargetGaugeArc" viewBox="0 0 120 68">
+        <path className="vizTargetGaugeTrack" d={halfArc(1)} fill="none" stroke={CHART_INK.grid} strokeLinecap="round" strokeWidth={10} />
+        {ratio > 0 && (
+          <path className={`vizTargetGaugeFill${motionClass(reduced, "admDrawIn")}`} d={halfArc(ratio)} fill="none" pathLength={1} stroke={tone} strokeLinecap="round" strokeWidth={10} />
+        )}
+      </svg>
+      <div className="vizTargetGaugeText">
+        <strong>{valueFormat(value)}</strong>
+        <span style={{ color: tone }}>{status.text}</span>
+        <span className="vizTargetGaugeTarget">Target {valueFormat(target)}</span>
+      </div>
+    </div>
+  );
+}
+
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 /** Day-of-week by hour-of-day activity (UTC), shaded with one hue from light to dark. */
 export function Heatmap({ cells }: { cells: Array<{ dow: number; hour: number; events: number }> }) {
+  const reduced = useReducedMotion();
   const [hover, setHover] = useState<{ dow: number; hour: number; events: number } | null>(null);
   const grid = new Map(cells.map((cell) => [`${cell.dow}:${cell.hour}`, cell.events]));
   const max = Math.max(1, ...cells.map((cell) => cell.events));
@@ -444,10 +480,10 @@ export function Heatmap({ cells }: { cells: Array<{ dow: number; hour: number; e
               const shade = sequential(events / max);
               return (
                 <span
-                  className="vizHeatmapCell"
+                  className={`vizHeatmapCell${motionClass(reduced, "admFadeIn")}`}
                   key={hour}
                   onMouseEnter={() => setHover({ dow: index + 1, hour, events })}
-                  style={{ background: shade.background }}
+                  style={{ background: shade.background, "--viz-fade-delay": `${index * 70}ms` } as CSSProperties}
                   title={describe({ dow: index + 1, hour, events })}
                 />
               );

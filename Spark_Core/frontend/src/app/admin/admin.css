@@ -32,6 +32,7 @@
   --adm-shadow-lg: 0 24px 50px -22px rgba(7, 20, 37, .45);
   --adm-glow: 0 8px 20px rgba(37, 99, 235, .2);
   --adm-glow-strong: 0 10px 25px rgba(37, 99, 235, .28);
+  --adm-shadow-lift: 0 4px 8px -4px rgba(23, 35, 61, .08), 0 20px 36px -18px rgba(37, 99, 235, .38);
   --adm-radius: 12px;
   --adm-radius-sm: 8px;
   --adm-sidebar: 248px;
@@ -44,8 +45,9 @@
   --adm-rail-faint: #6d7fa3;
   --adm-green: #047857;
   --adm-green-soft: #ecfdf3;
-  /* Type scale. Every font-size in this file is one of these ten steps — never a bare px value — so
-     text sizes read as a deliberate hierarchy instead of accumulated one-off nudges. */
+  /* Type scale. Every font-size in this file is one of these eleven steps — never a bare px value — so
+     text sizes read as a deliberate hierarchy instead of accumulated one-off nudges. 5xl is the trend
+     card's display value. */
   --adm-text-3xs: 11px;
   --adm-text-2xs: 12px;
   --adm-text-xs: 13px;
@@ -56,6 +58,7 @@
   --adm-text-2xl: 20px;
   --adm-text-3xl: 22px;
   --adm-text-4xl: 26px;
+  --adm-text-5xl: 30px;
   font-family: var(--adm-font-stack);
   font-size: var(--adm-text-sm);
   line-height: 1.5;
@@ -568,8 +571,52 @@
 .admNotice strong { color: #172554; }
 .admNotice p { margin: 2px 0 0; color: #31437a; }
 
+/* Trend cards: the compact key-number row above a dashboard's bento grid (about 96 px tall). */
+.admTrendCards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 0 0 16px; padding: 0; list-style: none; }
+.admTrendCards > li { min-width: 0; }
+.admTrendCard { position: relative; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; height: 100%; min-height: 96px; padding: 14px 16px; border: 1px solid var(--adm-line); border-radius: var(--adm-radius); color: inherit; text-decoration: none; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); transition: box-shadow .18s ease, border-color .18s ease; }
+.admTrendCard:hover { box-shadow: var(--adm-shadow-lift); }
+.admTrendCardLink:hover { border-color: #bfd3fb; }
+.admTrendCardText { display: grid; align-content: start; align-self: stretch; gap: 4px; min-width: 0; }
+.admTrendCardLabel { display: flex; align-items: center; gap: 7px; overflow: hidden; color: var(--adm-muted); font-size: var(--adm-text-3xs); font-weight: 700; letter-spacing: .07em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.admTrendCardDot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+.admTrendCardValue { color: var(--adm-ink); font-size: var(--adm-text-5xl); font-weight: 650; line-height: 1.1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.admTrendCardValue-bad { color: var(--adm-red-dark); }
+.admTrendCardSkeleton { width: 96px; height: 33px; }
+.admTrendChip { justify-self: start; padding: 1px 7px; border-radius: 999px; color: var(--adm-muted); font-size: var(--adm-text-2xs); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; background: #f1f4f9; }
+.admTrendChip[data-tone="good"] { color: var(--adm-green); background: var(--adm-green-soft); }
+.admTrendChip[data-tone="bad"] { color: var(--adm-red-dark); background: #fef2f2; }
+.admTrendCardSpark { display: flex; flex: none; }
+.admTrendCardSpark .vizSpark { width: 92px; height: 40px; }
+
+/* Bento: a 12-column grid of tiles; each tile sets its own span. Dense packing closes the gap left by a
+   tile that is not rendered (for example, a read the viewer's role cannot open). */
+.admBento { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 16px; margin: 0 0 16px; }
+.admTile { position: relative; display: flex; min-width: 0; flex-direction: column; grid-column: span var(--tile-span, 4); grid-row: span var(--tile-rows, 1); border-radius: var(--adm-radius); }
+.admTile:empty { display: none; }
+.admTile > * { flex: 1; }
+.admTile > .admCard, .admTile > .vizCard { margin: 0; }
+.admTile > .admCard:hover, .admTile > .vizCard:hover { box-shadow: var(--adm-shadow-lift); }
+
+/* Hover lift for trend cards and tiles: 2 px up and one light sheen sweep. The stronger shadow above is
+   not motion, so it stays for everyone; the movement is scoped to no-preference. */
+@keyframes adm-sheen { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+@media (prefers-reduced-motion: no-preference) {
+  .admLift { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+  .admLift::after { content: ""; position: absolute; z-index: 1; inset: 0; border-radius: inherit; background: linear-gradient(105deg, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, .55) 50%, rgba(255, 255, 255, 0) 62%) no-repeat; background-size: 250% 100%; background-position: 160% 0; pointer-events: none; }
+  .admLift:hover, .admLift:focus-visible, .admLift:focus-within { transform: translateY(-2px); }
+  .admLift:hover::after { animation: adm-sheen .8s ease-out 1; }
+}
+
 @media (max-width: 1100px) {
   .admGrid2, .admGrid3 { grid-template-columns: minmax(0, 1fr); }
+  .admTrendCards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admTile { grid-column: span var(--tile-span-md, 6); }
+}
+@media (max-width: 640px) {
+  .admTrendCards { grid-template-columns: minmax(0, 1fr); }
+  .admBento { grid-template-columns: minmax(0, 1fr); }
+  .admTile { grid-column: 1 / -1; grid-row: auto; }
 }
 @media (max-width: 720px) {
   .admKpiCards { grid-template-columns: minmax(0, 1fr); }

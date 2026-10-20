@@ -1,8 +1,16 @@
+"use client";
+
 import { useId } from "react";
 
-/** Tiny trend line for KPI cards. Decorative: the card states the number and change in text. */
+import { useReducedMotion } from "./motion";
+
+/**
+ * Tiny trend line for KPI and trend cards. Decorative: the card states the number and change in text.
+ * The line draws in and its area fades in on mount, unless reduced motion is set.
+ */
 export function Sparkline({ values, color, height = 36 }: { values: number[]; color: string; height?: number }) {
   const gradient = useId().replace(/:/gu, "");
+  const reduced = useReducedMotion();
   if (values.length < 2) return <svg aria-hidden="true" className="vizSpark" height={height} />;
   const width = 120;
   const max = Math.max(...values);
@@ -18,8 +26,18 @@ export function Sparkline({ values, color, height = 36 }: { values: number[]; co
           <stop offset="100%" stopColor={color} stopOpacity={0} />
         </linearGradient>
       </defs>
-      <path d={`${line} L${width} ${height} L0 ${height} Z`} fill={`url(#${gradient})`} />
-      <path d={line} fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      <path className={reduced ? undefined : "admFadeIn"} d={`${line} L${width} ${height} L0 ${height} Z`} fill={`url(#${gradient})`} />
+      <path
+        className={reduced ? undefined : "admDrawIn"}
+        d={line}
+        fill="none"
+        pathLength={1}
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
+      />
     </svg>
   );
 }
