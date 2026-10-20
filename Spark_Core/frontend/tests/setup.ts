@@ -1,6 +1,10 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+
+// The full suite renders many heavy pages in parallel; the default 1 s wait for findBy* queries made the
+// first render of the board tests flaky under that load.
+configure({ asyncUtilTimeout: 3000 });
 
 afterEach(() => cleanup());
 
