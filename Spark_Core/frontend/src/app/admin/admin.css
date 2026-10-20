@@ -598,12 +598,20 @@
 .admTile > .admCard, .admTile > .vizCard { margin: 0; }
 .admTile > .admCard:hover, .admTile > .vizCard:hover { box-shadow: var(--adm-shadow-lift); }
 
-/* Overview: audience stickiness gauge. `.admShell svg` sizes icons to 16 px, so the ring is sized here. */
-.admStickiness { display: grid; justify-items: center; gap: 10px; padding: 4px 0 2px; }
-.admStickiness .vizGauge svg { width: 100%; height: 100%; }
-.admStickiness .vizGaugeValue { font-size: var(--adm-text-3xl); font-weight: 650; letter-spacing: -.02em; }
-.admStickiness p { margin: 0; color: var(--adm-muted); font-size: var(--adm-text-xs); text-align: center; }
-.admStickiness strong { color: var(--adm-ink); font-variant-numeric: tabular-nums; }
+/* Big gauge tiles (Overview stickiness, Communities flagged share). `.admShell svg` sizes icons to 16 px,
+   so the ring is sized here. */
+.admStickiness, .admGaugeTile { display: grid; justify-items: center; gap: 10px; padding: 4px 0 2px; }
+.admStickiness .vizGauge svg, .admGaugeTile .vizGauge svg { width: 100%; height: 100%; }
+.admStickiness .vizGaugeValue, .admGaugeTile .vizGaugeValue { font-size: var(--adm-text-3xl); font-weight: 650; letter-spacing: -.02em; }
+.admStickiness p, .admGaugeTile p { margin: 0; color: var(--adm-muted); font-size: var(--adm-text-xs); text-align: center; }
+.admStickiness strong, .admGaugeTile strong { color: var(--adm-ink); font-variant-numeric: tabular-nums; }
+
+/* Communities: health mix donut with the "needs a decision" call-out under it. */
+.admHealthMix { display: grid; align-content: space-between; gap: 16px; height: 100%; }
+.admHealthCallout { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 0; padding: 10px 12px; border: 1px solid var(--adm-line); border-radius: 8px; color: var(--adm-muted); font-size: var(--adm-text-xs); background: var(--adm-surface-alt); }
+.admHealthCallout[data-tone="bad"] { border-color: #f1c0c0; color: var(--adm-red-dark); background: #fef3f2; }
+.admHealthCallout strong { font-weight: 700; }
+.admHealthCallout a { color: var(--adm-blue-dark); font-weight: 600; white-space: nowrap; }
 
 /* Hover lift for trend cards and tiles: 2 px up and one light sheen sweep. The stronger shadow above is
    not motion, so it stays for everyone; the movement is scoped to no-preference. */

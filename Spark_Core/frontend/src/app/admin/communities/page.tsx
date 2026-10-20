@@ -1,32 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
 import { AVAILABLE, COPY, RESULT, healthOf } from "../_components/community-actions";
-import { ChartCard, DonutChart } from "../_components/charts";
-import { AlertIcon, CommunityIcon, SearchIcon, TrendIcon } from "../_components/icons";
+import { SearchIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { Sparkline } from "../_components/sparkline";
-import { Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RowMenu, SkeletonRows } from "../_components/ui";
+import { Badge, EmptyState, ErrorBanner, FilterTabs, LoadMore, NoAccess, PageHeader, Panel, RangePicker, RowMenu, SkeletonRows } from "../_components/ui";
 import { adminApi, query, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
 import { COMMUNITY_STATE, formatCount, humanize } from "../_lib/format";
 import { VIZ } from "../_lib/palette";
+import { useRange } from "../_lib/range";
 import type { Community, CommunityAction, CommunityState } from "../_lib/types";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useDebounced, useQueryState } from "../_lib/use-query-state";
-
-/** One categorical color per health label, so the donut and its legend never rely on position alone. */
-const HEALTH_COLOR: Record<string, string> = {
-  Growing: VIZ.aqua,
-  Steady: VIZ.blue,
-  Slowing: VIZ.yellow,
-  "Needs review": VIZ.magenta,
-  Quiet: VIZ.violet,
-  Archived: "#94a3b8",
-};
+import { COMMUNITY_RANGES, CommunityInsights } from "./community-insights";
 
 type Filter = "all" | CommunityState | "flagged";
 const FILTERS: readonly Filter[] = ["all", "active", "featured", "frozen", "archived", "flagged"];
@@ -39,14 +30,9 @@ function CommunitiesList() {
   const settledSearch = useDebounced(search.trim());
   const list = usePagedList<Community>(allowed ? `/communities${query({ status: filter === "all" ? undefined : filter, search: settledSearch })}` : null);
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
-  const healthMix = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const community of list.items) {
-      const label = healthOf(community).label;
-      counts.set(label, (counts.get(label) ?? 0) + 1);
-    }
-    return [...counts.entries()].map(([label, value]) => ({ label, value, color: HEALTH_COLOR[label] ?? "#94a3b8" }));
-  }, [list.items]);
+  const [range, setRange] = useRange(30, COMMUNITY_RANGES);
+  // Bumped after an action, so the health counts above the table follow the change.
+  const [statsVersion, setStatsVersion] = useState(0);
 
   if (!allowed) return <NoAccess />;
 
@@ -68,6 +54,7 @@ function CommunitiesList() {
         // Drop the row when it no longer matches the active filter.
         list.update(community.id, (item) => (filter === "all" || filter === "flagged" || filter === state ? { ...item, state } : null));
         refreshOverview();
+        setStatsVersion((value) => value + 1);
         notify(copy.done);
       },
     });
@@ -75,28 +62,13 @@ function CommunitiesList() {
 
   return (
     <>
-      <PageHeader title="Communities" description="Spot communities that are growing, slowing down or drawing reports, and act on them." />
-
-      <KpiCards
-        items={[
-          { label: "Live communities", value: overview ? formatCount(overview.communities.active) : undefined, hint: overview ? `${overview.communities.featured} featured` : undefined, icon: <CommunityIcon />, tone: "blue" },
-          { label: "Need review", value: overview ? formatCount(overview.communities.flagged) : undefined, hint: "Have open reports", icon: <AlertIcon />, tone: "red", href: "/admin/communities?status=flagged" },
-          { label: "Frozen", value: overview ? formatCount(overview.communities.frozen) : undefined, hint: "Read-only until unfrozen", icon: <TrendIcon />, tone: "amber", href: "/admin/communities?status=frozen" },
-        ]}
-        label="Community summary"
+      <PageHeader
+        actions={<RangePicker onChange={setRange} options={COMMUNITY_RANGES} value={range} />}
+        description="Spot communities that are growing, slowing down or drawing reports, and act on them."
+        title="Communities"
       />
 
-      <ChartCard
-        empty={healthMix.length === 0}
-        emptyText="No communities loaded yet."
-        height={200}
-        loading={list.loading}
-        subtitle={`${filter === "all" ? "Every" : filter === "flagged" ? "Flagged" : COMMUNITY_STATE[filter as CommunityState]?.label ?? filter} community loaded, by health`}
-        table={{ columns: ["Health", "Communities"], rows: healthMix.map((item) => [item.label, item.value]) }}
-        title="Health mix"
-      >
-        <DonutChart centerLabel="loaded" centerValue={formatCount(list.items.length)} data={healthMix} height={180} />
-      </ChartCard>
+      <CommunityInsights range={range} refreshKey={statsVersion} />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       <Panel

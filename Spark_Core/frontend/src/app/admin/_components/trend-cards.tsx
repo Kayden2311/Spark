@@ -13,8 +13,11 @@ export interface TrendCardItem {
   value: string | undefined;
   /** Colour of the dot before the label (the metric's series colour). */
   dot: string;
-  /** Against the previous period. No chip when there is no previous period. */
-  change?: { current: number; previous: number | null; higherIsBetter?: boolean };
+  /**
+   * Against the previous period. No chip when there is no previous period. `subject` names what changed
+   * when it is not the card's value (e.g. "new" communities under a live count), on the chip and in words.
+   */
+  change?: { current: number; previous: number | null; higherIsBetter?: boolean; subject?: { short: string; long: string } };
   /** Drawn only with two or more points; metrics without reliable history pass none. */
   series?: number[];
   /** Sparkline colour. */
@@ -32,10 +35,17 @@ function chipOf(change: TrendCardItem["change"]): { text: string; label: string;
   if (!change) return null;
   const described = describeChange(change.current, change.previous);
   if (described.direction === "none") return null;
-  if (described.direction === "flat") return { text: described.text, label: described.text, tone: "flat" };
+  // "New this period" reads badly with a subject, so the chip counts what is new instead.
+  if (change.subject && change.previous === 0 && change.current > 0) {
+    const good = change.higherIsBetter ?? true;
+    return { text: `${ARROWS.up} ${change.current} ${change.subject.short}`, label: `${change.current} ${change.subject.long}, none in the previous period, ${good ? "improving" : "worsening"}`, tone: good ? "good" : "bad" };
+  }
+  const short = change.subject ? ` ${change.subject.short}` : "";
+  const long = change.subject ? ` ${change.subject.long}` : "";
+  if (described.direction === "flat") return { text: `${described.text}${short}`, label: `${described.text}${long}`, tone: "flat" };
   const good = (described.direction === "up") === (change.higherIsBetter ?? true);
   // The judgement is stated in words (sr sentence and title), so it never rests on the chip colour alone.
-  return { text: `${ARROWS[described.direction]} ${described.text}`, label: `${described.text} vs previous period, ${good ? "improving" : "worsening"}`, tone: good ? "good" : "bad" };
+  return { text: `${ARROWS[described.direction]} ${described.text}${short}`, label: `${described.text}${long} vs previous period, ${good ? "improving" : "worsening"}`, tone: good ? "good" : "bad" };
 }
 
 /**

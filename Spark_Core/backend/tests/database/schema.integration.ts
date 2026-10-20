@@ -275,6 +275,8 @@ async function insightReport(fixture: InsightFixture, community: string, reason:
   await owner.query(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,reason_code,status,created_at,resolved_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [fixture.tenant, community, fixture.reporter, post, reason, status, createdAt, resolvedAt]);
 }
+/** One case of frontend/tests/fixtures/community-health.json (shared with the frontend healthOf test). */
+interface HealthCase { name: string; recentPosts: number; earlierPosts: number; openReports: number; resolvedReports: number; archived: boolean; expected: string }
 // Mirrors healthOf in frontend/src/app/admin/_components/community-actions.ts.
 function badgeOf(archived: boolean, openReports: number, weeks: number[]) {
   if (archived) return "archived";
@@ -1191,34 +1193,28 @@ describe("Local PostgreSQL schema", () => {
       return Object.fromEntries(Object.entries(rows[0] as Record<string, string>).map(([key, value]) => [key, Number(value)]));
     };
     const before = await counts();
-    // [name, posts 2 weeks ago (recent half), posts 5 weeks ago (earlier half), open reports, archived, expected badge]
-    const cases: Array<[string, number, number, number, boolean, string]> = [
-      ["New and busy", 3, 0, 0, false, "growing"],
-      ["Exactly 1.25x", 5, 4, 0, false, "growing"],
-      ["Flat", 4, 4, 0, false, "steady"],
-      ["Exactly 0.6x", 3, 5, 0, false, "slowing"],
-      ["Gone quiet", 0, 3, 0, false, "quiet"],
-      ["Rising but reported", 5, 1, 1, false, "needs_review"],
-      ["Archived with reports", 2, 0, 2, true, "archived"],
-    ];
+    // Shared with the frontend healthOf test, so the SQL counts and the table badges agree on the same cases.
+    const { cases } = JSON.parse(await readFile(resolve("../frontend/tests/fixtures/community-health.json"), "utf8")) as { cases: HealthCase[] };
     const ids: string[] = [];
-    for (const [name, recent, earlier, reports, archived] of cases) {
+    for (const { name, recentPosts, earlierPosts, openReports, resolvedReports, archived } of cases) {
       const community = await insightCommunity(fixture, name);
-      if (recent) await weeklyPosts(fixture, community, 2, recent);
-      if (earlier) await weeklyPosts(fixture, community, 5, earlier);
-      for (let index = 0; index < reports; index++) await insightReport(fixture, community, "spam");
+      if (recentPosts) await weeklyPosts(fixture, community, 2, recentPosts);
+      if (earlierPosts) await weeklyPosts(fixture, community, 5, earlierPosts);
+      for (let index = 0; index < openReports; index++) await insightReport(fixture, community, "spam");
+      // A resolved report does not make a community need review.
+      for (let index = 0; index < resolvedReports; index++) await insightReport(fixture, community, "spam", "resolved", new Date(), new Date());
       if (archived) await owner.query(`UPDATE ${table("communities")} SET archived_at=now() WHERE id=$1`, [community]);
       ids.push(community);
     }
-    // A resolved report does not make a community need review.
-    await insightReport(fixture, ids[2]!, "spam", "resolved", new Date(), new Date());
     const after = await counts();
-    expect(Object.fromEntries(Object.keys(after).map((key) => [key, after[key]! - before[key]!]))).toEqual({ growing: 2, steady: 1, slowing: 1, quiet: 1, needs_review: 1, archived: 1 });
+    const expected = Object.fromEntries(Object.keys(after).map((key) => [key, cases.filter((entry) => entry.expected === key).length]));
+    expect(expected).toEqual({ growing: 2, steady: 1, slowing: 1, quiet: 1, needs_review: 1, archived: 1 });
+    expect(Object.fromEntries(Object.keys(after).map((key) => [key, after[key]! - before[key]!]))).toEqual(expected);
     // The per-community health read feeds the table badges; classifying its output gives the same answers.
     const health = (await asSession(fixture.communityModerator, `SELECT community_id,weekly_activity,open_reports FROM ${fn("staff_community_health")}($1::uuid[])`, [ids])).rows;
-    const archivedIds = new Set([ids[6]]);
+    const archivedIds = new Set(ids.filter((_, index) => cases[index]!.archived));
     const badges = new Map(health.map((row) => [row.community_id as string, badgeOf(archivedIds.has(row.community_id), Number(row.open_reports), (row.weekly_activity as string[]).map(Number))]));
-    expect(ids.map((id) => badges.get(id))).toEqual(cases.map((entry) => entry[5]));
+    expect(ids.map((id) => badges.get(id))).toEqual(cases.map((entry) => entry.expected));
   });
   it("returns one community row per day including empty days", async () => {
     const fixture = await insightFixture();

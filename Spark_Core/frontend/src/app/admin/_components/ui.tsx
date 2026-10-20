@@ -350,8 +350,9 @@ export function Segmented<T extends string | number>({ label, options, value, on
 export const RANGES = [7, 30, 90, 180] as const;
 export type RangeDays = (typeof RANGES)[number];
 
-export function RangePicker({ value, onChange }: { value: RangeDays; onChange: (value: RangeDays) => void }) {
-  return <Segmented label="Date range" onChange={onChange} options={RANGES.map((days) => ({ value: days, label: `${days}d` }))} value={value} />;
+/** `options` narrows the choices for pages whose reads accept fewer ranges (pair it with the same list in `useRange`). */
+export function RangePicker({ value, onChange, options = RANGES }: { value: RangeDays; onChange: (value: RangeDays) => void; options?: readonly RangeDays[] }) {
+  return <Segmented label="Date range" onChange={onChange} options={options.map((days) => ({ value: days, label: `${days}d` }))} value={value} />;
 }
 
 /** Icon chip plus a big number: one focused fact, used in place of a dense list row. */
