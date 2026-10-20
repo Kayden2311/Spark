@@ -112,7 +112,10 @@ const preview = (body: string, comment?: string) => json({
 const triage = {
   "GET /api/v1/admin/reports/r1/preview": preview("50x guaranteed returns"),
   "GET /api/v1/admin/reports/r2/preview": preview("Another body"),
-  "GET /api/v1/admin/reports/stats": json({ days: 30, opened: 4, closed: 2, backlog: 2, medianHoursToClose: 5.5 }),
+  "GET /api/v1/admin/reports/stats": json({
+    days: 30, opened: 4, closed: 2, backlog: 2, medianHoursToClose: 5.5, reasons: [{ reason: "spam", count: 2 }], topCommunities: [{ id: "c1", name: "Hyperdrive Founders", slug: "hyperdrive", count: 2 }],
+    series: [{ day: "2026-10-19", opened: 2, closed: 1, backlog: 3, medianHoursToClose: 4 }, { day: "2026-10-20", opened: 2, closed: 1, backlog: 2, medianHoursToClose: 7 }],
+  }),
   "GET /api/v1/admin/reports/r1/context": json({ author: { id: "u9", displayName: "Sam Spammer", status: "active", joinedAt: "2026-09-01T00:00:00.000Z", reportsAgainst: 4, hiddenContent: 1 }, communityOpenReports: 3, reporterReportsFiled: 1 }),
 };
 
