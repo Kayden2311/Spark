@@ -5,7 +5,8 @@ import { useEffect } from "react";
 
 import { useAdmin } from "../_components/admin-context";
 import { Bento, Tile } from "../_components/bento";
-import { BarList, ChartCard, DonutChart, Gauge, Heatmap } from "../_components/charts";
+import { BarList, ChartCard, DonutChart, Gauge } from "../_components/charts";
+import { EngagementHeatmapCard } from "../_components/engagement-heatmap";
 import { valueOf, type Read } from "../_components/overview-tiles";
 import { TrendCards, type TrendCardItem } from "../_components/trend-cards";
 import type { RangeDays } from "../_components/ui";
@@ -30,8 +31,6 @@ export const HEALTH_GROUPS: ReadonlyArray<{ key: keyof CommunityHealthCounts; sq
   { key: "needsReview", sqlKey: "needs_review", label: "Needs review", words: "need review", color: VIZ.magenta },
   { key: "archived", sqlKey: "archived", label: "Archived", words: "archived", color: "#94a3b8" },
 ];
-
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function plural(count: number, one: string, many: string): string {
   return `${formatCount(count)} ${count === 1 ? one : many}`;
@@ -162,55 +161,37 @@ function MostActiveTile({ top, range }: { top: Read<{ items: TopCommunity[] }>; 
   );
 }
 
-function MemberActivityTile({ engagement }: { engagement: Read<EngagementResponse> }) {
-  const cells = engagement.data?.cells ?? [];
-  return (
-    <ChartCard
-      empty={engagement.data !== null && cells.every((cell) => cell.events === 0)}
-      emptyText="No sign-ins, posts or comments in this period yet."
-      error={engagement.error}
-      height={240}
-      loading={engagement.loading && !engagement.data}
-      onRetry={engagement.reload}
-      subtitle="Sign-ins, posts and comments by weekday and hour (UTC). Use it to plan moderation cover."
-      table={{
-        columns: ["Day", ...Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}h`)],
-        rows: DAYS.map((day, index) => [day, ...Array.from({ length: 24 }, (_, hour) => cells.find((cell) => cell.dow === index + 1 && cell.hour === hour)?.events ?? 0)]),
-      }}
-      title="When members are active"
-    >
-      <Heatmap cells={cells} />
-    </ChartCard>
-  );
+/** Live communities (every one not archived) with open reports, from the same server health counts as the donut. */
+export function flaggedShare(health: CommunityHealthCounts): { flagged: number; live: number; ratio: number } {
+  const live = HEALTH_GROUPS.reduce((sum, group) => sum + health[group.key], 0) - health.archived;
+  return { flagged: health.needsReview, live, ratio: live > 0 ? health.needsReview / live : 0 };
 }
 
-/** Communities with open reports, as a share of live communities. Both counts come from `/admin/overview`. */
-function FlaggedShareTile({ overview, error, onRetry }: { overview: Overview | null; error: string | null; onRetry: () => void }) {
-  const counts = overview?.communities;
-  const ratio = counts && counts.active > 0 ? Math.min(1, counts.flagged / counts.active) : 0;
+/** Rendered only while loading, on error, or when there is at least one live community. */
+function FlaggedShareTile({ stats }: { stats: Read<CommunityStats> }) {
+  const share = stats.data ? flaggedShare(stats.data.health) : null;
+  if (share && share.live === 0) return null;
   // One decimal below 10%, so a small but real share does not read as "0%".
-  const percent = `${(ratio * 100).toFixed(ratio > 0 && ratio < 0.1 ? 1 : 0)}%`;
+  const percent = share ? `${(share.ratio * 100).toFixed(share.ratio > 0 && share.ratio < 0.1 ? 1 : 0)}%` : "";
   return (
     <ChartCard
-      empty={counts !== undefined && counts.active === 0}
-      emptyText="No live communities yet."
-      error={overview ? null : error}
+      error={stats.error}
       height={150}
-      loading={!overview && !error}
-      onRetry={onRetry}
-      subtitle="Communities with open reports, out of the live ones"
-      table={counts ? { columns: ["Measure", "Value"], rows: [["Communities with open reports", counts.flagged], ["Live communities", counts.active], ["Share", percent]] } : undefined}
+      loading={stats.loading && !stats.data}
+      onRetry={stats.reload}
+      subtitle="Live communities with open reports"
+      table={share ? { columns: ["Measure", "Value"], rows: [["Live communities with open reports", share.flagged], ["Live communities", share.live], ["Share", percent]] } : undefined}
       title="Flagged communities"
     >
-      {counts && (
+      {share && (
         <div className="admGaugeTile">
-          <div aria-label={`${percent} of live communities have open reports: ${formatCount(counts.flagged)} of ${formatCount(counts.active)}`} role="img">
-            <Gauge ratio={ratio} size={128} thickness={12} tone={VIZ.orange} valueText={percent} />
+          <div aria-label={`${percent}: ${formatCount(share.flagged)} of ${formatCount(share.live)} live communities have open reports`} role="img">
+            <Gauge ratio={share.ratio} size={128} thickness={12} tone={VIZ.orange} valueText={percent} />
           </div>
           <p aria-hidden="true">
-            <strong>{formatCount(counts.flagged)}</strong> flagged · <strong>{formatCount(counts.active)}</strong> live
+            <strong>{formatCount(share.flagged)}</strong> of <strong>{formatCount(share.live)}</strong> live communities
           </p>
-          {counts.flagged > 0 && <Link className="admBtn admBtnSecondary admBtnSm" href="/admin/communities?status=flagged">Review flagged</Link>}
+          {share.flagged > 0 && <Link className="admBtn admBtnSecondary admBtnSm" href="/admin/communities?status=flagged">Review flagged</Link>}
         </div>
       )}
     </ChartCard>
@@ -222,7 +203,7 @@ function FlaggedShareTile({ overview, error, onRetry }: { overview: Overview | n
  * only when the viewer's role can open the section that owns it, and each tile loads on its own.
  */
 export function CommunityInsights({ range, refreshKey = 0 }: { range: RangeDays; refreshKey?: number }) {
-  const { roles, overview, overviewError, refreshOverview } = useAdmin();
+  const { roles, overview, overviewError } = useAdmin();
   const analytics = canAccess(roles, "analytics");
   const reports = canAccess(roles, "reports");
 
@@ -238,13 +219,14 @@ export function CommunityInsights({ range, refreshKey = 0 }: { range: RangeDays;
     if (refreshKey > 0) reloadStats();
   }, [refreshKey, reloadStats]);
 
+  const showFlagged = !stats.data || flaggedShare(stats.data.health).live > 0;
   const cards = communityCards({ roles, overview, overviewError, stats, activity, reportStats });
 
   return (
     <>
       <TrendCards items={cards} label="Community numbers" />
       <Bento label="Community charts">
-        <Tile rowSpan={analytics ? 2 : 1} span={analytics ? 6 : 8}>
+        <Tile rowSpan={analytics && showFlagged ? 2 : 1} span={analytics ? 6 : showFlagged ? 8 : 12}>
           <HealthMixTile stats={stats} />
         </Tile>
         {analytics && (
@@ -252,12 +234,14 @@ export function CommunityInsights({ range, refreshKey = 0 }: { range: RangeDays;
             <MostActiveTile range={range} top={top} />
           </Tile>
         )}
-        <Tile span={analytics ? 6 : 4}>
-          <FlaggedShareTile error={overviewError} onRetry={refreshOverview} overview={overview} />
-        </Tile>
+        {showFlagged && (
+          <Tile span={analytics ? 6 : 4}>
+            <FlaggedShareTile stats={stats} />
+          </Tile>
+        )}
         {analytics && (
           <Tile span={12}>
-            <MemberActivityTile engagement={engagement} />
+            <EngagementHeatmapCard engagement={engagement} subtitle="Sign-ins, posts and comments by weekday and hour (UTC). Use it to plan moderation cover." />
           </Tile>
         )}
       </Bento>

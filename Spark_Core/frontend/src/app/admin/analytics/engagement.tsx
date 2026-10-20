@@ -3,7 +3,8 @@
 import Link from "next/link";
 
 import { Bento, Tile } from "../_components/bento";
-import { BarList, ChartCard, ChartLegend, CohortGrid, Heatmap, TrendChart } from "../_components/charts";
+import { BarList, ChartCard, ChartLegend, CohortGrid, TrendChart } from "../_components/charts";
+import { EngagementHeatmapCard } from "../_components/engagement-heatmap";
 import { valueOf } from "../_components/overview-tiles";
 import { TrendCards, type TrendCardItem } from "../_components/trend-cards";
 import { RangePicker, Segmented } from "../_components/ui";
@@ -14,7 +15,6 @@ import type { ActivityResponse, EngagementResponse, RetentionResponse, TopCommun
 import { useAdminData } from "../_lib/use-admin-data";
 import { useQueryState } from "../_lib/use-query-state";
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const RETENTION_WEEKS = 8;
 type Rank = "activity" | "growth";
 type Rows = Array<Record<string, unknown>>;
@@ -62,22 +62,7 @@ export function EngagementPanel() {
 
       <Bento label="Engagement charts">
         <Tile span={8}>
-          <ChartCard
-            empty={engagement.data !== null && engagement.data.cells.every((cell) => cell.events === 0)}
-            emptyText="No sign-ins, posts or comments in this period yet."
-            error={engagement.error}
-            height={240}
-            loading={engagement.loading && !engagement.data}
-            onRetry={engagement.reload}
-            subtitle="Sign-ins, posts and comments by weekday and hour (UTC). Use it to schedule announcements and moderation cover."
-            table={{
-              columns: ["Day", ...Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}h`)],
-              rows: DAYS.map((day, index) => [day, ...Array.from({ length: 24 }, (_, hour) => engagement.data?.cells.find((cell) => cell.dow === index + 1 && cell.hour === hour)?.events ?? 0)]),
-            }}
-            title="When members are active"
-          >
-            <Heatmap cells={engagement.data?.cells ?? []} />
-          </ChartCard>
+          <EngagementHeatmapCard engagement={engagement} subtitle="Sign-ins, posts and comments by weekday and hour (UTC). Use it to schedule announcements and moderation cover." />
         </Tile>
         <Tile span={4}>
           <ChartCard

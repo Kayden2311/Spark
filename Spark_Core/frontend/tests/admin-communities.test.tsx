@@ -29,7 +29,8 @@ import { healthOf } from "../src/app/admin/_components/community-actions";
 import { HEALTH_GROUPS } from "../src/app/admin/communities/community-insights";
 
 const overview = {
-  communities: { active: 12, featured: 1, frozen: 0, archived: 2, flagged: 3 },
+  // flagged also counts archived communities with open reports, so it differs from health.needsReview.
+  communities: { active: 12, featured: 1, frozen: 0, archived: 2, flagged: 5 },
   users: { active: 5, suspended: 1 },
   reports: { open: 4 },
   campaigns: { pending: 0, approved: 0 },
@@ -166,7 +167,8 @@ describe("communities dashboard", () => {
     expect(await within(ranked).findByRole("link", { name: "Makers" })).toHaveAttribute("href", "/admin/communities/c1");
     expect(screen.getByRole("region", { name: "When members are active" })).toBeInTheDocument();
     const flagged = screen.getByRole("region", { name: "Flagged communities" });
-    expect(await within(flagged).findByRole("img", { name: "25% of live communities have open reports: 3 of 12" })).toBeInTheDocument();
+    // From the health counts (3 need review of 15 not archived), not overview flagged / active (5 / 12).
+    expect(await within(flagged).findByRole("img", { name: "20%: 3 of 15 live communities have open reports" })).toBeInTheDocument();
     expect(requests.some((url) => url.includes("/admin/analytics/top-communities?days=30"))).toBe(true);
     expect(requests.some((url) => url.includes("/admin/analytics/engagement?days=30"))).toBe(true);
   });
@@ -220,7 +222,7 @@ describe("communities dashboard", () => {
     await waitFor(() => expect(requests.filter((url) => url.includes("/admin/communities/stats")).length).toBe(2));
   });
 
-  it("shows an empty health mix and flagged share on a platform with no communities", async () => {
+  it("shows an empty health mix and hides the flagged share on a platform with no communities", async () => {
     mockApi({
       ...routes,
       "GET /api/v1/admin/overview": json({ ...overview, communities: { active: 0, featured: 0, frozen: 0, archived: 0, flagged: 0 } }),
@@ -229,7 +231,7 @@ describe("communities dashboard", () => {
     render(<AdminLayout><CommunitiesAdminPage /></AdminLayout>);
     const tile = await screen.findByRole("region", { name: "Health mix" });
     expect(await within(tile).findByText("No communities yet.")).toBeInTheDocument();
-    expect(await within(screen.getByRole("region", { name: "Flagged communities" })).findByText("No live communities yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Flagged communities" })).not.toBeInTheDocument();
   });
 });
 
