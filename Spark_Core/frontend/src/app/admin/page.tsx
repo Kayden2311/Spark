@@ -26,7 +26,7 @@ type Rows = Array<Record<string, unknown>>;
 
 function CommandCenter() {
   const { user } = useAuth();
-  const { roles, overview, refreshOverview } = useAdmin();
+  const { roles, overview, overviewError, refreshOverview } = useAdmin();
   // Each read is requested only when the viewer's role can open the section that owns it.
   const analytics = canAccess(roles, "analytics");
   const reports = canAccess(roles, "reports");
@@ -43,8 +43,13 @@ function CommandCenter() {
 
   const series = activity.data?.series ?? [];
   const flow = reportStats.data?.series ?? [];
-  const cards = analytics || billingAccess ? adminTrendCards({ roles, activity, mrr }) : moderatorTrendCards({ roles, overview, reportStats });
+  const cards = analytics || billingAccess ? adminTrendCards({ roles, activity, mrr }) : moderatorTrendCards({ roles, overview, overviewError, reportStats });
   const activityLoading = activity.loading && !activity.data;
+  // A series with nothing in it shows the tile's plain empty message, not bare axes or zero lines.
+  const quiet = (keys: ReadonlyArray<keyof (typeof series)[number]>) => series.every((point) => keys.every((key) => point[key] === 0));
+  const noActivity = activity.data !== null && quiet(["activeUsers", "signups"]);
+  const noContent = activity.data !== null && quiet(["posts", "comments"]);
+  const noReports = reportStats.data !== null && flow.every((point) => point.opened === 0 && point.closed === 0);
   const median = reportStats.data?.medianHoursToClose;
 
   const refresh = () => {
@@ -71,6 +76,8 @@ function CommandCenter() {
         {analytics && (
           <Tile span={8}>
             <ChartCard
+              empty={noActivity}
+              emptyText="No member activity in this period yet."
               error={activity.error}
               legend={<ChartLegend series={[SERIES.activeUsers, SERIES.signups]} />}
               loading={activityLoading}
@@ -84,11 +91,13 @@ function CommandCenter() {
           </Tile>
         )}
         <Tile span={analytics ? 4 : reports ? 5 : 12}>
-          <NeedsAttentionTile onRetry={refreshOverview} overview={overview} roles={roles} />
+          <NeedsAttentionTile error={overviewError} onRetry={refreshOverview} overview={overview} roles={roles} />
         </Tile>
         {analytics && (
           <Tile span={6}>
             <ChartCard
+              empty={noContent}
+              emptyText="No posts or comments in this period yet."
               error={activity.error}
               legend={<ChartLegend series={[SERIES.posts, SERIES.comments]} />}
               loading={activityLoading}
@@ -104,6 +113,8 @@ function CommandCenter() {
         {reports && (
           <Tile span={analytics ? 6 : 7}>
             <ChartCard
+              empty={noReports}
+              emptyText="No reports opened or closed in this period yet."
               error={reportStats.error}
               legend={<ChartLegend series={[SERIES.reportsOpened, SERIES.reportsClosed]} />}
               loading={reportStats.loading && !reportStats.data}

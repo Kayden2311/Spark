@@ -572,7 +572,7 @@
 .admNotice p { margin: 2px 0 0; color: #31437a; }
 
 /* Trend cards: the compact key-number row above a dashboard's bento grid (about 96 px tall). */
-.admTrendCards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 0 0 16px; padding: 0; list-style: none; }
+.admTrendCards { display: grid; grid-template-columns: repeat(var(--trend-cards, 4), minmax(0, 1fr)); gap: 14px; margin: 0 0 16px; padding: 0; list-style: none; }
 .admTrendCards > li { min-width: 0; }
 .admTrendCard { position: relative; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; height: 100%; min-height: 96px; padding: 14px 16px; border: 1px solid var(--adm-line); border-radius: var(--adm-radius); color: inherit; text-decoration: none; background: var(--adm-surface); box-shadow: var(--adm-shadow-xs); transition: box-shadow .18s ease, border-color .18s ease; }
 .admTrendCard:hover { box-shadow: var(--adm-shadow-lift); }
@@ -617,7 +617,7 @@
 
 @media (max-width: 1100px) {
   .admGrid2, .admGrid3 { grid-template-columns: minmax(0, 1fr); }
-  .admTrendCards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admTrendCards { grid-template-columns: repeat(var(--trend-cards-md, 2), minmax(0, 1fr)); }
   .admTile { grid-column: span var(--tile-span-md, 6); }
 }
 @media (max-width: 640px) {

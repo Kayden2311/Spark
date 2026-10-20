@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -99,5 +102,17 @@ describe("trend cards", () => {
     expect(reduced.container.querySelector(".admTrendCard")).not.toHaveClass("admLift");
     expect(reduced.container.querySelector(".admDrawIn, .admFadeIn, .admGrowIn, .admLift")).toBeNull();
     expect(reduced.container.querySelector("svg.vizSpark path")).not.toBeNull();
+  });
+  it("sizes the row to its card count so one to four cards fill the width", () => {
+    const { container, rerender } = render(<TrendCards items={[base, { ...base, label: "Second" }]} label="Key numbers" />);
+    const list = container.querySelector(".admTrendCards")!;
+    expect(list).toHaveStyle({ "--trend-cards": "2", "--trend-cards-md": "2" });
+    rerender(<TrendCards items={[base]} label="Key numbers" />);
+    expect(container.querySelector(".admTrendCards")).toHaveStyle({ "--trend-cards": "1", "--trend-cards-md": "1" });
+    rerender(<TrendCards items={[1, 2, 3, 4, 5].map((n) => ({ ...base, label: `Card ${n}` }))} label="Key numbers" />);
+    expect(container.querySelector(".admTrendCards")).toHaveStyle({ "--trend-cards": "4", "--trend-cards-md": "2" });
+    const css = readFileSync(path.join(__dirname, "../src/app/admin/admin.css"), "utf8");
+    expect(css).toContain(".admTrendCards { display: grid; grid-template-columns: repeat(var(--trend-cards, 4), minmax(0, 1fr));");
+    expect(css).toContain(".admTrendCards { grid-template-columns: repeat(var(--trend-cards-md, 2), minmax(0, 1fr)); }");
   });
 });

@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { adminApi } from "../_lib/api";
+import { adminApi, messageOf } from "../_lib/api";
 import type { Overview } from "../_lib/types";
 import { CheckIcon, AlertIcon } from "./icons";
 
@@ -15,6 +15,8 @@ interface Toast {
 interface AdminContextValue {
   roles: string[];
   overview: Overview | null;
+  /** Why the last overview read failed (cleared while a retry loads), so tiles can offer Retry. */
+  overviewError: string | null;
   refreshOverview: () => void;
   notify: (message: string, tone?: Toast["tone"]) => void;
 }
@@ -33,12 +35,19 @@ export function AdminProvider({ roles, children }: { roles: string[]; children: 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [failure, setFailure] = useState<{ key: number; message: string } | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    adminApi<Overview>("/overview", { signal: controller.signal }).then(setOverview).catch(() => {
-      // Counts are a convenience; each section loads and reports its own data.
-    });
+    adminApi<Overview>("/overview", { signal: controller.signal })
+      .then((data) => {
+        setOverview(data);
+        setFailure(null);
+      })
+      .catch((error: unknown) => {
+        // The navigation badges treat counts as a convenience; Overview tiles show this error with Retry.
+        if (!controller.signal.aborted) setFailure({ key: refreshKey, message: messageOf(error) });
+      });
     return () => controller.abort();
   }, [refreshKey]);
 
@@ -50,7 +59,8 @@ export function AdminProvider({ roles, children }: { roles: string[]; children: 
     window.setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), 4500);
   }, []);
 
-  const value = useMemo(() => ({ roles, overview, refreshOverview, notify }), [roles, overview, refreshOverview, notify]);
+  const overviewError = failure && failure.key === refreshKey && !overview ? failure.message : null;
+  const value = useMemo(() => ({ roles, overview, overviewError, refreshOverview, notify }), [roles, overview, overviewError, refreshOverview, notify]);
 
   return (
     <AdminContext.Provider value={value}>

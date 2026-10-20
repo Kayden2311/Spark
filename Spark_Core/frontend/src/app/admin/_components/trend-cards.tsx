@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { CSSProperties } from "react";
 
 import { useReducedMotion } from "../../_ui/viz/motion";
 import { describeChange } from "../_lib/format";
@@ -44,8 +45,11 @@ function chipOf(change: TrendCardItem["change"]): { text: string; label: string;
  */
 export function TrendCards({ items, label }: { items: TrendCardItem[]; label: string }) {
   const reduced = useReducedMotion();
+  // The row has as many columns as cards (up to 4; at most 2 on tablets), so 1–3 cards still fill it.
+  const count = Math.max(1, Math.min(4, items.length));
+  const style = { "--trend-cards": count, "--trend-cards-md": Math.min(2, count) } as CSSProperties;
   return (
-    <ul aria-label={label} className="admTrendCards">
+    <ul aria-label={label} className="admTrendCards" style={style}>
       {items.map((item) => {
         const loading = item.value === undefined;
         const chip = loading ? null : chipOf(item.change);

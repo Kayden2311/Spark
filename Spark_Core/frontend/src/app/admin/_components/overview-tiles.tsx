@@ -89,9 +89,10 @@ export function adminTrendCards({ roles, activity, mrr }: { roles: readonly stri
 }
 
 /** Moderators without analytics: their queues. Queue counts have no history, so they carry no sparkline. */
-export function moderatorTrendCards({ roles, overview, reportStats }: { roles: readonly string[]; overview: Overview | null; reportStats: Read<ReportStats> }): TrendCardItem[] {
+export function moderatorTrendCards({ roles, overview, overviewError, reportStats }: { roles: readonly string[]; overview: Overview | null; overviewError: string | null; reportStats: Read<ReportStats> }): TrendCardItem[] {
   const items: TrendCardItem[] = [];
-  const count = (value: number | undefined) => (value === undefined ? undefined : formatCount(value));
+  // A failed overview read reads "–" (the Needs attention tile offers Retry) instead of a skeleton forever.
+  const count = (value: number | undefined) => (value !== undefined ? formatCount(value) : overviewError ? "–" : undefined);
   if (canAccess(roles, "reports")) {
     items.push(
       {
@@ -131,7 +132,7 @@ const QUEUES = [
 ] as const;
 
 /** Every queue the viewer works, as ranked bars that link to the queue. Counts come from `/admin/overview`. */
-export function NeedsAttentionTile({ roles, overview, onRetry }: { roles: readonly string[]; overview: Overview | null; onRetry: () => void }) {
+export function NeedsAttentionTile({ roles, overview, error, onRetry }: { roles: readonly string[]; overview: Overview | null; error: string | null; onRetry: () => void }) {
   const queues = QUEUES.filter((queue) => canAccess(roles, queue.section));
   if (queues.length === 0) return null;
   const rows = overview ? queues.map((queue) => ({ ...queue, count: queue.value(overview) })) : [];
@@ -139,7 +140,8 @@ export function NeedsAttentionTile({ roles, overview, onRetry }: { roles: readon
   return (
     <ChartCard
       height={120}
-      loading={!overview}
+      error={error}
+      loading={!overview && !error}
       onRetry={onRetry}
       subtitle={!overview ? "Loading your queues…" : waiting === 0 ? "All queues are clear." : `${waiting} ${waiting === 1 ? "item is" : "items are"} waiting.`}
       table={{ columns: ["Queue", "Waiting"], rows: rows.map((row) => [row.label, row.count]) }}

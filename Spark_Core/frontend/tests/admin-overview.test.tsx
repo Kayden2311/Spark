@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const router = { replace: vi.fn(), push: vi.fn() };
@@ -138,5 +139,33 @@ describe("overview dashboard", () => {
     expect(await screen.findByText(/^Reports closed: 2$/u)).toBeInTheDocument();
     expect(requests.filter((url) => /\/admin\/(analytics|billing)\//u.test(url))).toEqual([]);
     expect(requests.some((url) => url.includes("/admin/reports/stats?days=30"))).toBe(true);
+  });
+  it("shows an error with Retry when the overview read fails, and Retry refetches it", async () => {
+    auth.platformRoles = ["community_moderator"];
+    let fail = true;
+    mockApi({ "GET /api/v1/admin/overview": () => (fail ? new Response(JSON.stringify({ code: "boom", message: "Overview is down" }), { status: 500 }) : json(overview)()) });
+    render(<AdminLayout><AdminOverviewPage /></AdminLayout>);
+    const tile = await screen.findByRole("region", { name: "Needs attention" });
+    const retry = await within(tile).findByRole("button", { name: /Retry/u });
+    expect(screen.getByText(/^Flagged communities: –$/u)).toBeInTheDocument();
+    const before = requests.filter((url) => url.endsWith("/admin/overview")).length;
+    fail = false;
+    await userEvent.click(retry);
+    expect(await within(tile).findByRole("link", { name: "Flagged communities" })).toBeInTheDocument();
+    expect(requests.filter((url) => url.endsWith("/admin/overview")).length).toBeGreaterThan(before);
+  });
+
+  it("shows the empty message on chart tiles whose series has no activity", async () => {
+    const zero = (day: string) => ({ day, activeUsers: 0, signups: 0, signIns: 0, posts: 0, comments: 0, reportsOpened: 0, reportsClosed: 0 });
+    mockApi({
+      ...adminRoutes,
+      "GET /api/v1/admin/analytics/activity": json({ ...activity, series: [zero("2026-10-19"), zero("2026-10-20")] }),
+      "GET /api/v1/admin/reports/stats": json({ ...reportStats, series: [{ day: "2026-10-20", opened: 0, closed: 0, backlog: 0, medianHoursToClose: null }] }),
+    });
+    render(<AdminLayout><AdminOverviewPage /></AdminLayout>);
+    for (const name of ["Platform activity", "Content created", "Moderation flow"]) {
+      const tile = await screen.findByRole("region", { name });
+      expect(await within(tile).findByText(/^No .+ in this period/u)).toBeInTheDocument();
+    }
   });
 });
