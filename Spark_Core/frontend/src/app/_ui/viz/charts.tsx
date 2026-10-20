@@ -391,9 +391,9 @@ export function InlineBar({ ratio, color, wide, title, className }: { ratio: num
  * center. Always paired by the caller with a text label, so meaning never rests on color alone.
  */
 export function Gauge({ ratio, valueText, tone, size = 56, thickness = 6 }: { ratio: number; valueText: string; tone: string; size?: number; thickness?: number }) {
+  const reduced = useReducedMotion();
   const clamped = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
   const radius = (size - thickness) / 2;
-  const circumference = 2 * Math.PI * radius;
   return (
     <div className="vizGauge" style={{ width: size, height: size }}>
       <svg height={size} viewBox={`0 0 ${size} ${size}`} width={size}>
@@ -403,9 +403,12 @@ export function Gauge({ ratio, valueText, tone, size = 56, thickness = 6 }: { ra
           cy={size / 2}
           fill="none"
           r={radius}
+          className={reduced ? undefined : "admGaugeIn"}
+          // pathLength 1 lets the ring sweep in from empty to its value (CSS keyframe with only a `from`).
+          pathLength={1}
           stroke={tone}
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - clamped)}
+          strokeDasharray={1}
+          strokeDashoffset={Number((1 - clamped).toFixed(4))}
           strokeLinecap="round"
           strokeWidth={thickness}
           style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: "stroke-dashoffset .3s ease" }}

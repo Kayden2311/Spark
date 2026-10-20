@@ -598,6 +598,13 @@
 .admTile > .admCard, .admTile > .vizCard { margin: 0; }
 .admTile > .admCard:hover, .admTile > .vizCard:hover { box-shadow: var(--adm-shadow-lift); }
 
+/* Overview: audience stickiness gauge. `.admShell svg` sizes icons to 16 px, so the ring is sized here. */
+.admStickiness { display: grid; justify-items: center; gap: 10px; padding: 4px 0 2px; }
+.admStickiness .vizGauge svg { width: 100%; height: 100%; }
+.admStickiness .vizGaugeValue { font-size: var(--adm-text-3xl); font-weight: 650; letter-spacing: -.02em; }
+.admStickiness p { margin: 0; color: var(--adm-muted); font-size: var(--adm-text-xs); text-align: center; }
+.admStickiness strong { color: var(--adm-ink); font-variant-numeric: tabular-nums; }
+
 /* Hover lift for trend cards and tiles: 2 px up and one light sheen sweep. The stronger shadow above is
    not motion, so it stays for everyone; the movement is scoped to no-preference. */
 @keyframes adm-sheen { from { background-position: 160% 0; } to { background-position: -60% 0; } }

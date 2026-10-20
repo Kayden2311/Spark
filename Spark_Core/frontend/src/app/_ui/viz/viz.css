@@ -222,7 +222,10 @@
    Every entrance ends within about 1.2 s and none of them blocks pointer input. */
 @keyframes adm-draw-in { from { stroke-dasharray: 1; stroke-dashoffset: 1; } to { stroke-dasharray: 1; stroke-dashoffset: 0; } }
 @keyframes adm-fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* Only a `from`: the ring sweeps from empty to its own dash offset (the value). */
+@keyframes adm-gauge-in { from { stroke-dashoffset: 1; } }
 @media (prefers-reduced-motion: no-preference) {
+  .admGaugeIn { animation: adm-gauge-in .9s cubic-bezier(.33, 1, .68, 1) backwards; }
   .admDrawIn { animation: adm-draw-in .9s cubic-bezier(.33, 1, .68, 1) backwards; }
   .admGrowIn { transform-origin: left; animation: viz-bar-grow .55s var(--viz-bar-delay, 0ms) cubic-bezier(.16, 1, .3, 1) both; }
   .admFadeIn { animation: adm-fade-in .45s var(--viz-fade-delay, 0ms) ease-out both; }

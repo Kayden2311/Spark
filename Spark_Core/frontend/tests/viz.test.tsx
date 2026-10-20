@@ -5,7 +5,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BarList, ChartCard, Heatmap, Sparkline, TargetGauge } from "../src/app/_ui/viz";
+import { BarList, ChartCard, Gauge, Heatmap, Sparkline, TargetGauge } from "../src/app/_ui/viz";
 
 function mockReducedMotion(reduce: boolean) {
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -135,6 +135,25 @@ describe("shared viz module", () => {
     expect(still.container.querySelector(".admDrawIn, .admGrowIn, .admFadeIn")).toBeNull();
     expect(still.container.querySelector(".vizTargetGaugeFill")).not.toBeNull();
     expect(still.container.querySelector(".vizBarListTrack span")).toHaveStyle({ "--viz-bar-w": "100%" });
+  });
+
+  it("Gauge sweeps its ring in to the value only when motion is allowed", () => {
+    mockReducedMotion(false);
+    const animated = render(<Gauge ratio={0.25} tone="#2563eb" valueText="25%" />);
+    const fill = animated.container.querySelectorAll("circle")[1]!;
+    expect(fill).toHaveClass("admGaugeIn");
+    expect(fill).toHaveAttribute("pathLength", "1");
+    expect(fill).toHaveAttribute("stroke-dashoffset", "0.75");
+    animated.unmount();
+
+    mockReducedMotion(true);
+    const still = render(<Gauge ratio={0.25} tone="#2563eb" valueText="25%" />);
+    const stillFill = still.container.querySelectorAll("circle")[1]!;
+    expect(stillFill).not.toHaveClass("admGaugeIn");
+    expect(stillFill).toHaveAttribute("stroke-dashoffset", "0.75");
+    const css = readFileSync(path.join(__dirname, "../src/app/_ui/viz/viz.css"), "utf8");
+    // Scoped inside the no-preference media query (indented), never a top-level rule.
+    expect(css).toMatch(/\n {2}\.admGaugeIn \{ animation: adm-gauge-in /u);
   });
 
   it("Heatmap is one keyboard stop: focus reads the busiest cell and arrow keys move the readout", async () => {
