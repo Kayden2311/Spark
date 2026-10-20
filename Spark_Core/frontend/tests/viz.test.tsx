@@ -84,6 +84,15 @@ describe("shared viz module", () => {
     expect(screen.getByText("Nothing to rank yet.")).toBeInTheDocument();
   });
 
+  it("BarList can leave out the share of the total for values that do not add up", () => {
+    const { container } = render(
+      <BarList color="#2563eb" items={[{ key: "a", label: "Alpha", value: 300 }, { key: "b", label: "Beta", value: 100 }]} share={false} valueFormat={(value) => `${value} ms`} />,
+    );
+    expect(screen.queryByText("75%")).not.toBeInTheDocument();
+    expect(container.querySelector(".vizBarListPercent")).toBeNull();
+    expect(container.querySelector(".vizBarListTip")).toHaveTextContent(/^300 ms$/u);
+  });
+
   it("TargetGauge stays green within target", () => {
     const { container } = render(<TargetGauge label="Report backlog" target={10} value={4} />);
     const gauge = screen.getByRole("img", { name: "Report backlog: 4, Within target" });

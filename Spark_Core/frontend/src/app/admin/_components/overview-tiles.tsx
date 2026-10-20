@@ -19,7 +19,7 @@ export interface Read<T> {
 }
 
 /** A failed read with nothing to show reads "–" instead of a skeleton that never ends. */
-function valueOf<T>(read: Read<T>, format: (data: T) => string): string | undefined {
+export function valueOf<T>(read: Read<T>, format: (data: T) => string): string | undefined {
   if (read.data) return format(read.data);
   return read.error ? "–" : undefined;
 }

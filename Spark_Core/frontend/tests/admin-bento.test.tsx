@@ -70,6 +70,10 @@ describe("bento grid", () => {
     expect(container.querySelector(".admTile")).toHaveClass("admLift");
     unmount();
 
+    const still = render(<Bento label="Tiles"><Tile lift={false}><p>A</p></Tile></Bento>);
+    expect(still.container.querySelector(".admTile")).not.toHaveClass("admLift");
+    still.unmount();
+
     mockReducedMotion(true);
     const reduced = render(<Bento label="Tiles"><Tile><p>A</p></Tile></Bento>);
     expect(reduced.container.querySelector(".admTile")).not.toHaveClass("admLift");

@@ -17,13 +17,14 @@ export function Bento({ children, label }: { children: ReactNode; label: string 
  * One bento cell, usually wrapping a ChartCard. `span` is out of 12 columns on desktop; on tablets a tile
  * takes half the row (or the full row when it spans more than half on desktop) and on phones the full row.
  * A tile with no content renders nothing; one whose child renders nothing is hidden by `.admTile:empty`.
+ * `lift={false}` is for a tile whose own items lift on hover (so the tile does not lift with them).
  */
-export function Tile({ span = 4, rowSpan = 1, children }: { span?: number; rowSpan?: number; children?: ReactNode }) {
+export function Tile({ span = 4, rowSpan = 1, lift = true, children }: { span?: number; rowSpan?: number; lift?: boolean; children?: ReactNode }) {
   const reduced = useReducedMotion();
   if (children === null || children === undefined || children === false) return null;
   const style = { "--tile-span": span, "--tile-rows": rowSpan, "--tile-span-md": span > 6 ? 12 : 6 } as CSSProperties;
   return (
-    <div className={`admTile${reduced ? "" : " admLift"}`} style={style}>
+    <div className={`admTile${reduced || !lift ? "" : " admLift"}`} style={style}>
       {children}
     </div>
   );

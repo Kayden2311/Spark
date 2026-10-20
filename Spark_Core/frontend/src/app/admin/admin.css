@@ -822,3 +822,13 @@
 @media (max-width: 720px) {
   .admMetricTiles { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* System health as bento tiles: the banner and the check list fill their tile, and the checks (and the
+   ranked endpoints) use the bento gap. `.admShell svg` sizes icons to 16 px, so gauge rings are sized here. */
+.admTile > .admStatusBanner, .admTile > .admChecks { margin: 0; }
+.admTile > .admChecks { gap: 16px; }
+.admTile > .admChecks > .admCheck { align-content: start; }
+.admTile > .admChecks > .admCheck:hover { box-shadow: var(--adm-shadow-lift); }
+.admMetricTile .vizGauge svg { width: 100%; height: 100%; }
+.admTile .vizBarListLabel .admRoute { display: flex; }
+

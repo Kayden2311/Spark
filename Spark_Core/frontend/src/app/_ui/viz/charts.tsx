@@ -340,11 +340,13 @@ function isLinkLabel(label: ReactNode): boolean {
 /** Ranked magnitudes as horizontal bars, labelled with names and values (no legend needed). Bars grow
  * in from the left on mount (unless reduced motion is set) and highlight on hover, with the exact value
  * and its share of the total as a tooltip. */
-export function BarList({ items, color, valueFormat = formatCount, emptyText = "Nothing to rank yet." }: {
+export function BarList({ items, color, valueFormat = formatCount, emptyText = "Nothing to rank yet.", share: showShare = true }: {
   items: Array<{ key: string; label: ReactNode; value: number; hint?: ReactNode }>;
   color: string;
   valueFormat?: Formatter;
   emptyText?: string;
+  /** Show each row's share of the total. Off for values that do not add up, such as response times. */
+  share?: boolean;
 }) {
   const reduced = useReducedMotion();
   const max = Math.max(1, ...items.map((item) => item.value));
@@ -364,9 +366,9 @@ export function BarList({ items, color, valueFormat = formatCount, emptyText = "
             </div>
             <span className="vizBarListValue">
               {valueFormat(item.value)}
-              <span className="vizBarListPercent">{share}%</span>
+              {showShare && <span className="vizBarListPercent">{share}%</span>}
             </span>
-            <span aria-hidden="true" className="vizBarListTip">{`${valueFormat(item.value)} · ${share}% of ${valueFormat(total)}`}</span>
+            <span aria-hidden="true" className="vizBarListTip">{showShare ? `${valueFormat(item.value)} · ${share}% of ${valueFormat(total)}` : valueFormat(item.value)}</span>
             <span aria-hidden="true" className="vizBarListTrack">
               <span className={reduced ? undefined : "admGrowIn"} style={{ "--viz-bar-w": `${Math.max(2, (item.value / max) * 100)}%`, "--viz-bar-delay": `${Math.min(index, 8) * 45}ms`, background: color } as CSSProperties} />
             </span>
