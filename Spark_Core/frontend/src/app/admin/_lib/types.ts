@@ -206,12 +206,47 @@ export interface ReportContext {
   reporterReportsFiled: number;
 }
 
+/** GET /admin/reports/stats: queue health for the range, plus the open queue by reason and community. */
 export interface ReportStats {
   days: number;
   opened: number;
   closed: number;
+  /** Open reports right now. */
   backlog: number;
   medianHoursToClose: number | null;
+  /** Every open report, grouped by reason (not just a loaded page). */
+  reasons: Array<{ reason: string; count: number }>;
+  /** The five communities with the most open reports. */
+  topCommunities: Array<{ id: string; name: string; slug: string; count: number }>;
+  /** One point per day of the range: `backlog` is the open count at the end of that day (today: now) and
+   * `medianHoursToClose` covers the reports closed that day (null when none). */
+  series: Array<{ day: string; opened: number; closed: number; backlog: number; medianHoursToClose: number | null }>;
+}
+
+/** Same rules as `healthOf` in community-actions.ts, counted over every community by the server. */
+export interface CommunityHealthCounts {
+  growing: number;
+  steady: number;
+  slowing: number;
+  quiet: number;
+  needsReview: number;
+  archived: number;
+}
+
+export interface CommunityGrowth {
+  newMembers: number;
+  newCommunities: number;
+}
+
+/** GET /admin/communities/stats?days=7|30|90. */
+export interface CommunityStats {
+  days: 7 | 30 | 90;
+  health: CommunityHealthCounts;
+  /** One point per day of the range. `liveCommunities` is null where it cannot be rebuilt exactly. */
+  series: Array<CommunityGrowth & { day: string; liveCommunities: number | null }>;
+  current: CommunityGrowth;
+  /** Totals for the same-length period before the range, for change chips. */
+  previous: CommunityGrowth;
 }
 
 export type SubscriptionStatus = "incomplete" | "trialing" | "active" | "past_due" | "paused" | "cancelled" | "expired";
