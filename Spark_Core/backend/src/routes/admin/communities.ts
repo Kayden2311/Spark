@@ -159,6 +159,36 @@ function stateCondition(filter: CommunityFilter | undefined): SQL | undefined {
   }
 }
 
+const STATS_RANGES = [7, 30, 90] as const;
+const count = { type: "integer", minimum: 0 } as const;
+const growthTotals = { type: "object", properties: { newMembers: count, newCommunities: count } } as const;
+
+interface CommunityDayRow {
+  day: string;
+  new_members: string;
+  new_communities: string;
+  live_communities: string | null;
+}
+
+type CommunityDay = { day: string; newMembers: number; newCommunities: number; liveCommunities: number | null };
+
+function toCommunityDay(row: CommunityDayRow): CommunityDay {
+  return {
+    day: row.day,
+    newMembers: Number(row.new_members),
+    newCommunities: Number(row.new_communities),
+    // NULL while the live count cannot be rebuilt exactly from stored timestamps (see 0022).
+    liveCommunities: row.live_communities === null ? null : Number(row.live_communities),
+  };
+}
+
+function growthOf(points: CommunityDay[]) {
+  return {
+    newMembers: points.reduce((total, point) => total + point.newMembers, 0),
+    newCommunities: points.reduce((total, point) => total + point.newCommunities, 0),
+  };
+}
+
 export function registerCommunityRoutes(app: FastifyInstance, guard: StaffGuard): void {
   app.get<{ Querystring: { status?: CommunityFilter; search?: string; cursor?: string; limit?: number } }>(
     "/api/v1/admin/communities",
@@ -200,6 +230,79 @@ export function registerCommunityRoutes(app: FastifyInstance, guard: StaffGuard)
         page.rows.map((row) => toCommunity(row, page.health.get(row.id) ?? EMPTY_HEALTH)),
         limit,
       );
+    },
+  );
+
+  // Health counts over every community (the table badges' rules) and daily growth for the range, with
+  // totals for the same-length period before it. Registered before /:id; a static segment wins anyway.
+  app.get<{ Querystring: { days: (typeof STATS_RANGES)[number] } }>(
+    "/api/v1/admin/communities/stats",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          // Fastify's validator strips unknown keys instead of failing (removeAdditional); propertyNames makes them a 400.
+          propertyNames: { enum: ["days"] },
+          properties: { days: { type: "integer", enum: STATS_RANGES, default: 30 } },
+          additionalProperties: false,
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["days", "health", "series", "current", "previous"],
+            properties: {
+              days: count,
+              health: {
+                type: "object",
+                properties: { growing: count, steady: count, slowing: count, quiet: count, needsReview: count, archived: count },
+              },
+              series: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { day: { type: "string", format: "date" }, newMembers: count, newCommunities: count, liveCommunities: { type: ["integer", "null"] } },
+                },
+              },
+              current: growthTotals,
+              previous: growthTotals,
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const staff = await guard.authorize(request, reply, COMMUNITY_STAFF);
+      if (!staff) return reply;
+      const { days } = request.query;
+      const data = await guard.run(request, reply, staff, async (client) => {
+        // One transaction client runs one query at a time, so these run in sequence.
+        const health = await client.query<Record<"growing" | "steady" | "slowing" | "quiet" | "needs_review" | "archived", string>>(
+          "SELECT growing, steady, slowing, quiet, needs_review, archived FROM spark.staff_community_health_counts()",
+        );
+        const series = await client.query<CommunityDayRow>(
+          "SELECT day::text AS day, new_members, new_communities, live_communities FROM spark.staff_community_daily($1)",
+          [days * 2],
+        );
+        return { health: health.rows[0], points: series.rows.map(toCommunityDay) };
+      });
+      if (reply.sent || !data) return reply;
+      const current = data.points.slice(-days);
+      const previous = data.points.slice(0, Math.max(0, data.points.length - days));
+      const health = data.health;
+      return {
+        days,
+        health: {
+          growing: Number(health?.growing ?? 0),
+          steady: Number(health?.steady ?? 0),
+          slowing: Number(health?.slowing ?? 0),
+          quiet: Number(health?.quiet ?? 0),
+          needsReview: Number(health?.needs_review ?? 0),
+          archived: Number(health?.archived ?? 0),
+        },
+        series: current,
+        current: growthOf(current),
+        previous: growthOf(previous),
+      };
     },
   );
 

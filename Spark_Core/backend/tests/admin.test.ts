@@ -60,6 +60,7 @@ const ROUTES: Array<{ method: "GET" | "POST" | "PATCH" | "DELETE"; url: string; 
   { method: "GET", url: `/api/v1/admin/users/${target}/activity`, allowed: ["platform_admin"] },
   { method: "GET", url: `/api/v1/admin/users/${target}/sessions`, allowed: ["platform_admin"] },
   { method: "GET", url: "/api/v1/admin/reports/stats", allowed: ["content_moderator"] },
+  { method: "GET", url: "/api/v1/admin/communities/stats", allowed: ["community_moderator"] },
   { method: "GET", url: `/api/v1/admin/reports/${target}/context`, allowed: ["content_moderator"] },
   { method: "GET", url: `/api/v1/admin/reports/${target}/preview`, allowed: ["content_moderator"] },
 ];
@@ -330,6 +331,116 @@ describe("admin insight routes", () => {
     ]);
     expect(JSON.stringify(response.json())).not.toContain("secret");
     expect(Object.keys(response.json().items[0]).sort()).toEqual(["createdAt", "expiresAt", "id", "lastSeenAt", "method", "state"]);
+  });
+});
+
+describe("admin dashboard insight routes", () => {
+  const healthRow = { growing: "2", steady: "1", slowing: "0", quiet: "3", needs_review: "1", archived: "4" };
+  const communityDay = (index: number, live: string | null = null) => ({ day: `2026-10-${String(index + 1).padStart(2, "0")}`, new_members: String(index), new_communities: index % 2 ? "1" : "0", live_communities: live });
+
+  it("returns community health counts and the period split from one 2 x days series", async () => {
+    const { response, calls } = await call(["community_moderator"], { method: "GET", url: "/api/v1/admin/communities/stats?days=7" }, [
+      ["staff_community_health_counts", () => [healthRow]],
+      ["staff_community_daily", () => Array.from({ length: 14 }, (_, index) => communityDay(index))],
+    ]);
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(calls.find((entry) => entry.sql.includes("staff_community_daily"))?.params).toEqual([14]);
+    const body = response.json();
+    expect(body.days).toBe(7);
+    expect(body.health).toEqual({ growing: 2, steady: 1, slowing: 0, quiet: 3, needsReview: 1, archived: 4 });
+    expect(body.series).toHaveLength(7);
+    expect(body.series[0]).toEqual({ day: "2026-10-08", newMembers: 7, newCommunities: 1, liveCommunities: null });
+    expect(body.series[6]).toEqual({ day: "2026-10-14", newMembers: 13, newCommunities: 1, liveCommunities: null });
+    // Days 8-14 are the current period, days 1-7 the one before it.
+    expect(body.current).toEqual({ newMembers: 7 + 8 + 9 + 10 + 11 + 12 + 13, newCommunities: 4 });
+    expect(body.previous).toEqual({ newMembers: 0 + 1 + 2 + 3 + 4 + 5 + 6, newCommunities: 3 });
+  });
+
+  it("defaults to 30 days and passes a live community count through as a number", async () => {
+    const { response, calls } = await call(["platform_admin"], { method: "GET", url: "/api/v1/admin/communities/stats" }, [
+      ["staff_community_health_counts", () => [healthRow]],
+      ["staff_community_daily", () => Array.from({ length: 60 }, (_, index) => communityDay(index % 28, "5"))],
+    ]);
+    expect(response.statusCode).toBe(200);
+    expect(calls.find((entry) => entry.sql.includes("staff_community_daily"))?.params).toEqual([60]);
+    expect(response.json().series).toHaveLength(30);
+    expect(response.json().series[0].liveCommunities).toBe(5);
+  });
+
+  it("answers zeros for an empty platform", async () => {
+    const { response } = await call(["platform_admin"], { method: "GET", url: "/api/v1/admin/communities/stats?days=90" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      days: 90,
+      health: { growing: 0, steady: 0, slowing: 0, quiet: 0, needsReview: 0, archived: 0 },
+      series: [],
+      current: { newMembers: 0, newCommunities: 0 },
+      previous: { newMembers: 0, newCommunities: 0 },
+    });
+  });
+
+  it("serves /communities/stats from the stats route, not the community detail route", async () => {
+    const { response, calls } = await call(["community_moderator"], { method: "GET", url: "/api/v1/admin/communities/stats?days=30" }, [["staff_community_health_counts", () => [healthRow]]]);
+    expect(response.statusCode).toBe(200);
+    expect(calls.some((entry) => entry.sql.includes("staff_community_series"))).toBe(false);
+    expect(calls.some((entry) => entry.sql.includes("staff_community_daily"))).toBe(true);
+  });
+
+  it.each([
+    "/api/v1/admin/communities/stats?days=10",
+    "/api/v1/admin/communities/stats?days=365",
+    "/api/v1/admin/communities/stats?days=7&extra=1",
+    "/api/v1/admin/reports/stats?days=6",
+    "/api/v1/admin/reports/stats?days=30&extra=1",
+  ])("rejects invalid input before the database: %s", async (url) => {
+    const { response, calls } = await call(["super_admin"], { method: "GET", url });
+    expect(response.statusCode).toBe(400);
+    expect(calls.some((entry) => entry.sql.includes("staff_"))).toBe(false);
+  });
+
+  it("refuses community stats to a content moderator and report stats to a community moderator", async () => {
+    const communities = await call(["content_moderator"], { method: "GET", url: "/api/v1/admin/communities/stats?days=7" });
+    expect(communities.response.statusCode).toBe(403);
+    expect(communities.calls.some((entry) => entry.sql.includes("staff_"))).toBe(false);
+    const reports = await call(["community_moderator"], { method: "GET", url: "/api/v1/admin/reports/stats?days=7" });
+    expect(reports.response.statusCode).toBe(403);
+    expect(reports.calls.some((entry) => entry.sql.includes("staff_"))).toBe(false);
+  });
+
+  it("adds reasons, top communities and a daily series to the report stats", async () => {
+    const { response, calls } = await call(["content_moderator"], { method: "GET", url: "/api/v1/admin/reports/stats?days=7" }, [
+      ["staff_report_stats", () => [{ opened: "9", closed: "4", backlog: "12", median_hours_to_close: "5.5" }]],
+      ["staff_report_reasons", () => [{ reason: "spam", open_count: "8" }, { reason: "abuse", open_count: "4" }]],
+      ["staff_report_top_communities", () => [{ community_id: target, name: "Northstar Founders", slug: "northstar-founders", open_count: "6" }]],
+      ["staff_report_daily", () => [
+        { day: "2026-10-19", opened: "3", closed: "0", backlog: "11", median_hours_to_close: null },
+        { day: "2026-10-20", opened: "2", closed: "1", backlog: "12", median_hours_to_close: "26.5" },
+      ]],
+    ]);
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.json()).toEqual({
+      days: 7,
+      opened: 9,
+      closed: 4,
+      backlog: 12,
+      medianHoursToClose: 5.5,
+      reasons: [{ reason: "spam", count: 8 }, { reason: "abuse", count: 4 }],
+      topCommunities: [{ id: target, name: "Northstar Founders", slug: "northstar-founders", count: 6 }],
+      series: [
+        { day: "2026-10-19", opened: 3, closed: 0, backlog: 11, medianHoursToClose: null },
+        { day: "2026-10-20", opened: 2, closed: 1, backlog: 12, medianHoursToClose: 26.5 },
+      ],
+    });
+    expect(calls.find((entry) => entry.sql.includes("staff_report_top_communities"))?.params).toEqual([5]);
+    expect(calls.find((entry) => entry.sql.includes("staff_report_daily"))?.params).toEqual([7]);
+  });
+
+  it("keeps the report stats valid when the queue is empty", async () => {
+    const { response } = await call(["content_moderator"], { method: "GET", url: "/api/v1/admin/reports/stats" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ days: 30, opened: 0, closed: 0, backlog: 0, medianHoursToClose: null, reasons: [], topCommunities: [], series: [] });
   });
 });
 

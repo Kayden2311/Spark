@@ -118,6 +118,20 @@ function contentSchema(withComments: boolean) {
 
 const LIST_SQL = "SELECT *, created_at::text AS cursor_ts FROM spark.staff_list_reports($1, $2, $3::timestamptz, $4, $5)";
 
+const TOP_COMMUNITIES = 5;
+const count = { type: "integer", minimum: 0 } as const;
+const hours = { type: ["number", "null"] } as const;
+
+interface ReportDayRow {
+  day: string;
+  opened: string;
+  closed: string;
+  backlog: string;
+  median_hours_to_close: string | null;
+}
+
+const hoursOrNull = (value: string | null | undefined) => (value === null || value === undefined ? null : Number(value));
+
 export function registerReportRoutes(app: FastifyInstance, guard: StaffGuard): void {
   app.get<{ Querystring: { status?: ReportStatus; cursor?: string; limit?: number } }>(
     "/api/v1/admin/reports",
@@ -161,16 +175,39 @@ export function registerReportRoutes(app: FastifyInstance, guard: StaffGuard): v
     },
   );
 
-  // Queue health for the range: flow in and out, current backlog and median time to a decision.
+  // Queue health for the range: flow in and out, current backlog and median time to a decision, plus
+  // the open queue by reason and by community and a daily flow and backlog series.
   app.get<{ Querystring: { days: number } }>(
     "/api/v1/admin/reports/stats",
     {
       schema: {
-        querystring: { type: "object", properties: { days: { type: "integer", minimum: 7, maximum: 365, default: 30 } }, additionalProperties: false },
+        querystring: {
+          type: "object",
+          // Fastify's validator strips unknown keys instead of failing (removeAdditional); propertyNames makes them a 400.
+          propertyNames: { enum: ["days"] },
+          properties: { days: { type: "integer", minimum: 7, maximum: 365, default: 30 } },
+          additionalProperties: false,
+        },
         response: {
           200: {
             type: "object",
-            properties: { days: { type: "integer" }, opened: { type: "integer" }, closed: { type: "integer" }, backlog: { type: "integer" }, medianHoursToClose: { type: ["number", "null"] } },
+            required: ["days", "opened", "closed", "backlog", "medianHoursToClose", "reasons", "topCommunities", "series"],
+            properties: {
+              days: { type: "integer" },
+              opened: { type: "integer" },
+              closed: { type: "integer" },
+              backlog: { type: "integer" },
+              medianHoursToClose: hours,
+              reasons: { type: "array", items: { type: "object", properties: { reason: { type: "string" }, count } } },
+              topCommunities: {
+                type: "array",
+                items: { type: "object", properties: { id: { type: "string" }, name: { type: "string" }, slug: { type: "string" }, count } },
+              },
+              series: {
+                type: "array",
+                items: { type: "object", properties: { day: { type: "string", format: "date" }, opened: count, closed: count, backlog: count, medianHoursToClose: hours } },
+              },
+            },
           },
         },
       },
@@ -178,15 +215,38 @@ export function registerReportRoutes(app: FastifyInstance, guard: StaffGuard): v
     async (request, reply) => {
       const staff = await guard.authorize(request, reply, CONTENT_STAFF);
       if (!staff) return reply;
-      const row = await guard.run(request, reply, staff, async (client) =>
-        (await client.query<{ opened: string; closed: string; backlog: string; median_hours_to_close: string | null }>("SELECT * FROM spark.staff_report_stats($1)", [request.query.days])).rows[0]);
-      if (reply.sent) return reply;
+      const { days } = request.query;
+      const data = await guard.run(request, reply, staff, async (client) => {
+        // One transaction client runs one query at a time, so these run in sequence.
+        const stats = await client.query<{ opened: string; closed: string; backlog: string; median_hours_to_close: string | null }>("SELECT * FROM spark.staff_report_stats($1)", [days]);
+        const reasons = await client.query<{ reason: string; open_count: string }>("SELECT reason, open_count FROM spark.staff_report_reasons()");
+        const top = await client.query<{ community_id: string; name: string; slug: string; open_count: string }>(
+          "SELECT community_id, name, slug, open_count FROM spark.staff_report_top_communities($1)",
+          [TOP_COMMUNITIES],
+        );
+        const series = await client.query<ReportDayRow>(
+          "SELECT day::text AS day, opened, closed, backlog, median_hours_to_close FROM spark.staff_report_daily($1)",
+          [days],
+        );
+        return { stats: stats.rows[0], reasons: reasons.rows, top: top.rows, series: series.rows };
+      });
+      if (reply.sent || !data) return reply;
+      const row = data.stats;
       return {
-        days: request.query.days,
+        days,
         opened: Number(row?.opened ?? 0),
         closed: Number(row?.closed ?? 0),
         backlog: Number(row?.backlog ?? 0),
-        medianHoursToClose: row?.median_hours_to_close === null || row?.median_hours_to_close === undefined ? null : Number(row.median_hours_to_close),
+        medianHoursToClose: hoursOrNull(row?.median_hours_to_close),
+        reasons: data.reasons.map((entry) => ({ reason: entry.reason, count: Number(entry.open_count) })),
+        topCommunities: data.top.map((entry) => ({ id: entry.community_id, name: entry.name, slug: entry.slug, count: Number(entry.open_count) })),
+        series: data.series.map((point) => ({
+          day: point.day,
+          opened: Number(point.opened),
+          closed: Number(point.closed),
+          backlog: Number(point.backlog),
+          medianHoursToClose: hoursOrNull(point.median_hours_to_close),
+        })),
       };
     },
   );
