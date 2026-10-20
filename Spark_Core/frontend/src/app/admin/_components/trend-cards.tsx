@@ -33,7 +33,8 @@ function chipOf(change: TrendCardItem["change"]): { text: string; label: string;
   if (described.direction === "none") return null;
   if (described.direction === "flat") return { text: described.text, label: described.text, tone: "flat" };
   const good = (described.direction === "up") === (change.higherIsBetter ?? true);
-  return { text: `${ARROWS[described.direction]} ${described.text}`, label: `${described.text} vs previous period`, tone: good ? "good" : "bad" };
+  // The judgement is stated in words (sr sentence and title), so it never rests on the chip colour alone.
+  return { text: `${ARROWS[described.direction]} ${described.text}`, label: `${described.text} vs previous period, ${good ? "improving" : "worsening"}`, tone: good ? "good" : "bad" };
 }
 
 /**
@@ -48,7 +49,9 @@ export function TrendCards({ items, label }: { items: TrendCardItem[]; label: st
       {items.map((item) => {
         const loading = item.value === undefined;
         const chip = loading ? null : chipOf(item.change);
-        const sentence = loading ? `${item.label}: loading` : `${item.label}: ${item.value}${chip ? `, ${chip.label}` : ""}`;
+        const sentence = loading
+          ? `${item.label}: loading`
+          : `${item.label}: ${item.value}${item.valueTone === "bad" ? ", needs attention" : ""}${chip ? `, ${chip.label}` : ""}`;
         const showSpark = !loading && (item.series?.length ?? 0) >= 2;
         const className = `admTrendCard${item.href ? " admTrendCardLink" : ""}${reduced ? "" : " admLift"}`;
         const body = (
@@ -64,7 +67,11 @@ export function TrendCards({ items, label }: { items: TrendCardItem[]; label: st
               ) : (
                 <span className={`admTrendCardValue${item.valueTone === "bad" ? " admTrendCardValue-bad" : ""}`}>{item.value}</span>
               )}
-              {chip && <span className="admTrendChip" data-tone={chip.tone}>{chip.text}</span>}
+              {chip && (
+                <span className="admTrendChip" data-tone={chip.tone} title={chip.tone === "good" ? "Improving" : chip.tone === "bad" ? "Worsening" : undefined}>
+                  {chip.text}
+                </span>
+              )}
             </div>
             {showSpark && (
               <span className="admTrendCardSpark">

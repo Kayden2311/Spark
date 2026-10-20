@@ -117,10 +117,14 @@
 
 /* Ranked bars */
 .vizBarList { display: grid; gap: 2px; margin: 0; padding: 4px; list-style: none; }
-.vizBarList li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 7px 10px; border-radius: 8px; transition: background .15s ease; }
-.vizBarList li:hover { background: var(--viz-hover); }
-.vizBarList li:hover .vizBarListValue { color: var(--viz-blue-dark); }
-.vizBarList li:hover .vizBarListTrack span { filter: brightness(1.1); }
+.vizBarList li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 7px 10px; border-radius: 8px; transition: background .15s ease; }
+.vizBarList li:hover, .vizBarList li:focus-within { background: var(--viz-hover); }
+.vizBarList li:focus-visible { outline: none; box-shadow: var(--viz-ring); }
+.vizBarList li:hover .vizBarListValue, .vizBarList li:focus-within .vizBarListValue { color: var(--viz-blue-dark); }
+.vizBarList li:hover .vizBarListTrack span, .vizBarList li:focus-within .vizBarListTrack span { filter: brightness(1.1); }
+/* Exact value and share of the total, shown on hover and on keyboard focus (the row or its link). */
+.vizBarListTip { position: absolute; z-index: 5; right: 10px; bottom: calc(100% - 4px); padding: 4px 8px; border: 1px solid var(--viz-line); border-radius: 6px; color: var(--viz-ink); font-size: var(--viz-text-2xs); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; background: var(--viz-surface); box-shadow: var(--viz-shadow-md); opacity: 0; visibility: hidden; pointer-events: none; }
+.vizBarList li:hover .vizBarListTip, .vizBarList li:focus-within .vizBarListTip { opacity: 1; visibility: visible; }
 .vizBarListText { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .vizBarListLabel { overflow: hidden; color: var(--viz-ink); font-size: var(--viz-text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .vizBarListLabel a { color: inherit; text-decoration: none; }
@@ -140,7 +144,8 @@
 .vizHeatmapHour { color: var(--viz-faint); font-size: var(--viz-text-3xs); font-variant-numeric: tabular-nums; }
 .vizHeatmapDay { align-self: center; color: var(--viz-subtle); font-size: var(--viz-text-2xs); font-weight: 500; }
 .vizHeatmapCell { aspect-ratio: 1 / 1; min-height: 12px; border-radius: 3px; transition: box-shadow .1s ease; }
-.vizHeatmapCell:hover { box-shadow: 0 0 0 2px var(--viz-ink); }
+.vizHeatmapCell:hover, .vizHeatmapCellActive { box-shadow: 0 0 0 2px var(--viz-ink); }
+.vizHeatmapGrid:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--viz-ring); }
 .vizHeatmapScale { display: flex; align-items: center; justify-content: flex-end; gap: 3px; color: var(--viz-subtle); font-size: var(--viz-text-2xs); }
 .vizHeatmapScale span:first-child { margin-right: 4px; }
 .vizHeatmapScale span:last-child { margin-left: 4px; }

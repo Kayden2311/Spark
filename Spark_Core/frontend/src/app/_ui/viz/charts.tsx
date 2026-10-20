@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type CSSProperties, type ReactNode } from "react";
+import { isValidElement, useId, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { formatCount, shortDate } from "./format";
@@ -332,6 +332,11 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
   );
 }
 
+/** True for a label that is itself a link (an <a> or next/link, both of which take `href`). */
+function isLinkLabel(label: ReactNode): boolean {
+  return isValidElement<{ href?: unknown }>(label) && (label.type === "a" || label.props.href !== undefined);
+}
+
 /** Ranked magnitudes as horizontal bars, labelled with names and values (no legend needed). Bars grow
  * in from the left on mount (unless reduced motion is set) and highlight on hover, with the exact value
  * and its share of the total as a tooltip. */
@@ -350,7 +355,9 @@ export function BarList({ items, color, valueFormat = formatCount, emptyText = "
       {items.map((item, index) => {
         const share = total ? Math.round((item.value / total) * 100) : 0;
         return (
-          <li key={item.key} title={`${valueFormat(item.value)} · ${share}% of ${valueFormat(total)}`}>
+          // A row whose label is already a link is reached through that link; any other row is its own tab
+          // stop, so the share tooltip below shows on keyboard focus as it does on hover.
+          <li key={item.key} tabIndex={isLinkLabel(item.label) ? undefined : 0}>
             <div className="vizBarListText">
               <span className="vizBarListLabel">{item.label}</span>
               {item.hint && <span className="vizBarListHint">{item.hint}</span>}
@@ -359,6 +366,7 @@ export function BarList({ items, color, valueFormat = formatCount, emptyText = "
               {valueFormat(item.value)}
               <span className="vizBarListPercent">{share}%</span>
             </span>
+            <span aria-hidden="true" className="vizBarListTip">{`${valueFormat(item.value)} · ${share}% of ${valueFormat(total)}`}</span>
             <span aria-hidden="true" className="vizBarListTrack">
               <span className={reduced ? undefined : "admGrowIn"} style={{ "--viz-bar-w": `${Math.max(2, (item.value / max) * 100)}%`, "--viz-bar-delay": `${Math.min(index, 8) * 45}ms`, background: color } as CSSProperties} />
             </span>
@@ -455,36 +463,66 @@ export function TargetGauge({ value, target, label, valueFormat = formatCount }:
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/** Day-of-week by hour-of-day activity (UTC), shaded with one hue from light to dark. */
+/**
+ * Day-of-week by hour-of-day activity (UTC), shaded with one hue from light to dark. The grid is one
+ * keyboard stop: focusing it selects the busiest cell, arrow keys (and Home/End) move the selection,
+ * and the polite live readout above states the selected cell's exact value, as hovering does.
+ */
 export function Heatmap({ cells }: { cells: Array<{ dow: number; hour: number; events: number }> }) {
   const reduced = useReducedMotion();
-  const [hover, setHover] = useState<{ dow: number; hour: number; events: number } | null>(null);
+  const [active, setActive] = useState<{ dow: number; hour: number } | null>(null);
   const grid = new Map(cells.map((cell) => [`${cell.dow}:${cell.hour}`, cell.events]));
   const max = Math.max(1, ...cells.map((cell) => cell.events));
   const busiest = cells.reduce<{ dow: number; hour: number; events: number } | null>((best, cell) => (!best || cell.events > best.events ? cell : best), null);
+  const eventsAt = (dow: number, hour: number) => grid.get(`${dow}:${hour}`) ?? 0;
   const describe = (cell: { dow: number; hour: number; events: number }) =>
     `${DAYS[cell.dow - 1]} ${String(cell.hour).padStart(2, "0")}:00 UTC: ${formatCount(cell.events)} ${cell.events === 1 ? "event" : "events"}`;
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const from = active ?? { dow: 1, hour: 0 };
+    const moves: Record<string, { dow: number; hour: number }> = {
+      ArrowLeft: { dow: from.dow, hour: Math.max(0, from.hour - 1) },
+      ArrowRight: { dow: from.dow, hour: Math.min(23, from.hour + 1) },
+      ArrowUp: { dow: Math.max(1, from.dow - 1), hour: from.hour },
+      ArrowDown: { dow: Math.min(7, from.dow + 1), hour: from.hour },
+      Home: { dow: from.dow, hour: 0 },
+      End: { dow: from.dow, hour: 23 },
+    };
+    const next = moves[event.key];
+    if (!next) return;
+    event.preventDefault();
+    setActive(next);
+  };
   return (
     <div className="vizHeatmap">
       <p aria-live="polite" className="vizHeatmapReadout">
-        {hover ? describe(hover) : busiest && busiest.events > 0 ? `Busiest hour: ${describe(busiest)}` : "No activity recorded in this period."}
+        {active
+          ? describe({ ...active, events: eventsAt(active.dow, active.hour) })
+          : busiest && busiest.events > 0 ? `Busiest hour: ${describe(busiest)}` : "No activity recorded in this period."}
       </p>
-      <div aria-hidden="true" className="vizHeatmapGrid" onMouseLeave={() => setHover(null)}>
-        <span />
-        {Array.from({ length: 24 }, (_, hour) => <span className="vizHeatmapHour" key={hour}>{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</span>)}
+      <div
+        aria-label="Activity by day and hour (UTC). Use the arrow keys to read each hour."
+        className="vizHeatmapGrid"
+        onBlur={() => setActive(null)}
+        onFocus={() => setActive(busiest && busiest.events > 0 ? { dow: busiest.dow, hour: busiest.hour } : { dow: 1, hour: 0 })}
+        onKeyDown={onKeyDown}
+        onMouseLeave={() => setActive(null)}
+        role="group"
+        tabIndex={0}
+      >
+        <span aria-hidden="true" />
+        {Array.from({ length: 24 }, (_, hour) => <span aria-hidden="true" className="vizHeatmapHour" key={hour}>{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</span>)}
         {DAYS.map((day, index) => (
-          <div className="vizHeatmapRow" key={day}>
+          <div aria-hidden="true" className="vizHeatmapRow" key={day}>
             <span className="vizHeatmapDay">{day}</span>
             {Array.from({ length: 24 }, (_, hour) => {
-              const events = grid.get(`${index + 1}:${hour}`) ?? 0;
-              const shade = sequential(events / max);
+              const shade = sequential(eventsAt(index + 1, hour) / max);
+              const selected = active?.dow === index + 1 && active.hour === hour;
               return (
                 <span
-                  className={`vizHeatmapCell${motionClass(reduced, "admFadeIn")}`}
+                  className={`vizHeatmapCell${selected ? " vizHeatmapCellActive" : ""}${motionClass(reduced, "admFadeIn")}`}
                   key={hour}
-                  onMouseEnter={() => setHover({ dow: index + 1, hour, events })}
+                  onMouseEnter={() => setActive({ dow: index + 1, hour })}
                   style={{ background: shade.background, "--viz-fade-delay": `${index * 70}ms` } as CSSProperties}
-                  title={describe({ dow: index + 1, hour, events })}
                 />
               );
             })}

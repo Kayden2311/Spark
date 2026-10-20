@@ -5,7 +5,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BarList, ChartCard, Sparkline, TargetGauge } from "../src/app/_ui/viz";
+import { BarList, ChartCard, Heatmap, Sparkline, TargetGauge } from "../src/app/_ui/viz";
 
 function mockReducedMotion(reduce: boolean) {
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -135,6 +135,62 @@ describe("shared viz module", () => {
     expect(still.container.querySelector(".admDrawIn, .admGrowIn, .admFadeIn")).toBeNull();
     expect(still.container.querySelector(".vizTargetGaugeFill")).not.toBeNull();
     expect(still.container.querySelector(".vizBarListTrack span")).toHaveStyle({ "--viz-bar-w": "100%" });
+  });
+
+  it("Heatmap is one keyboard stop: focus reads the busiest cell and arrow keys move the readout", async () => {
+    const { container } = render(<Heatmap cells={[{ dow: 1, hour: 9, events: 5 }, { dow: 2, hour: 10, events: 1 }]} />);
+    const grid = screen.getByRole("group", { name: /Activity by day and hour/u });
+    expect(grid).toHaveAttribute("tabindex", "0");
+    expect(container.querySelectorAll("[tabindex]")).toHaveLength(1);
+    await userEvent.tab();
+    expect(grid).toHaveFocus();
+    const readout = screen.getByText("Mon 09:00 UTC: 5 events");
+    expect(readout).toHaveAttribute("aria-live", "polite");
+    expect(container.querySelector(".vizHeatmapCellActive")).not.toBeNull();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(readout).toHaveTextContent("Mon 10:00 UTC: 0 events");
+    await userEvent.keyboard("{ArrowDown}");
+    expect(readout).toHaveTextContent("Tue 10:00 UTC: 1 event");
+    await userEvent.keyboard("{ArrowUp}{ArrowUp}");
+    expect(readout).toHaveTextContent("Mon 10:00 UTC: 0 events");
+    await userEvent.keyboard("{End}");
+    expect(readout).toHaveTextContent("Mon 23:00 UTC: 0 events");
+    await userEvent.keyboard("{Home}{ArrowLeft}");
+    expect(readout).toHaveTextContent("Mon 00:00 UTC: 0 events");
+    await userEvent.tab();
+    expect(readout).toHaveTextContent("Busiest hour: Mon 09:00 UTC: 5 events");
+    expect(container.querySelector(".vizHeatmapCellActive")).toBeNull();
+  });
+
+  it("Heatmap cells fade in by row only when motion is allowed", () => {
+    mockReducedMotion(false);
+    const animated = render(<Heatmap cells={[{ dow: 1, hour: 9, events: 5 }]} />);
+    expect(animated.container.querySelectorAll(".vizHeatmapCell.admFadeIn")).toHaveLength(7 * 24);
+    animated.unmount();
+    mockReducedMotion(true);
+    const still = render(<Heatmap cells={[{ dow: 1, hour: 9, events: 5 }]} />);
+    expect(still.container.querySelector(".admFadeIn")).toBeNull();
+  });
+
+  it("BarList rows are focusable unless the label is already a link, and carry a share tooltip", async () => {
+    render(
+      <BarList
+        color="#2563eb"
+        items={[
+          { key: "a", label: "Alpha", value: 3 },
+          { key: "b", label: <a href="/b">Beta</a>, value: 1 },
+        ]}
+      />,
+    );
+    const [alpha, beta] = screen.getAllByRole("listitem");
+    expect(alpha).toHaveAttribute("tabindex", "0");
+    expect(beta).not.toHaveAttribute("tabindex");
+    expect(alpha).not.toHaveAttribute("title");
+    expect(within(alpha!).getByText("3 · 75% of 4")).toHaveClass("vizBarListTip");
+    await userEvent.tab();
+    expect(alpha).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.getByRole("link", { name: "Beta" })).toHaveFocus();
   });
 
   it("shared modules never import admin", () => {

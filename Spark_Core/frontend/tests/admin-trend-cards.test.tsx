@@ -25,7 +25,8 @@ describe("trend cards", () => {
     expect(within(card).getByText("130")).toBeInTheDocument();
     const chip = within(card).getByText("↑ +30%");
     expect(chip).toHaveAttribute("data-tone", "good");
-    expect(within(card).getByText("New sign-ups: 130, +30% vs previous period")).toHaveClass("admSrOnly");
+    expect(within(card).getByText("New sign-ups: 130, +30% vs previous period, improving")).toHaveClass("admSrOnly");
+    expect(chip).toHaveAttribute("title", "Improving");
     const spark = card.querySelector("svg.vizSpark");
     expect(spark).not.toBeNull();
     expect(spark).toHaveAttribute("aria-hidden", "true");
@@ -33,7 +34,10 @@ describe("trend cards", () => {
 
   it("marks a rise as bad when lower is better", () => {
     render(<TrendCards items={[{ ...base, label: "Open reports", change: { current: 130, previous: 100, higherIsBetter: false } }]} label="Reports" />);
-    expect(screen.getByText("↑ +30%")).toHaveAttribute("data-tone", "bad");
+    const chip = screen.getByText("↑ +30%");
+    expect(chip).toHaveAttribute("data-tone", "bad");
+    expect(chip).toHaveAttribute("title", "Worsening");
+    expect(screen.getByText("Open reports: 130, +30% vs previous period, worsening")).toHaveClass("admSrOnly");
   });
 
   it("marks a fall as good when lower is better, and flat as neutral", () => {
@@ -63,7 +67,7 @@ describe("trend cards", () => {
 
   it("makes the whole card a link when href is set", () => {
     render(<TrendCards items={[{ ...base, href: "/admin/users", change: { current: 130, previous: 100 } }]} label="Key numbers" />);
-    const link = screen.getByRole("link", { name: "New sign-ups: 130, +30% vs previous period" });
+    const link = screen.getByRole("link", { name: "New sign-ups: 130, +30% vs previous period, improving" });
     expect(link).toHaveAttribute("href", "/admin/users");
     expect(link).toHaveClass("admTrendCard");
   });
@@ -80,6 +84,7 @@ describe("trend cards", () => {
   it("colours a bad value", () => {
     render(<TrendCards items={[{ ...base, valueTone: "bad" }]} label="Key numbers" />);
     expect(screen.getByText("130")).toHaveClass("admTrendCardValue-bad");
+    expect(screen.getByText("New sign-ups: 130, needs attention")).toHaveClass("admSrOnly");
   });
 
   it("animates (lift, sparkline draw-in) only when motion is allowed", () => {
