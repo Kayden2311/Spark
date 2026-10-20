@@ -6,7 +6,7 @@ import { Suspense, useState } from "react";
 
 import { useAuth } from "../../auth-context";
 import { useAdmin } from "../_components/admin-context";
-import { ChartCard, ChartLegend, DonutChart, InlineBar } from "../_components/charts";
+import { ChartCard, DonutChart, InlineBar } from "../_components/charts";
 import { AlertIcon, BoardIcon, ListIcon, SearchIcon, SignupIcon, UserIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RoleSummary, RowMenu, Segmented, SkeletonRows } from "../_components/ui";
@@ -48,7 +48,6 @@ function RoleMix() {
     <ChartCard
       empty={!loading && total === 0}
       height={200}
-      legend={<ChartLegend series={mix} />}
       loading={loading}
       subtitle="Role grants right now; an account can hold more than one"
       table={{ columns: ["Role", "Holders"], rows: mix.map((item) => [item.label, item.value]) }}

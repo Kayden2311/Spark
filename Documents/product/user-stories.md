@@ -256,24 +256,28 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Workspace Member
 - **Priority**: Must
-- **Status**: Mockup (`/workspace` Add task)
-- **Note**: Projects now exist (US-E7): each project has a key, a methodology and its board columns, so tasks will be created inside a project's board. Task creation itself is still planned.
+- **Status**: Implemented (`POST /api/v1/projects/{projectId}/issues` with an optional `Idempotency-Key`, `GET`/`PATCH /api/v1/issues/{issueId}` with `If-Match`, `GET /api/v1/issues/{issueId}/events`; screens: quick-add on the board `/w/[slug]/p/[key]` and the task drawer `?issue=<KEY>-<n>`)
 - **Story**: As a Workspace Member, I want to create tasks and assign them so that ownership and progress are clear.
 - **Acceptance criteria**:
-  - Given a title and optional assignee, then the task is created in the workspace's board.
-  - The assignee must be a member of the same workspace.
-  - A member of another workspace cannot read or change the task.
+  - Given a title, when I add a task under a board column, then it is created at the end of that column of the project's board with the key `<KEY>-<n>`; every active member (owner, admin or member) may create, edit, assign and archive tasks in non-archived projects of the workspace.
+  - A double-submitted or network-retried "Add task" creates exactly one task: the same `Idempotency-Key` with the same body replays the first result (`201`, header `Idempotent-Replayed: true`) for 24 hours; the same key with a different body is refused with `409 idempotency_key_reused`.
+  - Adding a task to a column whose WIP limit is reached is refused with `409 wip_limit_reached` and the column explains why.
+  - In the task drawer the assignee is chosen from the workspace members or "Unassigned". An assignee who is not an active member of the same workspace is refused with `422 invalid_assignee`.
+  - When someone else assigns me, I get one in-app `issue_assigned` notice and one email whose link opens the task's drawer (`/w/<slug>/p/<KEY>?issue=<KEY>-<n>`). Assigning myself sends nothing. Email limits: only the latest assignment per task and recipient is emailed, at most one email per task and recipient within 10 minutes, and at most 20 task-assigned emails per recipient per hour; the in-app notice is not limited. The `task_assigned` email preference is honoured.
+  - Archiving asks for confirmation, removes the card from the board and keeps the history. An unknown or archived task in a link shows "That task no longer exists."; when the board shows only its first 500 tasks, a task outside them shows "That task isn't on the loaded board. Open it from the task list." instead (a lookup by key is not built yet).
+  - A member of another workspace cannot read or change the task (`404`).
 
 ### US-E5: Move tasks safely
 
 - **Actor**: Workspace Member
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented (`GET /api/v1/projects/{projectId}/board`, `PATCH /api/v1/issues/{issueId}` with `If-Match` and `statusId` / `afterIssueId`; screen: the board `/w/[slug]/p/[key]`)
 - **Story**: As a Workspace Member, I want to move tasks between states without overwriting a teammate's change so that the board stays accurate.
 - **Acceptance criteria**:
-  - Given a task version, when I update with a stale version, then the API returns a conflict and I see the latest state.
-  - Moving a task works with keyboard and on mobile.
-  - Each successful update increments the task version.
+  - Every task write carries `If-Match` with the task version (missing: `428 precondition_required`). Given a stale version, the API returns `412 version_mismatch` with the current task; the board refreshes with "Updated by a teammate — the board was refreshed." and the drawer swaps in the newer values with "Updated by a teammate — review the latest values and save again." Of two teammates moving the same card at once, exactly one wins.
+  - Moving a card into a column whose WIP limit is reached by other tasks is refused with `409 wip_limit_reached`: the card snaps back and the column says "<Status> is at its WIP limit (<n>). Finish or move a task out first." Reordering inside a full column is never blocked.
+  - Moving works by drag and drop, by keyboard (Space picks up, arrows move, Enter drops, Escape cancels, each step announced) and on phones through "Move to…" on every card.
+  - Each successful change increments the task version by one and appends one history event; the drawer tells the history in sentences ("Avery Founder moved it to In progress · 2 h ago").
 
 ### US-E6: Schedule events
 

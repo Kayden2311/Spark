@@ -158,6 +158,76 @@ const waterfallInput = (key: string): ProjectInput => ({ key, methodology: "wate
 async function updateProject(who: Account, project: string, version: number, patch: unknown) {
   return (await asSession(who.token, `SELECT * FROM ${fn("ws_update_project")}($1,$2,$3)`, [project, version, JSON.stringify(patch)])).rows[0] as { outcome: string; settings_version: number | null };
 }
+type IssueInput = { title?: string; description?: string | null; type?: string | null; priority?: string | null; status?: string | null; assignee?: string | null;
+  points?: string | null; due?: string | null; phase?: string | null; key?: string | null; hash?: Buffer | null };
+type IssueResult = { outcome: string; issue_id: string | null; issue_version: number | null };
+const createIssueCall = `SELECT * FROM "${namespace}".ws_create_issue($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`;
+const issueArgs = (project: string, input: IssueInput) => [project, input.title ?? "Task", input.description ?? null, input.type ?? null, input.priority ?? null,
+  input.status ?? null, input.assignee ?? null, input.points ?? null, input.due ?? null, input.phase ?? null, input.key ?? null, input.hash ?? null];
+// Creates an issue through the definer function as the given session (null: no session at all).
+async function createIssue(who: Account | null, project: string, input: IssueInput = {}) {
+  return (await asSession(who?.token ?? null, createIssueCall, issueArgs(project, input))).rows[0] as IssueResult;
+}
+const refusedIssue = (outcome: string): IssueResult => ({ outcome, issue_id: null, issue_version: null });
+// A Kanban project with the M2 template statuses, created through ws_create_project.
+async function kanbanProject(who: Account, workspace?: string) {
+  const tenant = workspace ?? (await createWorkspace(who)).workspace_id!;
+  const key = `K${randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`;
+  const created = await createProject(who, tenant, { key, methodology: "kanban" });
+  if (created.outcome !== "ok") throw new Error(`Project not created: ${created.outcome}`);
+  return { workspace: tenant, project: created.project_id!, key };
+}
+async function statusNamed(project: string, name: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id FROM ${table("issue_statuses")} WHERE project_id=$1 AND name=$2`, [project, name])).rows[0].id as string;
+}
+const countRows = async (sql: string, values: unknown[]) => {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT count(*)::integer AS total FROM ${sql}`, values)).rows[0].total as number;
+};
+type UpdateResult = { outcome: string; issue_version: number | null };
+const updateIssueCall = `SELECT * FROM "${namespace}".ws_update_issue($1,$2,$3)`;
+// Updates an issue through the definer function as the given session.
+async function updateIssue(who: Account, issue: string, version: number, patch: unknown) {
+  return (await asSession(who.token, updateIssueCall, [issue, version, JSON.stringify(patch)])).rows[0] as UpdateResult;
+}
+// The non-archived issues of a status in board order.
+async function columnOrder(statusId: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id FROM ${table("issues")} WHERE status_id=$1 AND archived_at IS NULL ORDER BY position,id`, [statusId])).rows.map((row) => row.id as string);
+}
+async function issueVersion(issue: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT version FROM ${table("issues")} WHERE id=$1`, [issue])).rows[0].version as number;
+}
+async function issueEvents(issue: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT event_type,actor_user_id,from_version,to_version,changes FROM ${table("issue_events")} WHERE issue_id=$1 ORDER BY to_version`, [issue])).rows;
+}
+// Opens two runtime connections, each in a transaction bound to one session.
+async function sessionPair(accounts: [Account, Account]) {
+  const clients = [0, 1].map(() => new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 })) as [pg.Client, pg.Client];
+  await Promise.all(clients.map((client) => client.connect()));
+  for (const [index, client] of clients.entries()) {
+    await client.query("SET lock_timeout = '15s'");
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('spark.session_token_hash',$1,true)", [accounts[index]!.token.toString("hex")]);
+  }
+  return clients;
+}
+async function closePair(clients: pg.Client[]) {
+  await Promise.allSettled(clients.map((client) => client.query("ROLLBACK")));
+  await Promise.allSettled(clients.map((client) => client.end()));
+}
+const backendPid = async (client: pg.Client) => (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+// Waits until the backend with this pid is blocked on a lock.
+async function waitUntilBlocked(pid: number) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if ((await owner.query("SELECT count(*)::integer AS waiting FROM pg_locks WHERE pid=$1 AND NOT granted", [pid])).rows[0].waiting > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
 
 beforeAll(async () => {
   await owner.connect();
@@ -237,7 +307,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(19);
+    expect(result.rows[0].count).toBe(22);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -482,9 +552,11 @@ describe("Local PostgreSQL schema", () => {
     });
   });
   it("denies runtime writes, role escalation and sensitive table reads", async () => {
-    for (const sensitive of ["password_credentials","auth_identities","sessions","account_tokens","content_reports","notifications","payment_events","promotion_orders","platform_role_assignments"]) {
+    for (const sensitive of ["password_credentials","auth_identities","sessions","account_tokens","content_reports","payment_events","promotion_orders","platform_role_assignments"]) {
       await expect(runtime.query(`SELECT * FROM ${table(sensitive)}`)).rejects.toMatchObject({code:"42501"});
     }
+    // Notifications are readable since 0019, but only the recipient's own rows (none without a session).
+    expect((await runtime.query(`SELECT * FROM ${table("notifications")}`)).rows).toEqual([]);
     await expect(withDatabaseContext(runtime,actorA,c=>c.query(`UPDATE ${table("workspace_memberships")} SET role='owner'`))).rejects.toMatchObject({code:"42501"});
     await expect(runtime.query("SET ROLE spark_owner")).rejects.toMatchObject({code:"42501"});
   });
@@ -823,13 +895,13 @@ describe("Local PostgreSQL schema", () => {
       WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
       "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "is_community_member",
-      "is_coworker", "is_workspace_member", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
+      "is_coworker", "is_session_user", "is_workspace_member", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
       "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_health", "staff_community_series", "staff_engagement_heatmap", "staff_grant_role",
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
       "staff_report_context", "staff_report_preview", "staff_report_stats", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
-      "staff_user_sessions", "ws_accept_invitation", "ws_create_invitation", "ws_create_project", "ws_create_workspace", "ws_invitation_preview",
-      "ws_list_members", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role", "ws_update_project",
+      "staff_user_sessions", "ws_accept_invitation", "ws_create_invitation", "ws_create_issue", "ws_create_project", "ws_create_workspace", "ws_invitation_preview",
+      "ws_list_members", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role", "ws_update_issue", "ws_update_project",
       "ws_update_workspace",
     ]);
   });
@@ -1383,6 +1455,7 @@ describe("Local PostgreSQL schema", () => {
       workspaces: [ownerPolicy, appRead("workspace_read")],
       workspace_memberships: [ownerPolicy, appRead("staff_read"), appRead("workspace_members_read")],
       workspace_invitations: [appRead("invitation_admin_read"), ownerPolicy],
+      notifications: [ownerPolicy, appRead("recipient_read")],
       ...Object.fromEntries(tenantTables.map((name) => [name, [ownerPolicy, appRead("workspace_read")]])),
     };
     const policies = await owner.query(`SELECT tablename,policyname,cmd,roles::text[] AS roles,permissive FROM pg_policies WHERE schemaname=$1 AND tablename = ANY($2::text[]) ORDER BY tablename,policyname`, [namespace, Object.keys(expected)]);
@@ -1402,7 +1475,8 @@ describe("Local PostgreSQL schema", () => {
     expect(workerTables.rows).toEqual([]);
     const workerFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname=$1 AND has_function_privilege('spark_worker',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
-    const expected = ["worker_claim_outbox", "worker_complete_outbox", "worker_fail_outbox", "worker_invitation_email", "worker_issue_invitation_token"];
+    const expected = ["worker_claim_outbox", "worker_complete_outbox", "worker_fail_outbox", "worker_invitation_email", "worker_issue_invitation_token",
+      "worker_record_email_delivery", "worker_task_assigned_email"];
     expect(workerFunctions.rows.map((row) => row.proname)).toEqual(expected);
     for (const role of ["spark_app", "spark_auth"]) {
       const reachable = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
@@ -1796,5 +1870,699 @@ describe("Local PostgreSQL schema", () => {
     await owner.query("SET ROLE spark_owner");
     for (let index = 0; index < 5; index++) await owner.query(`UPDATE ${table("projects")} SET next_issue_number=next_issue_number+1 WHERE id=$1`, [plan]);
     expect((await owner.query(`SELECT settings_version,next_issue_number::integer AS next FROM ${table("projects")} WHERE id=$1`, [plan])).rows[0]).toEqual({ settings_version: 2, next: 6 });
+  });
+  it("creates issues with numbers, positions and history", async () => {
+    const alice = await account("Issue Author");
+    const { project } = await kanbanProject(alice);
+    const first = await createIssue(alice, project, { title: "  First task  ", description: "   " });
+    expect(first).toEqual({ outcome: "ok", issue_id: expect.any(String), issue_version: 1 });
+    const second = await createIssue(alice, project, { title: "Second task", description: "  Steps  ", type: "bug", priority: "high", points: "3.5", due: "2026-12-01" });
+    expect(second).toEqual({ outcome: "ok", issue_id: expect.any(String), issue_version: 1 });
+    const backlog = await statusNamed(project, "Backlog");
+    const rows = (await owner.query(`SELECT id,number::integer AS number,title,description,type,priority,status_id,position::text AS position,version,reporter_user_id,assignee_user_id,
+      story_points::text AS story_points,due_date::text AS due_date,phase_id,started_at,completed_at FROM ${table("issues")} WHERE project_id=$1 ORDER BY number`, [project])).rows;
+    const common = { status_id: backlog, version: 1, reporter_user_id: alice.id, assignee_user_id: null, phase_id: null, started_at: null, completed_at: null };
+    expect(rows).toEqual([
+      { ...common, id: first.issue_id, number: 1, title: "First task", description: null, type: "task", priority: "medium", position: "1024.000000", story_points: null, due_date: null },
+      { ...common, id: second.issue_id, number: 2, title: "Second task", description: "Steps", type: "bug", priority: "high", position: "2048.000000", story_points: "3.50", due_date: "2026-12-01" },
+    ]);
+    for (const issue of [first, second]) {
+      const events = (await owner.query(`SELECT event_type,actor_user_id,from_version,to_version,changes FROM ${table("issue_events")} WHERE issue_id=$1`, [issue.issue_id])).rows;
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ event_type: "issue.created", actor_user_id: alice.id, from_version: 0, to_version: 1 });
+      expect(events[0].changes.after).toEqual({ statusId: backlog, category: "backlog", assigneeUserId: null, storyPoints: issue === first ? null : 3.5, phaseId: null, sprintId: null, archived: false });
+      expect(JSON.stringify(events[0].changes)).not.toContain("task");
+      const outbox = (await owner.query(`SELECT event_type,aggregate_version,processed_at IS NOT NULL AS processed FROM ${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1`, [issue.issue_id])).rows;
+      expect(outbox).toEqual([{ event_type: "issue.created", aggregate_version: 1, processed: true }]);
+    }
+    expect((await owner.query(`SELECT next_issue_number::integer AS next,settings_version FROM ${table("projects")} WHERE id=$1`, [project])).rows[0]).toEqual({ next: 3, settings_version: 1 });
+    expect((await asSession(alice.token, `SELECT number::integer AS number FROM ${table("issues")} WHERE project_id=$1 ORDER BY number`, [project])).rows).toEqual([{ number: 1 }, { number: 2 }]);
+    const index = await owner.query(`SELECT indexdef FROM pg_indexes WHERE schemaname=$1 AND tablename='issue_events' AND indexname='issue_events_tenant_id_project_id_created_at_issue_id_read'`, [namespace]);
+    expect(index.rows[0].indexdef).toContain("(tenant_id, project_id, created_at, issue_id)");
+  });
+  it("notifies the assignee but not a self-assignment", async () => {
+    const alice = await account("Assigning Owner"), bob = await account("Assigned Member");
+    const { workspace, project, key } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    const assigned = await createIssue(alice, project, { title: "Review the deck", assignee: bob.id });
+    expect(assigned.outcome).toBe("ok");
+    const self = await createIssue(alice, project, { title: "My own task", assignee: alice.id });
+    expect(self.outcome).toBe("ok");
+    await owner.query("SET ROLE spark_owner");
+    const outboxId = (await owner.query(`SELECT id FROM ${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=1`, [assigned.issue_id])).rows[0].id;
+    const notices = (await owner.query(`SELECT recipient_user_id,outbox_event_id,kind,title,resource_type,resource_id,read_at FROM ${table("notifications")} WHERE tenant_id=$1`, [workspace])).rows;
+    expect(notices).toEqual([{ recipient_user_id: bob.id, outbox_event_id: outboxId, kind: "issue_assigned", title: `Assigning Owner assigned you ${key}-1: Review the deck`,
+      resource_type: "issue", resource_id: assigned.issue_id, read_at: null }]);
+    expect(notices[0].title.startsWith("Assigning Owner")).toBe(true);
+    expect((await owner.query(`SELECT assignee_user_id FROM ${table("issues")} WHERE id=$1`, [self.issue_id])).rows[0].assignee_user_id).toBe(alice.id);
+    // A member may create and assign too; a maximum-length title fits the notification in full.
+    const long = await createIssue(bob, project, { title: "x".repeat(200), assignee: alice.id });
+    expect(long.outcome).toBe("ok");
+    await owner.query("SET ROLE spark_owner");
+    const longTitle = (await owner.query(`SELECT title FROM ${table("notifications")} WHERE resource_id=$1`, [long.issue_id])).rows[0].title as string;
+    expect(longTitle).toBe(`Assigned Member assigned you ${key}-3: ${"x".repeat(200)}`);
+  });
+  it("guards issue creation", async () => {
+    const alice = await account("Issue Guard Owner"), bob = await account("Issue Guard Member"), carol = await account("Issue Guard Stranger");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    const other = await kanbanProject(carol);
+    expect(await createIssue(carol, project)).toEqual(refusedIssue("not_found"));
+    expect(await createIssue(alice, randomUUID())).toEqual(refusedIssue("not_found"));
+    expect(await createIssue(alice, other.project)).toEqual(refusedIssue("not_found"));
+    expect(await createIssue(alice, project, { assignee: carol.id })).toEqual(refusedIssue("invalid_assignee"));
+    expect(await createIssue(alice, project, { assignee: randomUUID() })).toEqual(refusedIssue("invalid_assignee"));
+    expect((await createIssue(bob, project, { title: "Member task" })).outcome).toBe("ok");
+
+    const rejects = async (input: IssueInput, message: string) =>
+      expect(createIssue(alice, project, input)).rejects.toMatchObject({ code: "22023", message });
+    await rejects({ status: await statusNamed(other.project, "Backlog") }, "Invalid issue status");
+    await rejects({ status: randomUUID() }, "Invalid issue status");
+    for (const title of ["x".repeat(201), "   ", ""]) await rejects({ title }, "Invalid issue title");
+    await rejects({ description: "x".repeat(10001) }, "Invalid issue description");
+    for (const type of ["epic", "subtask", "Task"]) await rejects({ type }, "Invalid issue type");
+    await rejects({ priority: "urgent" }, "Invalid issue priority");
+    for (const points of ["100.001", "-1", "100.01", "0.005"]) await rejects({ points }, "Invalid story points");
+    for (const due of ["1999-12-31", "2101-01-01", "infinity"]) await rejects({ due }, "Invalid due date");
+    await rejects({ phase: randomUUID() }, "Invalid issue phase");
+    await rejects({ key: "bad key", hash: randomBytes(32) }, "Invalid idempotency key");
+    await rejects({ key: "x".repeat(101), hash: randomBytes(32) }, "Invalid idempotency key");
+    await rejects({ key: "good-key", hash: randomBytes(31) }, "Invalid idempotency key");
+    await rejects({ key: "good-key" }, "Invalid idempotency key");
+    expect((await createIssue(alice, project, { points: "100", due: "2100-12-31" })).outcome).toBe("ok");
+    expect((await createIssue(alice, project, { points: "0", due: "2000-01-01", type: "story", priority: "lowest" })).outcome).toBe("ok");
+
+    // A project without statuses has no board to place the issue on.
+    const bare = randomUUID();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("projects")} (id,tenant_id,key,name) VALUES ($1,$2,'BARE','Bare')`, [bare, workspace]);
+    await owner.query(`INSERT INTO ${table("boards")} (tenant_id,project_id,name) VALUES ($1,$2,'Bare')`, [workspace, bare]);
+    expect(await createIssue(alice, bare)).toEqual(refusedIssue("no_board"));
+
+    // WIP: one slot in Ready, then full.
+    const ready = await statusNamed(project, "Ready");
+    await owner.query(`UPDATE ${table("issue_statuses")} SET wip_limit=1 WHERE id=$1`, [ready]);
+    expect((await createIssue(alice, project, { status: ready })).outcome).toBe("ok");
+    expect(await createIssue(alice, project, { status: ready })).toEqual(refusedIssue("wip_limit_reached"));
+
+    // Archived projects are invisible.
+    const archived = await kanbanProject(alice, workspace);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [archived.project]);
+    expect(await createIssue(alice, archived.project)).toEqual(refusedIssue("not_found"));
+
+    await expect(createIssue(null, project)).rejects.toMatchObject({ code: "28000" });
+    await expect(asSession(newTokenHash(), createIssueCall, issueArgs(project, {}))).rejects.toMatchObject({ code: "28000" });
+    expect(await countRows(`${table("issues")} WHERE project_id=$1`, [project])).toBe(4);
+    expect(await countRows(`${table("issues")} WHERE project_id=ANY($1::uuid[])`, [[bare, archived.project, other.project]])).toBe(0);
+  });
+  it("replays idempotent creates", async () => {
+    const alice = await account("Retry Owner"), bob = await account("Retry Member");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    const key = `quick-add:${randomUUID()}`, hash = randomBytes(32);
+    const first = await createIssue(alice, project, { title: "Once", key, hash });
+    expect(first).toEqual({ outcome: "ok", issue_id: expect.any(String), issue_version: 1 });
+    expect(await createIssue(alice, project, { title: "Once", key, hash })).toEqual({ outcome: "replayed", issue_id: first.issue_id, issue_version: 1 });
+    expect(await createIssue(alice, project, { title: "Changed", key, hash: randomBytes(32) })).toEqual(refusedIssue("idempotency_conflict"));
+    // The same key in another project of the workspace is a conflict, never a replay of a foreign issue.
+    const sibling = await kanbanProject(alice, workspace);
+    expect(await createIssue(alice, sibling.project, { title: "Once", key, hash })).toEqual(refusedIssue("idempotency_conflict"));
+    // Keys are scoped to the actor.
+    expect((await createIssue(bob, project, { title: "Once", key, hash })).outcome).toBe("ok");
+    expect(await countRows(`${table("issues")} WHERE project_id=$1 AND title='Once'`, [project])).toBe(2);
+    const stored = async () => (await owner.query(`SELECT operation,state,resource_id,response_status,request_hash,expires_at > now() + interval '23 hours' AS fresh
+      FROM ${table("idempotency_requests")} WHERE actor_user_id=$1 AND key=$2`, [alice.id, key])).rows;
+    await owner.query("SET ROLE spark_owner");
+    expect(await stored()).toEqual([{ operation: "issue.create", state: "completed", resource_id: first.issue_id, response_status: 201, request_hash: hash, fresh: true }]);
+
+    // An expired row is replaced and creates a new issue.
+    await owner.query(`UPDATE ${table("idempotency_requests")} SET expires_at=created_at+interval '1 millisecond' WHERE actor_user_id=$1 AND key=$2`, [alice.id, key]);
+    const renewed = await createIssue(alice, project, { title: "Once", key, hash });
+    expect(renewed.outcome).toBe("ok");
+    expect(renewed.issue_id).not.toBe(first.issue_id);
+    await owner.query("SET ROLE spark_owner");
+    expect(await stored()).toEqual([{ operation: "issue.create", state: "completed", resource_id: renewed.issue_id, response_status: 201, request_hash: hash, fresh: true }]);
+
+    // A refused create keeps no idempotency row, so a later retry can still succeed.
+    const ready = await statusNamed(project, "Ready");
+    await owner.query(`UPDATE ${table("issue_statuses")} SET wip_limit=1 WHERE id=$1`, [ready]);
+    expect((await createIssue(alice, project, { status: ready })).outcome).toBe("ok");
+    const fullKey = `full:${randomUUID()}`;
+    expect(await createIssue(alice, project, { status: ready, key: fullKey, hash })).toEqual(refusedIssue("wip_limit_reached"));
+    expect(await countRows(`${table("idempotency_requests")} WHERE key=$1`, [fullKey])).toBe(0);
+  });
+  it("admits WIP concurrently", async () => {
+    const alice = await account("WIP Racer A"), bob = await account("WIP Racer B");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    const ready = await statusNamed(project, "Ready");
+    await owner.query(`UPDATE ${table("issue_statuses")} SET wip_limit=2 WHERE id=$1`, [ready]);
+    expect((await createIssue(alice, project, { status: ready })).outcome).toBe("ok");
+    const clients = [0, 1].map(() => new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 }));
+    await Promise.all(clients.map((client) => client.connect()));
+    try {
+      const [first, second] = clients as [pg.Client, pg.Client];
+      for (const [client, who] of [[first, alice], [second, bob]] as const) {
+        await client.query("SET lock_timeout = '15s'");
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('spark.session_token_hash',$1,true)", [who.token.toString("hex")]);
+      }
+      const winner = (await first.query(createIssueCall, issueArgs(project, { title: "First in", status: ready }))).rows[0] as IssueResult;
+      expect(winner.outcome).toBe("ok");
+      const secondPid = (await second.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+      const competing = second.query(createIssueCall, issueArgs(project, { title: "Second in", status: ready }));
+      let blocked = false;
+      for (let attempt = 0; attempt < 100 && !blocked; attempt++) {
+        blocked = (await owner.query("SELECT count(*)::integer AS waiting FROM pg_locks WHERE pid=$1 AND NOT granted", [secondPid])).rows[0].waiting > 0;
+        if (!blocked) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(blocked).toBe(true);
+      await first.query("COMMIT");
+      expect(((await competing).rows[0] as IssueResult)).toEqual(refusedIssue("wip_limit_reached"));
+      await second.query("COMMIT");
+    } finally {
+      await Promise.allSettled(clients.map((client) => client.query("ROLLBACK")));
+      await Promise.allSettled(clients.map((client) => client.end()));
+    }
+    expect(await countRows(`${table("issues")} WHERE status_id=$1`, [ready])).toBe(2);
+  });
+  it("rolls back notifications with the transaction", async () => {
+    const alice = await account("Rollback Owner"), bob = await account("Rollback Member");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    const client = await runtime.connect();
+    let created: IssueResult;
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('spark.session_token_hash',$1,true)", [alice.token.toString("hex")]);
+      created = (await client.query(createIssueCall, issueArgs(project, { title: "Never kept", assignee: bob.id }))).rows[0] as IssueResult;
+      expect(created.outcome).toBe("ok");
+      await client.query("ROLLBACK");
+    } finally { client.release(); }
+    expect(await countRows(`${table("issues")} WHERE id=$1`, [created.issue_id])).toBe(0);
+    expect(await countRows(`${table("issue_events")} WHERE issue_id=$1`, [created.issue_id])).toBe(0);
+    expect(await countRows(`${table("outbox_events")} WHERE aggregate_id=$1`, [created.issue_id])).toBe(0);
+    expect(await countRows(`${table("notifications")} WHERE tenant_id=$1`, [workspace])).toBe(0);
+    expect((await owner.query(`SELECT next_issue_number::integer AS next FROM ${table("projects")} WHERE id=$1`, [project])).rows[0].next).toBe(1);
+  });
+  it("lets recipients read only their notifications", async () => {
+    const alice = await account("Notice Owner"), bob = await account("Notice Recipient"), carol = await account("Notice Bystander");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const assigned = await createIssue(alice, project, { title: "Read me", assignee: bob.id });
+    expect(assigned.outcome).toBe("ok");
+    const read = async (who: Account | null) => (await asSession(who?.token ?? null, `SELECT kind,resource_id FROM ${table("notifications")}`)).rows;
+    expect(await read(bob)).toEqual([{ kind: "issue_assigned", resource_id: assigned.issue_id }]);
+    expect(await read(carol)).toEqual([]);
+    expect(await read(alice)).toEqual([]);
+    expect(await read(null)).toEqual([]);
+    expect(await outcome(bob, "ws_remove_member($1,$2)", [workspace, bob.id])).toBe("ok");
+    expect(await read(bob)).toEqual([]);
+  });
+  it("clears the project lead when the lead is removed", async () => {
+    const alice = await account("Lead Owner"), bob = await account("Lead Member");
+    const workspace = (await createWorkspace(alice)).workspace_id!, elsewhere = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(elsewhere, bob, "member");
+    const led = (await createProject(alice, workspace, { key: "LEDA", methodology: "kanban", lead: bob.id })).project_id!;
+    const kept = (await createProject(alice, workspace, { key: "LEDB", methodology: "kanban", lead: alice.id })).project_id!;
+    const foreign = (await createProject(alice, elsewhere, { key: "LEDC", methodology: "kanban", lead: bob.id })).project_id!;
+    expect(await outcome(alice, "ws_remove_member($1,$2)", [workspace, bob.id])).toBe("ok");
+    await owner.query("SET ROLE spark_owner");
+    const leads = async (project: string) => (await owner.query(`SELECT lead_user_id,settings_version FROM ${table("projects")} WHERE id=$1`, [project])).rows[0];
+    expect(await leads(led)).toEqual({ lead_user_id: null, settings_version: 2 });
+    expect(await leads(kept)).toEqual({ lead_user_id: alice.id, settings_version: 1 });
+    expect(await leads(foreign)).toEqual({ lead_user_id: bob.id, settings_version: 1 });
+    const membership = (await owner.query(`SELECT id,status FROM ${table("workspace_memberships")} WHERE tenant_id=$1 AND user_id=$2`, [workspace, bob.id])).rows[0];
+    expect(membership.status).toBe("left");
+    expect((await auditRows(membership.id)).map((row) => row.action)).toEqual(["member.removed"]);
+  });
+  it("replays a create with the issue's current version", async () => {
+    const alice = await account("Replay After Edit");
+    const { project } = await kanbanProject(alice);
+    const key = `quick-add:${randomUUID()}`, hash = randomBytes(32);
+    const first = await createIssue(alice, project, { title: "Edited later", key, hash });
+    expect(first.outcome).toBe("ok");
+    expect(await updateIssue(alice, first.issue_id!, 1, { title: "Edited" })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect(await createIssue(alice, project, { title: "Edited later", key, hash })).toEqual({ outcome: "replayed", issue_id: first.issue_id, issue_version: 2 });
+  });
+  it("moves and reorders issues", async () => {
+    const alice = await account("Board Mover");
+    const { project } = await kanbanProject(alice);
+    const progress = await statusNamed(project, "In progress");
+    const ids: string[] = [];
+    for (const title of ["A", "B", "C", "D"]) ids.push((await createIssue(alice, project, { title })).issue_id!);
+    const [a, b, c, d] = ids as [string, string, string, string];
+    expect(await updateIssue(alice, a, 1, { statusId: progress })).toEqual({ outcome: "ok", issue_version: 2 });
+    await owner.query("SET ROLE spark_owner");
+    const moved = (await owner.query(`SELECT status_id,position::text AS position,started_at,version FROM ${table("issues")} WHERE id=$1`, [a])).rows[0];
+    expect(moved).toEqual({ status_id: progress, position: "1024.000000", started_at: expect.any(Date), version: 2 });
+    const events = await issueEvents(a);
+    expect(events).toHaveLength(2);
+    expect(events[1]).toMatchObject({ event_type: "issue.updated", actor_user_id: alice.id, from_version: 1, to_version: 2 });
+    expect(events[1].changes).toEqual({ fields: ["statusId"], after: { statusId: progress, category: "in_progress", assigneeUserId: null, storyPoints: null, phaseId: null, sprintId: null, archived: false } });
+    expect((await owner.query(`SELECT event_type,processed_at IS NOT NULL AS processed FROM ${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=2`, [a])).rows)
+      .toEqual([{ event_type: "issue.updated", processed: true }]);
+
+    // Moves without a position go to the end of the target column.
+    expect((await updateIssue(alice, b, 1, { statusId: progress })).outcome).toBe("ok");
+    expect((await updateIssue(alice, c, 1, { statusId: progress })).outcome).toBe("ok");
+    expect(await columnOrder(progress)).toEqual([a, b, c]);
+    // afterIssueId null puts the issue first; afterIssueId X right after X.
+    expect(await updateIssue(alice, c, 2, { afterIssueId: null })).toEqual({ outcome: "ok", issue_version: 3 });
+    expect(await columnOrder(progress)).toEqual([c, a, b]);
+    expect((await issueEvents(c))[2].changes.fields).toEqual(["position"]);
+    expect(await updateIssue(alice, c, 3, { afterIssueId: a })).toEqual({ outcome: "ok", issue_version: 4 });
+    expect(await columnOrder(progress)).toEqual([a, c, b]);
+    expect(await updateIssue(alice, d, 1, { statusId: progress, afterIssueId: a })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect(await columnOrder(progress)).toEqual([a, d, c, b]);
+    expect((await issueEvents(d))[1].changes.fields).toEqual(["position", "statusId"]);
+    // Dropping an issue where it already is changes nothing.
+    expect(await updateIssue(alice, d, 2, { afterIssueId: a })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect(await issueEvents(d)).toHaveLength(2);
+    await owner.query("SET ROLE spark_owner");
+    const positions = (await owner.query(`SELECT position::numeric AS position FROM ${table("issues")} WHERE status_id=$1 ORDER BY position,id`, [progress])).rows.map((row) => Number(row.position));
+    for (let index = 1; index < positions.length; index++) expect(positions[index]!).toBeGreaterThan(positions[index - 1]!);
+    // Other issues were never touched.
+    for (const issue of [a, b]) expect(await issueVersion(issue)).toBe(2);
+  });
+  it("rebalances a crowded column", async () => {
+    const alice = await account("Crowded Column");
+    const { project } = await kanbanProject(alice);
+    const backlog = await statusNamed(project, "Backlog");
+    const ids: string[] = [];
+    for (const title of ["F", "P", "Q", "R"]) ids.push((await createIssue(alice, project, { title })).issue_id!);
+    const [f, p, q, r] = ids as [string, string, string, string];
+    const intended = [f, p, q, r];
+    for (let move = 0; move < 25; move++) {
+      const mover = move % 2 === 0 ? q : p;
+      const result = await updateIssue(alice, mover, await issueVersion(mover), { afterIssueId: f });
+      expect({ move, outcome: result.outcome }).toEqual({ move, outcome: "ok" });
+      intended.splice(intended.indexOf(mover), 1);
+      intended.splice(1, 0, mover);
+      expect(await columnOrder(backlog)).toEqual(intended);
+    }
+    expect(intended).toEqual([f, q, p, r]);
+    await owner.query("SET ROLE spark_owner");
+    const reranked = (await owner.query(`SELECT issue_id,to_version,actor_user_id,changes FROM ${table("issue_events")} WHERE project_id=$1 AND event_type='issue.reranked'`, [project])).rows;
+    expect(reranked.length).toBeGreaterThan(0);
+    for (const event of reranked) {
+      expect(event.actor_user_id).toBe(alice.id);
+      expect(event.changes.fields).toEqual(["position"]);
+      expect(event.changes.after).toMatchObject({ statusId: backlog, category: "backlog", archived: false });
+      expect((await owner.query(`SELECT event_type,processed_at IS NOT NULL AS processed FROM ${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=$2`,
+        [event.issue_id, event.to_version])).rows).toEqual([{ event_type: "issue.reranked", processed: true }]);
+    }
+    for (const issue of ids) {
+      const version = await issueVersion(issue);
+      const history = await issueEvents(issue);
+      expect(history.map((row) => row.to_version)).toEqual(Array.from({ length: version }, (_, index) => index + 1));
+      expect(await countRows(`${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1`, [issue])).toBe(version);
+    }
+    // After a rebalance the gaps are wide again.
+    const positions = (await owner.query(`SELECT position::numeric AS position FROM ${table("issues")} WHERE status_id=$1 ORDER BY position,id`, [backlog])).rows.map((row) => Number(row.position));
+    for (let index = 1; index < positions.length; index++) expect(positions[index]! - positions[index - 1]!).toBeGreaterThanOrEqual(0.001);
+  });
+  it("applies a rebalancing reorder that keeps the mover's position", async () => {
+    const alice = await account("Rebalance Keeper");
+    const { project } = await kanbanProject(alice);
+    const backlog = await statusNamed(project, "Backlog");
+    const x = (await createIssue(alice, project, { title: "X" })).issue_id!;
+    const m = (await createIssue(alice, project, { title: "M" })).issue_id!;
+    const inserted: string[] = [];
+    for (let index = 0; index < 19; index++) {
+      const issue = (await createIssue(alice, project, { title: `I${index}` })).issue_id!;
+      expect(await updateIssue(alice, issue, 1, { afterIssueId: x })).toEqual({ outcome: "ok", issue_version: 2 });
+      inserted.unshift(issue);
+    }
+    expect(await countRows(`${table("issue_events")} WHERE project_id=$1 AND event_type='issue.reranked'`, [project])).toBe(0);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT position::text AS position FROM ${table("issues")} WHERE id=$1`, [m])).rows[0].position).toBe("2048.000000");
+    // M lands at slot 2 of the renumbered column, i.e. 2048 again, but the move and the rebalance still apply.
+    expect(await updateIssue(alice, m, 1, { afterIssueId: x })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect(await columnOrder(backlog)).toEqual([x, m, ...inserted]);
+    expect((await issueEvents(m))[1].changes.fields).toEqual(["position"]);
+    expect(await countRows(`${table("issue_events")} WHERE project_id=$1 AND event_type='issue.reranked'`, [project])).toBeGreaterThan(0);
+  });
+  it("rebalances only a bounded window of a long column", async () => {
+    const alice = await account("Long Column");
+    const { project } = await kanbanProject(alice);
+    const backlog = await statusNamed(project, "Backlog");
+    const ids: string[] = [];
+    for (let index = 0; index < 200; index++) ids.push((await createIssue(alice, project, { title: `L${index}` })).issue_id!);
+    const anchor = ids[100]!, movers = [ids[198]!, ids[199]!];
+    const intended = [...ids];
+    const events = () => countRows(`${table("issue_events")} WHERE project_id=$1`, [project]);
+    let rebalanced = 0;
+    for (let move = 0; move < 26; move++) {
+      const mover = movers[move % 2]!;
+      const before = await events();
+      expect((await updateIssue(alice, mover, await issueVersion(mover), { afterIssueId: anchor })).outcome).toBe("ok");
+      const written = (await events()) - before;
+      expect(written).toBeLessThanOrEqual(50);
+      if (written > 1) rebalanced++;
+      intended.splice(intended.indexOf(mover), 1);
+      intended.splice(intended.indexOf(anchor) + 1, 0, mover);
+    }
+    expect(rebalanced).toBeGreaterThan(0);
+    expect(await columnOrder(backlog)).toEqual(intended);
+    // Issues far from the drop point were never renumbered.
+    for (const issue of [...ids.slice(0, 50), ...ids.slice(160, 198)]) expect(await issueVersion(issue)).toBe(1);
+  });
+  it("falls back to renumbering the column when the local span is too dense", async () => {
+    const alice = await account("Dense Column");
+    const { workspace, project } = await kanbanProject(alice);
+    const backlog = await statusNamed(project, "Backlog");
+    const ids: string[] = [];
+    for (let index = 0; index < 60; index++) ids.push((await createIssue(alice, project, { title: `D${index}` })).issue_id!);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query("BEGIN");
+    try {
+      for (const [index, issue] of ids.entries()) {
+        await owner.query(`UPDATE ${table("issues")} SET position=$2,version=2 WHERE id=$1`, [issue, 1024 + index * 0.0005]);
+        await owner.query(`INSERT INTO ${table("issue_events")} (tenant_id,project_id,issue_id,actor_user_id,event_type,from_version,to_version,changes) VALUES ($1,$2,$3,$4,'issue.reranked',1,2,'{}')`, [workspace, project, issue, alice.id]);
+        await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload,processed_at) VALUES ($1,'issue.reranked','issue',$2,2,'{}',now())`, [workspace, issue]);
+      }
+      await owner.query("COMMIT");
+    } catch (error) { await owner.query("ROLLBACK"); throw error; }
+    const mover = ids[59]!;
+    expect(await updateIssue(alice, mover, 2, { afterIssueId: ids[30] })).toEqual({ outcome: "ok", issue_version: 3 });
+    const intended = [...ids.slice(0, 31), mover, ...ids.slice(31, 59)];
+    expect(await columnOrder(backlog)).toEqual(intended);
+    await owner.query("SET ROLE spark_owner");
+    const positions = (await owner.query(`SELECT i.position::text AS position FROM ${table("issues")} i WHERE i.status_id=$1 ORDER BY i.position,i.id`, [backlog])).rows;
+    expect(positions.map((row) => row.position)).toEqual(intended.map((_, index) => `${1024 * (index + 1)}.000000`));
+  });
+  it("rejects a stale version once under concurrency", async () => {
+    const alice = await account("Edit Racer A"), bob = await account("Edit Racer B");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    const issue = (await createIssue(alice, project, { title: "Contested" })).issue_id!;
+    const clients = await sessionPair([alice, bob]);
+    try {
+      const [first, second] = clients;
+      expect((await first.query(updateIssueCall, [issue, 1, JSON.stringify({ title: "Alice wins" })])).rows[0]).toEqual({ outcome: "ok", issue_version: 2 });
+      const secondPid = await backendPid(second);
+      const competing = second.query(updateIssueCall, [issue, 1, JSON.stringify({ title: "Bob loses" })]);
+      expect(await waitUntilBlocked(secondPid)).toBe(true);
+      await first.query("COMMIT");
+      expect((await competing).rows[0]).toEqual({ outcome: "version_mismatch", issue_version: 2 });
+      await second.query("COMMIT");
+    } finally { await closePair(clients); }
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT title,version FROM ${table("issues")} WHERE id=$1`, [issue])).rows[0]).toEqual({ title: "Alice wins", version: 2 });
+  });
+  it("enforces WIP on moves but not on reorders", async () => {
+    const alice = await account("WIP Mover A"), bob = await account("WIP Mover B");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    const review = await statusNamed(project, "Review");
+    const ids: string[] = [];
+    for (const title of ["One", "Two", "Three", "Four", "Five"]) ids.push((await createIssue(alice, project, { title })).issue_id!);
+    for (const issue of ids.slice(0, 3)) expect(await updateIssue(alice, issue, 1, { statusId: review })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect(await updateIssue(alice, ids[3]!, 1, { statusId: review })).toEqual({ outcome: "wip_limit_reached", issue_version: null });
+    expect(await updateIssue(alice, ids[3]!, 1, { statusId: review, afterIssueId: ids[0] })).toEqual({ outcome: "wip_limit_reached", issue_version: null });
+    expect(await issueVersion(ids[3]!)).toBe(1);
+    // Reordering and editing inside the full column are never blocked.
+    expect(await updateIssue(alice, ids[2]!, 2, { afterIssueId: null })).toEqual({ outcome: "ok", issue_version: 3 });
+    expect(await updateIssue(alice, ids[2]!, 3, { title: "Three, edited", statusId: review })).toEqual({ outcome: "ok", issue_version: 4 });
+    expect(await columnOrder(review)).toEqual([ids[2], ids[0], ids[1]]);
+
+    // Two concurrent moves into the last free slot: one wins.
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("issue_statuses")} SET wip_limit=4 WHERE id=$1`, [review]);
+    const clients = await sessionPair([alice, bob]);
+    try {
+      const [first, second] = clients;
+      expect((await first.query(updateIssueCall, [ids[3], 1, JSON.stringify({ statusId: review })])).rows[0]).toEqual({ outcome: "ok", issue_version: 2 });
+      const secondPid = await backendPid(second);
+      const competing = second.query(updateIssueCall, [ids[4], 1, JSON.stringify({ statusId: review })]);
+      expect(await waitUntilBlocked(secondPid)).toBe(true);
+      await first.query("COMMIT");
+      expect((await competing).rows[0]).toEqual({ outcome: "wip_limit_reached", issue_version: null });
+      await second.query("COMMIT");
+    } finally { await closePair(clients); }
+    expect(await countRows(`${table("issues")} WHERE status_id=$1 AND archived_at IS NULL`, [review])).toBe(4);
+  });
+  it("guards issue updates", async () => {
+    const alice = await account("Guard Owner"), bob = await account("Guard Member"), carol = await account("Guard Stranger"), dave = await account("Guard Leaver");
+    const { workspace, project, key } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, dave, "member");
+    expect(await outcome(dave, "ws_remove_member($1,$2)", [workspace, dave.id])).toBe("ok");
+    const issue = (await createIssue(alice, project, { title: "Guarded" })).issue_id!;
+    const other = (await createIssue(alice, project, { title: "Elsewhere", status: await statusNamed(project, "Ready") })).issue_id!;
+    const foreign = await kanbanProject(carol);
+    const plan = (await createProject(alice, workspace, waterfallInput(`W${randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`))).project_id!;
+    await owner.query("SET ROLE spark_owner");
+    const foreignPhase = (await owner.query(`SELECT id FROM ${table("project_phases")} WHERE project_id=$1 ORDER BY position LIMIT 1`, [plan])).rows[0].id as string;
+
+    expect(await updateIssue(carol, issue, 1, { title: "Stranger" })).toEqual({ outcome: "not_found", issue_version: null });
+    expect(await updateIssue(dave, issue, 1, { title: "Leaver" })).toEqual({ outcome: "not_found", issue_version: null });
+    expect(await updateIssue(alice, randomUUID(), 1, { title: "Missing" })).toEqual({ outcome: "not_found", issue_version: null });
+    expect(await updateIssue(alice, issue, 7, { title: "Stale" })).toEqual({ outcome: "version_mismatch", issue_version: 1 });
+    expect(await updateIssue(alice, issue, 1, { assigneeUserId: dave.id })).toEqual({ outcome: "invalid_assignee", issue_version: null });
+    expect(await updateIssue(alice, issue, 1, { assigneeUserId: carol.id })).toEqual({ outcome: "invalid_assignee", issue_version: null });
+    expect(await updateIssue(alice, issue, 1, { assigneeUserId: "not-a-uuid" })).toEqual({ outcome: "invalid_assignee", issue_version: null });
+
+    const rejects = async (patch: unknown, message: string) =>
+      expect(updateIssue(alice, issue, 1, patch)).rejects.toMatchObject({ code: "22023", message });
+    await rejects({}, "Invalid issue patch");
+    await rejects({ methodology: "x" }, "Invalid issue patch");
+    await rejects({ title: "Fine", sprintId: null }, "Invalid issue patch");
+    await rejects(["title"], "Invalid issue patch");
+    await rejects({ archived: "yes" }, "Invalid issue patch");
+    for (const title of ["   ", "x".repeat(201), 42]) await rejects({ title }, "Invalid issue title");
+    await rejects({ description: "x".repeat(10001) }, "Invalid issue description");
+    for (const type of ["epic", "subtask", null]) await rejects({ type }, "Invalid issue type");
+    for (const priority of ["urgent", null]) await rejects({ priority }, "Invalid issue priority");
+    for (const storyPoints of [100.01, -1, 0.005, "3"]) await rejects({ storyPoints }, "Invalid story points");
+    for (const dueDate of ["1999-12-31", "2101-01-01", "2026-02-30", "infinity", 20261201]) await rejects({ dueDate }, "Invalid due date");
+    for (const statusId of [null, randomUUID(), "nope", await statusNamed(foreign.project, "Backlog")]) await rejects({ statusId }, "Invalid issue status");
+    for (const phaseId of [foreignPhase, randomUUID(), "nope"]) await rejects({ phaseId }, "Invalid issue phase");
+    for (const afterIssueId of [issue, other, randomUUID(), "nope", 5]) await rejects({ afterIssueId }, "Invalid issue position");
+    // A position is valid when the anchor is in the target status.
+    expect(await updateIssue(alice, issue, 1, { statusId: await statusNamed(project, "Ready"), afterIssueId: other })).toEqual({ outcome: "ok", issue_version: 2 });
+
+    // Reassigning notifies the new assignee once; assigning yourself notifies nobody.
+    expect(await updateIssue(alice, issue, 2, { assigneeUserId: bob.id, title: "  Guarded, assigned  " })).toEqual({ outcome: "ok", issue_version: 3 });
+    expect(await updateIssue(alice, issue, 3, { assigneeUserId: alice.id })).toEqual({ outcome: "ok", issue_version: 4 });
+    expect(await updateIssue(bob, issue, 4, { assigneeUserId: null, storyPoints: 2.5, dueDate: "2026-12-01", priority: "high", type: "bug", description: "  Steps  " }))
+      .toEqual({ outcome: "ok", issue_version: 5 });
+    await owner.query("SET ROLE spark_owner");
+    const outboxId = (await owner.query(`SELECT id FROM ${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=3`, [issue])).rows[0].id;
+    expect((await owner.query(`SELECT recipient_user_id,outbox_event_id,kind,title,resource_type,resource_id FROM ${table("notifications")} WHERE tenant_id=$1`, [workspace])).rows)
+      .toEqual([{ recipient_user_id: bob.id, outbox_event_id: outboxId, kind: "issue_assigned", title: `Guard Owner assigned you ${key}-1: Guarded, assigned`, resource_type: "issue", resource_id: issue }]);
+    expect((await owner.query(`SELECT title,description,type,priority,assignee_user_id,story_points::text AS points,due_date::text AS due FROM ${table("issues")} WHERE id=$1`, [issue])).rows[0])
+      .toEqual({ title: "Guarded, assigned", description: "Steps", type: "bug", priority: "high", assignee_user_id: null, points: "2.50", due: "2026-12-01" });
+    const history = await issueEvents(issue);
+    expect(history.map((row) => row.changes.fields)).toEqual([expect.any(Array), ["position", "statusId"], ["assigneeUserId", "title"], ["assigneeUserId"],
+      ["assigneeUserId", "description", "dueDate", "priority", "storyPoints", "type"]]);
+    expect(history[4].changes.after).toMatchObject({ assigneeUserId: null, storyPoints: 2.5 });
+    expect(JSON.stringify(history.map((row) => row.changes))).not.toContain("Guarded");
+
+    // A patch that changes no value writes nothing.
+    expect(await updateIssue(alice, issue, 5, { title: "Guarded, assigned", description: "Steps", storyPoints: 2.50 })).toEqual({ outcome: "ok", issue_version: 5 });
+    expect(await issueEvents(issue)).toHaveLength(5);
+    expect(await countRows(`${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1`, [issue])).toBe(5);
+
+    // Clearing and setting a phase of the same project.
+    const ownPhaseProject = (await createProject(alice, workspace, waterfallInput(`V${randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`))).project_id!;
+    await owner.query("SET ROLE spark_owner");
+    const ownPhase = (await owner.query(`SELECT id FROM ${table("project_phases")} WHERE project_id=$1 ORDER BY position LIMIT 1`, [ownPhaseProject])).rows[0].id as string;
+    const planned = (await createIssue(alice, ownPhaseProject, { title: "Planned" })).issue_id!;
+    expect(await updateIssue(alice, planned, 1, { phaseId: ownPhase })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect((await issueEvents(planned))[1].changes.after.phaseId).toBe(ownPhase);
+    expect(await updateIssue(alice, planned, 2, { phaseId: null })).toEqual({ outcome: "ok", issue_version: 3 });
+
+    // Archived projects are invisible.
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [project]);
+    expect(await updateIssue(alice, issue, 5, { title: "Archived project" })).toEqual({ outcome: "not_found", issue_version: null });
+    await expect(asSession(newTokenHash(), updateIssueCall, [issue, 5, JSON.stringify({ title: "No session" })])).rejects.toMatchObject({ code: "28000" });
+  });
+  it("archives and restores issues", async () => {
+    const alice = await account("Archiver");
+    const { project } = await kanbanProject(alice);
+    const review = await statusNamed(project, "Review");
+    const ids: string[] = [];
+    for (const title of ["One", "Two", "Three"]) ids.push((await createIssue(alice, project, { title, status: review })).issue_id!);
+    expect(await updateIssue(alice, ids[0]!, 1, { archived: true })).toEqual({ outcome: "ok", issue_version: 2 });
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT archived_at IS NOT NULL AS archived FROM ${table("issues")} WHERE id=$1`, [ids[0]])).rows[0].archived).toBe(true);
+    expect((await issueEvents(ids[0]!))[1].changes).toMatchObject({ fields: ["archived"], after: { archived: true, statusId: review } });
+    // The archived issue no longer counts against the WIP limit.
+    const replacement = await createIssue(alice, project, { title: "Replacement", status: review });
+    expect(replacement.outcome).toBe("ok");
+    expect(await updateIssue(alice, ids[0]!, 2, { archived: false })).toEqual({ outcome: "wip_limit_reached", issue_version: null });
+    for (const patch of [{ title: "Edited while archived" }, { archived: false, title: "Edited" }, { archived: true }, { afterIssueId: null }]) {
+      await expect(updateIssue(alice, ids[0]!, 2, patch)).rejects.toMatchObject({ code: "22023", message: "Invalid issue patch" });
+    }
+    // Once a slot frees up the issue is restored at the end of its column.
+    expect(await updateIssue(alice, ids[1]!, 1, { archived: true })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect(await updateIssue(alice, ids[0]!, 2, { archived: false })).toEqual({ outcome: "ok", issue_version: 3 });
+    expect(await columnOrder(review)).toEqual([ids[2], replacement.issue_id, ids[0]]);
+    expect((await issueEvents(ids[0]!))[2].changes).toMatchObject({ fields: ["archived"], after: { archived: false } });
+    // Restoring an issue that is not archived changes nothing.
+    expect(await updateIssue(alice, ids[0]!, 3, { archived: false })).toEqual({ outcome: "ok", issue_version: 3 });
+  });
+  it("skips no-op project settings updates", async () => {
+    const alice = await account("Quiet Owner");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    const project = (await createProject(alice, workspace, { key: "QUIET", methodology: "scrum", name: "Quiet", sprint: 14, lead: alice.id })).project_id!;
+    expect(await updateProject(alice, project, 1, { name: "  Quiet  ", sprintLengthDays: 14, leadUserId: alice.id, description: "" })).toEqual({ outcome: "ok", settings_version: 1 });
+    expect((await auditRows(project)).filter((row) => row.action === "project.updated")).toEqual([]);
+    expect(await updateProject(alice, project, 1, { name: "Loud" })).toEqual({ outcome: "ok", settings_version: 2 });
+    expect((await auditRows(project)).filter((row) => row.action === "project.updated")).toHaveLength(1);
+    // Validation and the version check still run first.
+    expect(await updateProject(alice, project, 1, { name: "Loud" })).toEqual({ outcome: "version_mismatch", settings_version: 2 });
+    await expect(updateProject(alice, project, 2, { name: " " })).rejects.toMatchObject({ code: "22023", message: "Invalid project name" });
+  });
+  it("queues one assignment email per notification", async () => {
+    const alice = await account("Mail Assigner"), bob = await account("Mail Assignee"), carol = await account("Mail Other");
+    const { workspace, project, key } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const slug = (await owner.query(`SELECT slug FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows[0].slug as string;
+    const outboxOf = async (issue: string, version: number) => {
+      await owner.query("SET ROLE spark_owner");
+      return (await owner.query(`SELECT payload,processed_at IS NULL AS pending FROM ${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=$2`,
+        [issue, version])).rows[0] as { payload: Record<string, unknown>; pending: boolean };
+    };
+    const noticeOf = async (issue: string, recipient: string) => {
+      await owner.query("SET ROLE spark_owner");
+      return (await owner.query(`SELECT n.id,o.aggregate_version FROM ${table("notifications")} n JOIN ${table("outbox_events")} o ON o.id=n.outbox_event_id
+        WHERE n.resource_id=$1 AND n.recipient_user_id=$2 ORDER BY o.aggregate_version DESC LIMIT 1`, [issue, recipient])).rows[0].id as string;
+    };
+    const view = async (id: string) => (await workerRuntime.query(`SELECT * FROM ${fn("worker_task_assigned_email")}($1)`, [id])).rows;
+    const statusOf = async (id: string) => (await view(id))[0]?.status as string | undefined;
+    const record = async (id: string, status: string) =>
+      (await workerRuntime.query(`SELECT ${fn("worker_record_email_delivery")}($1,$2) AS recorded`, [id, status])).rows[0].recorded as boolean;
+
+    // Creating with another member as assignee leaves exactly that outbox row for the worker.
+    const assigned = (await createIssue(alice, project, { title: "Ship the <b>deck</b>", assignee: bob.id })).issue_id!;
+    const notice = await noticeOf(assigned, bob.id);
+    expect(await outboxOf(assigned, 1)).toEqual({ pending: true,
+      payload: { issueId: assigned, projectId: project, actorUserId: alice.id, assigneeUserId: bob.id, version: 1, notificationId: notice } });
+    const self = (await createIssue(alice, project, { title: "Mine", assignee: alice.id })).issue_id!;
+    expect(await outboxOf(self, 1)).toEqual({ pending: false, payload: { issueId: self, projectId: project, actorUserId: alice.id, assigneeUserId: alice.id } });
+    const unassigned = (await createIssue(alice, project, { title: "Nobody" })).issue_id!;
+    expect((await outboxOf(unassigned, 1)).pending).toBe(false);
+
+    const details = { email: bob.email.toLowerCase(), recipient_name: "Mail Assignee", actor_name: "Mail Assigner", workspace_name: "Acme", workspace_slug: slug,
+      project_key: key, project_name: "Project", issue_number: "1", issue_title: "Ship the <b>deck</b>" };
+    expect(await view(notice)).toEqual([{ status: "pending", ...details }]);
+    expect(await view(randomUUID())).toEqual([]);
+    await expect(record(notice, "failed")).rejects.toMatchObject({ code: "22023" });
+    expect(await record(randomUUID(), "sent")).toBe(false);
+    expect(await record(notice, "sent")).toBe(true);
+    expect(await record(notice, "sent")).toBe(false);
+    expect(await record(notice, "suppressed")).toBe(false);
+    expect(await view(notice)).toEqual([{ status: "skipped", ...Object.fromEntries(Object.keys(details).map((name) => [name, null])) }]);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT channel,status,delivered_at IS NOT NULL AS delivered FROM ${table("notification_deliveries")} WHERE notification_id=$1`, [notice])).rows)
+      .toEqual([{ channel: "email", status: "sent", delivered: true }]);
+
+    // Updates: a new assignee gets a pending row; self-assignment and other edits stay processed.
+    expect((await updateIssue(alice, unassigned, 1, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    const carolNotice = await noticeOf(unassigned, carol.id);
+    expect(await outboxOf(unassigned, 2)).toEqual({ pending: true,
+      payload: { issueId: unassigned, projectId: project, actorUserId: alice.id, assigneeUserId: carol.id, version: 2, notificationId: carolNotice } });
+    expect((await updateIssue(alice, self, 1, { title: "Still mine" })).outcome).toBe("ok");
+    expect((await outboxOf(self, 2)).pending).toBe(false);
+    expect((await updateIssue(carol, self, 2, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    expect(await outboxOf(self, 3)).toEqual({ pending: false, payload: { issueId: self, projectId: project, actorUserId: carol.id, assigneeUserId: carol.id } });
+
+    // A disabled preference suppresses the email; no row or an enabled row means enabled.
+    expect(await statusOf(carolNotice)).toBe("pending");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("notification_preferences")} (user_id,kind,channel,enabled) VALUES ($1,'task_assigned','email',false)`, [carol.id]);
+    expect(await statusOf(carolNotice)).toBe("skipped");
+    await owner.query(`UPDATE ${table("notification_preferences")} SET enabled=true WHERE user_id=$1`, [carol.id]);
+    expect(await statusOf(carolNotice)).toBe("pending");
+
+    // Reassigned or archived in the meantime: nothing to send.
+    const moving = (await createIssue(alice, project, { title: "Moving target", assignee: bob.id })).issue_id!;
+    const movingNotice = await noticeOf(moving, bob.id);
+    expect(await statusOf(movingNotice)).toBe("pending");
+    expect((await updateIssue(alice, moving, 1, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    expect(await statusOf(movingNotice)).toBe("skipped");
+    expect((await updateIssue(alice, unassigned, 2, { archived: true })).outcome).toBe("ok");
+    expect(await statusOf(carolNotice)).toBe("skipped");
+
+    // A recipient who left the workspace gets nothing.
+    const leaving = (await createIssue(alice, project, { title: "Before leaving", assignee: bob.id })).issue_id!;
+    const leavingNotice = await noticeOf(leaving, bob.id);
+    expect(await statusOf(leavingNotice)).toBe("pending");
+    expect(await outcome(alice, "ws_remove_member($1,$2)", [workspace, bob.id])).toBe("ok");
+    expect(await statusOf(leavingNotice)).toBe("skipped");
+
+    for (const role of [runtime, authRuntime]) {
+      await expect(role.query(`SELECT * FROM ${fn("worker_task_assigned_email")}($1)`, [notice])).rejects.toMatchObject({ code: "42501" });
+      await expect(role.query(`SELECT ${fn("worker_record_email_delivery")}($1,'sent')`, [notice])).rejects.toMatchObject({ code: "42501" });
+    }
+  });
+  it("bounds assignment emails per recipient", async () => {
+    const alice = await account("Limit Assigner"), bob = await account("Limit Assignee"), carol = await account("Limit Other"), dave = await account("Limit Busy");
+    const { workspace, project } = await kanbanProject(alice);
+    for (const who of [bob, carol, dave]) await addMember(workspace, who, "member");
+    const noticesOf = async (issue: string, recipient: string) => {
+      await owner.query("SET ROLE spark_owner");
+      return (await owner.query(`SELECT n.id FROM ${table("notifications")} n JOIN ${table("outbox_events")} o ON o.id=n.outbox_event_id
+        WHERE n.resource_id=$1 AND n.recipient_user_id=$2 ORDER BY o.aggregate_version`, [issue, recipient])).rows.map((row) => row.id as string);
+    };
+    const statusOf = async (id: string) => (await workerRuntime.query(`SELECT status FROM ${fn("worker_task_assigned_email")}($1)`, [id])).rows[0]?.status as string | undefined;
+    const send = async (id: string) =>
+      (await workerRuntime.query(`SELECT ${fn("worker_record_email_delivery")}($1,'sent') AS recorded`, [id])).rows[0].recorded as boolean;
+    const deliveredAgo = async (id: string, minutes: number) => {
+      await owner.query("SET ROLE spark_owner");
+      await owner.query(`UPDATE ${table("notification_deliveries")} SET delivered_at=now()-make_interval(mins => $2) WHERE notification_id=$1`, [id, minutes]);
+    };
+
+    // Latest only: assigned B, then C, then B again before the worker ran: only the last notice to B is emailed.
+    const issue = (await createIssue(alice, project, { title: "Bounced", assignee: bob.id })).issue_id!;
+    expect((await updateIssue(alice, issue, 1, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    expect((await updateIssue(alice, issue, 2, { assigneeUserId: bob.id })).outcome).toBe("ok");
+    const [firstToBob, latestToBob] = await noticesOf(issue, bob.id) as [string, string];
+    expect(await statusOf(firstToBob)).toBe("skipped");
+    expect(await statusOf(latestToBob)).toBe("pending");
+
+    // Same issue window: a second email for the same issue within 10 minutes is skipped.
+    expect(await send(latestToBob)).toBe(true);
+    expect((await updateIssue(alice, issue, 3, { assigneeUserId: carol.id })).outcome).toBe("ok");
+    expect((await updateIssue(alice, issue, 4, { assigneeUserId: bob.id })).outcome).toBe("ok");
+    const againToBob = (await noticesOf(issue, bob.id))[2]!;
+    expect(await statusOf(againToBob)).toBe("skipped");
+    await deliveredAgo(latestToBob, 9);
+    expect(await statusOf(againToBob)).toBe("skipped");
+    await deliveredAgo(latestToBob, 11);
+    expect(await statusOf(againToBob)).toBe("pending");
+    // A different issue is not affected by the per-issue window.
+    const other = (await createIssue(alice, project, { title: "Other issue", assignee: bob.id })).issue_id!;
+    expect(await statusOf((await noticesOf(other, bob.id))[0]!)).toBe("pending");
+
+    // Recipient window: at most 20 sent task-assigned emails per hour, across issues and workspaces.
+    const second = await kanbanProject(alice);
+    await addMember(second.workspace, dave, "member");
+    const daveNotices: string[] = [];
+    for (let index = 0; index < 21; index++) {
+      const target = index % 2 === 0 ? project : second.project;
+      const created = (await createIssue(alice, target, { title: `Busy ${index}`, assignee: dave.id })).issue_id!;
+      daveNotices.push((await noticesOf(created, dave.id))[0]!);
+    }
+    for (const notice of daveNotices.slice(0, 20)) {
+      expect(await statusOf(notice)).toBe("pending");
+      expect(await send(notice)).toBe(true);
+    }
+    const last = daveNotices[20]!;
+    expect(await statusOf(last)).toBe("skipped");
+    // Suppressed deliveries and deliveries older than an hour do not count.
+    await deliveredAgo(daveNotices[0]!, 59);
+    expect(await statusOf(last)).toBe("skipped");
+    await deliveredAgo(daveNotices[0]!, 61);
+    expect(await statusOf(last)).toBe("pending");
+    expect(await statusOf((await noticesOf(other, bob.id))[0]!)).toBe("pending");
   });
 });

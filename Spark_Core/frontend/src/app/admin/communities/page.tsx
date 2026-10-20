@@ -5,7 +5,7 @@ import { Suspense, useMemo, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
 import { AVAILABLE, COPY, RESULT, healthOf } from "../_components/community-actions";
-import { ChartCard, ChartLegend, DonutChart } from "../_components/charts";
+import { ChartCard, DonutChart } from "../_components/charts";
 import { AlertIcon, CommunityIcon, SearchIcon, TrendIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
 import { Sparkline } from "../_components/sparkline";
@@ -90,7 +90,6 @@ function CommunitiesList() {
         empty={healthMix.length === 0}
         emptyText="No communities loaded yet."
         height={200}
-        legend={<ChartLegend series={healthMix} />}
         loading={list.loading}
         subtitle={`${filter === "all" ? "Every" : filter === "flagged" ? "Flagged" : COMMUNITY_STATE[filter as CommunityState]?.label ?? filter} community loaded, by health`}
         table={{ columns: ["Health", "Communities"], rows: healthMix.map((item) => [item.label, item.value]) }}

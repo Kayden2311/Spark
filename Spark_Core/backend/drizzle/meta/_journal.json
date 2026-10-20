@@ -134,6 +134,27 @@
       "when": 1792320000000,
       "tag": "0018_project_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792330000000,
+      "tag": "0019_issue_create",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792340000000,
+      "tag": "0020_issue_updates",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792350000000,
+      "tag": "0021_task_assigned_email",
+      "breakpoints": true
     }
   ]
 }

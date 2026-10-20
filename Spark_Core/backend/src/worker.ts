@@ -7,8 +7,9 @@ import { createDispatcher } from "./modules/outbox/dispatcher.js";
 import { outboxHandlers } from "./modules/outbox/handlers.js";
 
 // Background worker. It alone holds the worker database role (spark_worker), which can only claim and
-// settle outbox events and read or re-tokenize invitations. It serves no HTTP traffic. Logs carry counts
-// and error codes only: never addresses, tokens or message text.
+// settle outbox events, read or re-tokenize invitations, and read task-assigned emails and record their
+// delivery. It serves no HTTP traffic. Logs carry counts and error codes only: never addresses, tokens or
+// message text.
 const IDLE_WAIT_MS = 2_000;
 const once = process.argv.includes("--once");
 const config = loadWorkerConfig();

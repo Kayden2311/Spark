@@ -39,7 +39,7 @@ const callsTo = (calls: Array<{ sql: string; params: unknown[] }>, fragment: str
 
 describe("outbox dispatcher", () => {
   it("completes unknown events without action", async () => {
-    const { pool, calls } = setup([event("issue.created")]);
+    const { pool, calls } = setup([event("issue.reranked")]);
     const sender = createMemorySender();
     const result = await createDispatcher({ pool, sender, handlers: outboxHandlers, appBaseUrl: "http://localhost:3000", now: () => now }).runOnce();
     expect(result).toEqual({ claimed: 1, sent: 0, failed: 0, leaseLost: 0 });
@@ -48,7 +48,7 @@ describe("outbox dispatcher", () => {
     expect(callsTo(calls, "worker_fail_outbox")).toHaveLength(0);
     const claim = callsTo(calls, "worker_claim_outbox")[0]!;
     expect(claim.params.slice(1)).toEqual([5, 300]);
-    expect(callsTo(calls, "worker_complete_outbox")[0]!.params).toEqual([event("issue.created").id, claim.params[0]]);
+    expect(callsTo(calls, "worker_complete_outbox")[0]!.params).toEqual([event("issue.reranked").id, claim.params[0]]);
   });
 
   it("sends one invitation email with a fresh token whose hash it stores", async () => {

@@ -13,7 +13,7 @@ This document is the backend contract for `Spark_Core/backend`. Apply each rule 
 - Validate path, query, headers, and body before calling a use case. Serialize responses through an explicit schema.
 - Large collections use deterministic cursor pagination with an opaque cursor and bounded `limit`.
 - Authenticated responses default to `Cache-Control: private, no-store`. Public cacheable responses declare correct `Cache-Control`, validators, and `Vary` headers.
-- Retry-sensitive mutations use an actor-scoped `Idempotency-Key`. Reusing the key with a different payload returns `409`.
+- Retry-sensitive mutations use an actor-scoped `Idempotency-Key`. Reusing the key with a different payload returns `409`. Repeating the same request with the same key replays the first result (same status and resource) and adds the response header `Idempotent-Replayed: true`; `POST /api/v1/projects/{projectId}/issues` keeps keys for 24 hours and answers a reused key with another body with `409 idempotency_key_reused`.
 - Concurrent edits use `ETag`/`If-Match` or an explicit version contract.
 - OpenAPI describes every implemented status, media type, header, authentication rule, and limit.
 - State-changing requests with an `Origin` that is not an allowed frontend origin, or marked `Sec-Fetch-Site: cross-site`, are refused with `403 origin_not_allowed` (`src/routes/origin-guard.ts`).

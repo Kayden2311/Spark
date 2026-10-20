@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 
 import { createMemberGuard } from "./guard.js";
 import { registerInvitationRoutes } from "./invitations.js";
+import { registerIssueRoutes } from "./issues.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerMethodologyRoutes } from "./methodologies.js";
 import { registerProjectRoutes } from "./projects.js";
@@ -20,4 +21,5 @@ export function registerWorkspaceRoutes(app: FastifyInstance, options: Workspace
   registerMethodologyRoutes(app);
   registerInvitationRoutes(app, guard, options.pool);
   registerProjectRoutes(app, guard);
+  registerIssueRoutes(app, guard);
 }

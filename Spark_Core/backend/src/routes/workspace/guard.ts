@@ -26,7 +26,25 @@ const KNOWN_INPUT_ERRORS: ReadonlySet<string> = new Set([
   "Invalid sprint length",
   "Invalid project statuses",
   "Invalid project phases",
+  "Invalid issue title",
+  "Invalid issue description",
+  "Invalid issue type",
+  "Invalid issue priority",
+  "Invalid story points",
+  "Invalid due date",
+  "Invalid issue status",
+  "Invalid issue phase",
+  "Invalid issue position",
+  "Invalid issue patch",
+  "Invalid idempotency key",
 ]);
+
+// Raised by the issue trigger when a concurrent writer filled the column first: the race fallback for
+// the functions' own wip_limit_reached outcome.
+function isWipLimitViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "23514"
+    && "message" in error && error.message === "Status WIP limit reached";
+}
 
 export interface MemberGuard {
   /** Resolves the session principal; sends 401 and returns null without a live session. */
@@ -68,6 +86,10 @@ export function createMemberGuard(pool: Pool): MemberGuard {
         }
         if (isInvalidParameter(error)) {
           void problem(request, reply, 400, "Bad Request", "invalid_input", invalidInputDetail(error, KNOWN_INPUT_ERRORS));
+          return undefined;
+        }
+        if (isWipLimitViolation(error)) {
+          void problem(request, reply, 409, "Conflict", "wip_limit_reached", "The target status is at its WIP limit.");
           return undefined;
         }
         throw error;

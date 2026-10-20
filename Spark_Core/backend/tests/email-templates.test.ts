@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { escapeHtml, renderEmail } from "../src/modules/email/layout.js";
 import { invitationEmail } from "../src/modules/email/templates/invitation.js";
+import { taskAssignedEmail } from "../src/modules/email/templates/task-assigned.js";
 
 const acceptUrl = `http://localhost:3000/invitations/accept#token=${"a".repeat(64)}`;
 const input = {
@@ -67,5 +68,48 @@ describe("email layout", () => {
 
   it("rejects non-http action links", () => {
     expect(() => renderEmail({ preheader: "", heading: "", paragraphs: [], footerNote: "", action: { label: "x", url: "javascript:alert(1)" } })).toThrow();
+  });
+});
+
+describe("task-assigned email", () => {
+  const issueUrl = "http://localhost:3000/w/acme/p/WEB?issue=WEB-42";
+  const preferencesUrl = "http://localhost:3000/settings/notifications";
+  const task = {
+    actorName: "Ana Lima",
+    recipientName: "Bob Stone",
+    issueKey: "WEB-42",
+    issueTitle: "Fix <script>alert(1)</script> & login",
+    projectName: "Website",
+    workspaceName: "Acme & Co",
+    issueUrl,
+    preferencesUrl,
+  };
+
+  it("uses the exact subject and truncates long titles to 80 characters", () => {
+    expect(taskAssignedEmail(task).subject).toBe("Ana Lima assigned you WEB-42: Fix <script>alert(1)</script> & login");
+    const long = taskAssignedEmail({ ...task, issueTitle: "x".repeat(200) }).subject;
+    expect(long).toBe(`Ana Lima assigned you WEB-42: ${"x".repeat(79)}…`);
+    expect(taskAssignedEmail({ ...task, issueTitle: "y".repeat(80) }).subject).toBe(`Ana Lima assigned you WEB-42: ${"y".repeat(80)}`);
+    expect(taskAssignedEmail({ ...task, actorName: "Ana\r\nBcc: x@example.com" }).subject.startsWith("Ana Bcc: x@example.com assigned you")).toBe(true);
+  });
+
+  it("escapes every value in the HTML part and links the task and the email preferences", () => {
+    const { html } = taskAssignedEmail(task);
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("Fix &lt;script&gt;alert(1)&lt;/script&gt; &amp; login");
+    expect(html).toContain("Acme &amp; Co");
+    expect(html).toContain(`href="${issueUrl}"`);
+    expect(html).toContain(">Open task</a>");
+    expect(html).toContain(`href="${preferencesUrl}"`);
+    expect(html).toContain("Email preferences");
+    expect(html).toContain("#09265a");
+  });
+
+  it("puts the task link and the preferences link into the text part", () => {
+    const { text } = taskAssignedEmail(task);
+    expect(text).toContain(`Open task: ${issueUrl}`);
+    expect(text).toContain(`Email preferences: ${preferencesUrl}`);
+    expect(text).toContain("Fix <script>alert(1)</script> & login");
+    expect(text).toContain("Website");
   });
 });
