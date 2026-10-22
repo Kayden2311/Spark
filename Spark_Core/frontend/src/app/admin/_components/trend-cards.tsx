@@ -1,0 +1,105 @@
+"use client";
+
+import Link from "next/link";
+import type { CSSProperties } from "react";
+
+import { useReducedMotion } from "../../_ui/viz/motion";
+import { describeChange } from "../_lib/format";
+import { Sparkline } from "./sparkline";
+
+export interface TrendCardItem {
+  label: string;
+  /** Already formatted. `undefined` while loading: the card shows a skeleton. */
+  value: string | undefined;
+  /** Colour of the dot before the label (the metric's series colour). */
+  dot: string;
+  /**
+   * Against the previous period. No chip when there is no previous period. `subject` names what changed
+   * when it is not the card's value (e.g. "new" communities under a live count), on the chip and in words.
+   */
+  change?: { current: number; previous: number | null; higherIsBetter?: boolean; subject?: { short: string; long: string } };
+  /** Drawn only with two or more points; metrics without reliable history pass none. */
+  series?: number[];
+  /** Sparkline colour. */
+  color: string;
+  /** Makes the whole card a link. */
+  href?: string;
+  valueTone?: "default" | "bad";
+}
+
+const ARROWS = { up: "↑", down: "↓" } as const;
+
+type ChipTone = "good" | "bad" | "flat";
+
+function chipOf(change: TrendCardItem["change"]): { text: string; label: string; tone: ChipTone } | null {
+  if (!change) return null;
+  const described = describeChange(change.current, change.previous);
+  if (described.direction === "none") return null;
+  // "New this period" reads badly with a subject, so the chip counts what is new instead.
+  if (change.subject && change.previous === 0 && change.current > 0) {
+    const good = change.higherIsBetter ?? true;
+    return { text: `${ARROWS.up} ${change.current} ${change.subject.short}`, label: `${change.current} ${change.subject.long}, none in the previous period, ${good ? "improving" : "worsening"}`, tone: good ? "good" : "bad" };
+  }
+  const short = change.subject ? ` ${change.subject.short}` : "";
+  const long = change.subject ? ` ${change.subject.long}` : "";
+  if (described.direction === "flat") return { text: `${described.text}${short}`, label: `${described.text}${long}`, tone: "flat" };
+  const good = (described.direction === "up") === (change.higherIsBetter ?? true);
+  // The judgement is stated in words (sr sentence and title), so it never rests on the chip colour alone.
+  return { text: `${ARROWS[described.direction]} ${described.text}${short}`, label: `${described.text}${long} vs previous period, ${good ? "improving" : "worsening"}`, tone: good ? "good" : "bad" };
+}
+
+/**
+ * The compact key-number row at the top of a dashboard: label with a colour dot, the value, a change chip
+ * whose colour follows whether the change is good for this metric (stated in words too), and a sparkline.
+ * Screen readers get one sentence per card instead of the visual pieces.
+ */
+export function TrendCards({ items, label }: { items: TrendCardItem[]; label: string }) {
+  const reduced = useReducedMotion();
+  // The row has as many columns as cards (up to 4; at most 2 on tablets), so 1–3 cards still fill it.
+  const count = Math.max(1, Math.min(4, items.length));
+  const style = { "--trend-cards": count, "--trend-cards-md": Math.min(2, count) } as CSSProperties;
+  return (
+    <ul aria-label={label} className="admTrendCards" style={style}>
+      {items.map((item) => {
+        const loading = item.value === undefined;
+        const chip = loading ? null : chipOf(item.change);
+        const sentence = loading
+          ? `${item.label}: loading`
+          : `${item.label}: ${item.value}${item.valueTone === "bad" ? ", needs attention" : ""}${chip ? `, ${chip.label}` : ""}`;
+        const showSpark = !loading && (item.series?.length ?? 0) >= 2;
+        const className = `admTrendCard${item.href ? " admTrendCardLink" : ""}${reduced ? "" : " admLift"}`;
+        const body = (
+          <>
+            <span className="admSrOnly">{sentence}</span>
+            <div aria-hidden="true" className="admTrendCardText">
+              <span className="admTrendCardLabel">
+                <span className="admTrendCardDot" style={{ background: item.dot }} />
+                {item.label}
+              </span>
+              {loading ? (
+                <span className="admSkeleton admTrendCardSkeleton" />
+              ) : (
+                <span className={`admTrendCardValue${item.valueTone === "bad" ? " admTrendCardValue-bad" : ""}`}>{item.value}</span>
+              )}
+              {chip && (
+                <span className="admTrendChip" data-tone={chip.tone} title={chip.tone === "good" ? "Improving" : chip.tone === "bad" ? "Worsening" : undefined}>
+                  {chip.text}
+                </span>
+              )}
+            </div>
+            {showSpark && (
+              <span className="admTrendCardSpark">
+                <Sparkline color={item.color} height={40} values={item.series!} />
+              </span>
+            )}
+          </>
+        );
+        return (
+          <li key={item.label}>
+            {item.href ? <Link className={className} href={item.href}>{body}</Link> : <div className={className}>{body}</div>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

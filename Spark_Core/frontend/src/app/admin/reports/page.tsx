@@ -4,20 +4,22 @@ import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdmin } from "../_components/admin-context";
-import { BarList, InlineBar } from "../_components/charts";
-import { ClockIcon, InboxIcon, KeyboardIcon, PulseIcon } from "../_components/icons";
+import { InlineBar } from "../_components/charts";
+import { KeyboardIcon } from "../_components/icons";
 import { PostPreview } from "../_components/post-preview";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Avatar, Badge, Card, CheckboxFacet, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, MetricTile, NoAccess, PageHeader, SkeletonRows, Tag } from "../_components/ui";
+import { Avatar, Badge, CheckboxFacet, EmptyState, ErrorBanner, FilterTabs, KeyValue, LoadMore, NoAccess, PageHeader, SkeletonRows, Tag } from "../_components/ui";
 import { adminApi, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
 import { REPORT_STATUS, formatCount, formatDate, formatDateTime, formatRelative, humanize } from "../_lib/format";
-import { VIZ } from "../_lib/palette";
 import type { Report, ReportContext, ReportPreview, ReportStats, ReportStatus } from "../_lib/types";
 import { useAdminData } from "../_lib/use-admin-data";
 import { usePagedList } from "../_lib/use-paged-list";
 import { useQueryState } from "../_lib/use-query-state";
+import { ReportInsights } from "./report-insights";
 
+/** The period the queue numbers and charts cover. */
+const STATS_DAYS = 30;
 const STATUSES: readonly ReportStatus[] = ["open", "reviewing", "resolved", "dismissed"];
 type ReportAction = "hide" | "restore" | "dismiss";
 
@@ -140,7 +142,7 @@ function TriageDesk() {
   const [status, setStatus] = useQueryState<ReportStatus>("status", "open", STATUSES);
   const allowed = canAccess(roles, "reports");
   const list = usePagedList<Report>(allowed ? `/reports?status=${status}&limit=100` : null);
-  const stats = useAdminData<ReportStats>(allowed ? "/reports/stats?days=30" : null);
+  const stats = useAdminData<ReportStats>(allowed ? `/reports/stats?days=${STATS_DAYS}` : null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
   const [help, setHelp] = useState(false);
@@ -238,23 +240,7 @@ function TriageDesk() {
         </div>
       )}
 
-      <div className="admGrid2">
-        <Card subtitle="Last 30 days" title="Queue health">
-          <div className="admMetricTiles">
-            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-amber"><InboxIcon /></span>} label="Open now" value={stats.data ? formatCount(stats.data.backlog) : "–"} />
-            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-violet"><PulseIcon /></span>} label="Opened (30d)" value={stats.data ? formatCount(stats.data.opened) : "–"} />
-            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-green"><InboxIcon /></span>} label="Closed (30d)" value={stats.data ? formatCount(stats.data.closed) : "–"} />
-            <MetricTile icon={<span aria-hidden="true" className="admMetricIcon admTone-blue"><ClockIcon /></span>} label="Median time to decision" value={stats.data?.medianHoursToClose == null ? "–" : `${stats.data.medianHoursToClose.toFixed(1)} h`} />
-          </div>
-        </Card>
-        <Card subtitle={`${REPORT_STATUS[status].label} queue · ${formatCount(loaded.length)} loaded`} title="By reason">
-          <BarList
-            color={VIZ.violet}
-            emptyText="Nothing in this queue yet."
-            items={[...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ key: reason, label: humanize(reason), value: count }))}
-          />
-        </Card>
-      </div>
+      <ReportInsights days={STATS_DAYS} stats={stats} />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       <div className="admTriage">

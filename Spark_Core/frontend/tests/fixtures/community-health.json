@@ -1,0 +1,12 @@
+{
+  "about": "Shared community health fixtures. The backend database test (Spark_Core/backend/tests/database/schema.integration.ts) inserts them and checks staff_community_health_counts; the frontend test (tests/admin-communities.test.tsx) classifies them with healthOf. recentPosts are posted 2 weeks ago (recent 4 weeks), earlierPosts 5 weeks ago (earlier 4 weeks). Expected values use the SQL column names.",
+  "cases": [
+    { "name": "New and busy", "recentPosts": 3, "earlierPosts": 0, "openReports": 0, "resolvedReports": 0, "archived": false, "expected": "growing" },
+    { "name": "Exactly 1.25x", "recentPosts": 5, "earlierPosts": 4, "openReports": 0, "resolvedReports": 0, "archived": false, "expected": "growing" },
+    { "name": "Flat", "recentPosts": 4, "earlierPosts": 4, "openReports": 0, "resolvedReports": 1, "archived": false, "expected": "steady" },
+    { "name": "Exactly 0.6x", "recentPosts": 3, "earlierPosts": 5, "openReports": 0, "resolvedReports": 0, "archived": false, "expected": "slowing" },
+    { "name": "Gone quiet", "recentPosts": 0, "earlierPosts": 3, "openReports": 0, "resolvedReports": 0, "archived": false, "expected": "quiet" },
+    { "name": "Rising but reported", "recentPosts": 5, "earlierPosts": 1, "openReports": 1, "resolvedReports": 0, "archived": false, "expected": "needs_review" },
+    { "name": "Archived with reports", "recentPosts": 2, "earlierPosts": 0, "openReports": 2, "resolvedReports": 0, "archived": true, "expected": "archived" }
+  ]
+}

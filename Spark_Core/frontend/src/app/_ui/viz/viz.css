@@ -59,9 +59,14 @@
 /* ---------- Chart cards ---------- */
 .vizChartCard { overflow: visible; }
 .vizChartHead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; padding: 16px 20px 0; }
+/* The title takes the row and the tools keep to the right, also when a narrow card wraps them below. */
+.vizChartTitle { flex: 1 1 160px; min-width: 0; }
+/* In a narrow card the subtitle keeps the full width and the tools drop to their own row on the right. */
+.vizChartCard { container-type: inline-size; }
+@container (max-width: 400px) { .vizChartTitle { flex-basis: 100%; } }
 .vizChartTitle h2 { margin: 0; color: var(--viz-ink); font-size: var(--viz-text-md); font-weight: 600; letter-spacing: -.005em; }
 .vizChartTitle p { margin: 2px 0 0; color: var(--viz-subtle); font-size: var(--viz-text-xs); }
-.vizChartTools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vizChartTools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .vizChartLegendRow { padding: 10px 20px 0; }
 .vizChartBody { padding: 12px 16px 16px 8px; }
 .vizChartBody > .vizError { margin: 0 8px; }
@@ -117,10 +122,14 @@
 
 /* Ranked bars */
 .vizBarList { display: grid; gap: 2px; margin: 0; padding: 4px; list-style: none; }
-.vizBarList li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 7px 10px; border-radius: 8px; transition: background .15s ease; }
-.vizBarList li:hover { background: var(--viz-hover); }
-.vizBarList li:hover .vizBarListValue { color: var(--viz-blue-dark); }
-.vizBarList li:hover .vizBarListTrack span { filter: brightness(1.1); }
+.vizBarList li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 7px 10px; border-radius: 8px; transition: background .15s ease; }
+.vizBarList li:hover, .vizBarList li:focus-within { background: var(--viz-hover); }
+.vizBarList li:focus-visible { outline: none; box-shadow: var(--viz-ring); }
+.vizBarList li:hover .vizBarListValue, .vizBarList li:focus-within .vizBarListValue { color: var(--viz-blue-dark); }
+.vizBarList li:hover .vizBarListTrack span, .vizBarList li:focus-within .vizBarListTrack span { filter: brightness(1.1); }
+/* Exact value and share of the total, shown on hover and on keyboard focus (the row or its link). */
+.vizBarListTip { position: absolute; z-index: 5; right: 10px; bottom: calc(100% - 4px); padding: 4px 8px; border: 1px solid var(--viz-line); border-radius: 6px; color: var(--viz-ink); font-size: var(--viz-text-2xs); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; background: var(--viz-surface); box-shadow: var(--viz-shadow-md); opacity: 0; visibility: hidden; pointer-events: none; }
+.vizBarList li:hover .vizBarListTip, .vizBarList li:focus-within .vizBarListTip { opacity: 1; visibility: visible; }
 .vizBarListText { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .vizBarListLabel { overflow: hidden; color: var(--viz-ink); font-size: var(--viz-text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .vizBarListLabel a { color: inherit; text-decoration: none; }
@@ -129,11 +138,8 @@
 .vizBarListValue { display: flex; align-items: baseline; gap: 6px; color: var(--viz-ink); font-size: var(--viz-text-xs); font-weight: 600; font-variant-numeric: tabular-nums; transition: color .15s ease; }
 .vizBarListPercent { color: var(--viz-faint); font-size: var(--viz-text-3xs); font-weight: 500; }
 .vizBarListTrack { grid-column: 1 / -1; height: 8px; overflow: hidden; border-radius: 4px; background: #f1f4f9; }
-.vizBarListTrack span { display: block; width: var(--viz-bar-w); height: 100%; border-radius: 4px; transition: filter .15s ease; animation: viz-bar-grow .55s var(--viz-bar-delay, 0ms) cubic-bezier(.16, 1, .3, 1) both; transform-origin: left; }
+.vizBarListTrack span { display: block; width: var(--viz-bar-w); height: 100%; border-radius: 4px; transition: filter .15s ease; transform-origin: left; }
 @keyframes viz-bar-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-@media (prefers-reduced-motion: reduce) {
-  .vizBarListTrack span { animation: none; }
-}
 
 /* Heatmap */
 .vizHeatmap { display: grid; gap: 10px; padding: 0 8px 0 12px; }
@@ -143,7 +149,8 @@
 .vizHeatmapHour { color: var(--viz-faint); font-size: var(--viz-text-3xs); font-variant-numeric: tabular-nums; }
 .vizHeatmapDay { align-self: center; color: var(--viz-subtle); font-size: var(--viz-text-2xs); font-weight: 500; }
 .vizHeatmapCell { aspect-ratio: 1 / 1; min-height: 12px; border-radius: 3px; transition: box-shadow .1s ease; }
-.vizHeatmapCell:hover { box-shadow: 0 0 0 2px var(--viz-ink); }
+.vizHeatmapCell:hover, .vizHeatmapCellActive { box-shadow: 0 0 0 2px var(--viz-ink); }
+.vizHeatmapGrid:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--viz-ring); }
 .vizHeatmapScale { display: flex; align-items: center; justify-content: flex-end; gap: 3px; color: var(--viz-subtle); font-size: var(--viz-text-2xs); }
 .vizHeatmapScale span:first-child { margin-right: 4px; }
 .vizHeatmapScale span:last-child { margin-left: 4px; }
@@ -182,6 +189,14 @@
 .vizGauge { position: relative; display: grid; flex: none; place-items: center; }
 .vizGaugeValue { position: absolute; color: var(--viz-ink); font-size: var(--viz-text-3xs); font-weight: 700; font-variant-numeric: tabular-nums; }
 
+/* Target gauge: a half arc that is full at twice the target, with the value and status in words. */
+.vizTargetGauge { display: grid; justify-items: center; gap: 2px; padding: 4px 8px 0; }
+.vizTargetGauge .vizTargetGaugeArc { display: block; width: 100%; max-width: 220px; height: auto; overflow: visible; }
+.vizTargetGaugeText { display: grid; justify-items: center; gap: 2px; margin-top: -34px; text-align: center; }
+.vizTargetGaugeText strong { color: var(--viz-ink); font-size: var(--viz-text-4xl); font-weight: 700; line-height: 1.1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.vizTargetGaugeText span { font-size: var(--viz-text-xs); font-weight: 600; }
+.vizTargetGaugeText .vizTargetGaugeTarget { color: var(--viz-subtle); font-size: var(--viz-text-2xs); font-weight: 500; }
+
 /* Inline ratio bar */
 .vizInlineBarTrack { display: inline-block; width: 64px; height: 5px; overflow: hidden; border-radius: 3px; background: var(--viz-line-soft); }
 .vizInlineBarTrack-wide { display: block; width: 100%; }
@@ -203,4 +218,20 @@
 @media (prefers-reduced-motion: reduce) {
   .vizSkeleton { animation: none; }
   .vizCard, .vizBtn { transition: none; }
+}
+
+/* ---------- Entrance effects ----------
+   Applied by the components only when motion is allowed, and scoped here to no-preference as well, so
+   reduced motion always gets the finished, static chart. Draw-in needs pathLength="1" on the path; the
+   dash pattern exists only while animating (fill-mode backwards), so the resting line is always whole.
+   Every entrance ends within about 1.2 s and none of them blocks pointer input. */
+@keyframes adm-draw-in { from { stroke-dasharray: 1; stroke-dashoffset: 1; } to { stroke-dasharray: 1; stroke-dashoffset: 0; } }
+@keyframes adm-fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* Only a `from`: the ring sweeps from empty to its own dash offset (the value). */
+@keyframes adm-gauge-in { from { stroke-dashoffset: 1; } }
+@media (prefers-reduced-motion: no-preference) {
+  .admGaugeIn { animation: adm-gauge-in .9s cubic-bezier(.33, 1, .68, 1) backwards; }
+  .admDrawIn { animation: adm-draw-in .9s cubic-bezier(.33, 1, .68, 1) backwards; }
+  .admGrowIn { transform-origin: left; animation: viz-bar-grow .55s var(--viz-bar-delay, 0ms) cubic-bezier(.16, 1, .3, 1) both; }
+  .admFadeIn { animation: adm-fade-in .45s var(--viz-fade-delay, 0ms) ease-out both; }
 }

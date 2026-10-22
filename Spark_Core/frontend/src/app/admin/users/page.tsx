@@ -6,57 +6,23 @@ import { Suspense, useState } from "react";
 
 import { useAuth } from "../../auth-context";
 import { useAdmin } from "../_components/admin-context";
-import { ChartCard, DonutChart, InlineBar } from "../_components/charts";
-import { AlertIcon, BoardIcon, ListIcon, SearchIcon, SignupIcon, UserIcon } from "../_components/icons";
+import { InlineBar } from "../_components/charts";
+import { BoardIcon, ListIcon, SearchIcon } from "../_components/icons";
 import { ReasonDialog, type ReasonRequest } from "../_components/reason-dialog";
-import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, KpiCards, LoadMore, NoAccess, PageHeader, Panel, RoleSummary, RowMenu, Segmented, SkeletonRows } from "../_components/ui";
+import { Avatar, Badge, EmptyState, ErrorBanner, FilterTabs, LoadMore, NoAccess, PageHeader, Panel, RoleSummary, RowMenu, Segmented, SkeletonRows } from "../_components/ui";
 import { query } from "../_lib/api";
 import { PLATFORM_ROLES, canAccess } from "../_lib/access";
-import { ROLE_LABELS, USER_STATUS, formatCount, formatDate, formatRelative } from "../_lib/format";
-import { CATEGORICAL, SERIES } from "../_lib/palette";
-import type { ActivityResponse, Page, PlatformRole, UserStatus, UserSummary } from "../_lib/types";
-import { useAdminData } from "../_lib/use-admin-data";
+import { ROLE_LABELS, USER_STATUS, formatDate, formatRelative } from "../_lib/format";
+import type { PlatformRole, UserStatus, UserSummary } from "../_lib/types";
 import { usePagedList } from "../_lib/use-paged-list";
 import { canChangeStatus, statusRequest } from "../_components/user-actions";
 import { useDebounced, useQueryState } from "../_lib/use-query-state";
 import { RolesMatrix } from "./roles-matrix";
+import { UserInsights } from "./user-insights";
 
 type StatusFilter = "all" | UserStatus;
 const STATUS_FILTERS: readonly StatusFilter[] = ["all", "active", "suspended"];
 const ROLE_FILTERS: readonly ("any" | PlatformRole)[] = ["any", ...PLATFORM_ROLES];
-
-function useHolderCount(role: PlatformRole) {
-  return useAdminData<Page<UserSummary>>(`/users?role=${role}&limit=100`);
-}
-
-/** Who holds each platform role right now. An account can hold more than one, so this totals role
- * grants, not staff headcount — the subtitle and center label say so rather than imply otherwise. */
-function RoleMix() {
-  // PLATFORM_ROLES is a fixed 5-role tuple, so these are named one by one rather than mapped —
-  // calling a hook inside a loop or .map() would break React's rules of hooks.
-  const holders = [
-    useHolderCount("super_admin"),
-    useHolderCount("platform_admin"),
-    useHolderCount("community_moderator"),
-    useHolderCount("content_moderator"),
-    useHolderCount("campaign_moderator"),
-  ];
-  const loading = holders.some((holder) => !holder.data);
-  const mix = PLATFORM_ROLES.map((role, index) => ({ label: ROLE_LABELS[role], value: holders[index]!.data?.items.length ?? 0, color: CATEGORICAL[index % CATEGORICAL.length] }));
-  const total = mix.reduce((sum, item) => sum + item.value, 0);
-  return (
-    <ChartCard
-      empty={!loading && total === 0}
-      height={200}
-      loading={loading}
-      subtitle="Role grants right now; an account can hold more than one"
-      table={{ columns: ["Role", "Holders"], rows: mix.map((item) => [item.label, item.value]) }}
-      title="Platform roles"
-    >
-      <DonutChart centerLabel="role grants" centerValue={formatCount(total)} data={mix} height={180} />
-    </ChartCard>
-  );
-}
 
 /** One person, HR-directory style: a face, a name, their roles and status — the facts you'd scan a
  * roster for, not a row of columns. The overflow menu carries the same actions the table row did. */
@@ -116,7 +82,6 @@ function UsersList() {
     allowed && view === "directory" ? `/users${query({ status: status === "all" ? undefined : status, role: role === "any" ? undefined : role, search: settledSearch })}` : null,
   );
   const [dialog, setDialog] = useState<ReasonRequest | null>(null);
-  const growth = useAdminData<ActivityResponse>(allowed ? "/analytics/activity?days=30" : null);
 
   if (!allowed) return <NoAccess />;
   const viewSwitch = <Segmented label="Users view" onChange={setView} options={[{ value: "directory", label: "Directory" }, { value: "roles", label: "Roles & access" }]} value={view} />;
@@ -128,8 +93,6 @@ function UsersList() {
       </>
     );
   }
-  const audience = growth.data?.audience;
-
   const changeStatus = (user: UserSummary) =>
     setDialog(statusRequest(user, (next) => {
       list.update(user.id, (item) => (status === "all" || status === next ? { ...item, status: next } : null));
@@ -141,25 +104,9 @@ function UsersList() {
 
   return (
     <>
-      <PageHeader actions={<>{viewSwitch}{layoutSwitch}</>} description="See how membership is growing, find any account, and act on risky ones." title="Users" />
+      <PageHeader actions={<>{viewSwitch}{layoutSwitch}</>} description="How membership is growing over the last 30 days, every account, and the ones that need action." title="Users" />
 
-      <KpiCards
-        items={[
-          {
-            label: "New members (30d)",
-            value: growth.data ? formatCount(growth.data.current.signups) : undefined,
-            change: growth.data ? { current: growth.data.current.signups, previous: growth.data.previous?.signups } : undefined,
-            icon: <SignupIcon />,
-            tone: "amber",
-            trend: { values: growth.data?.series.map((point) => point.signups) ?? [], color: SERIES.signups.color },
-          },
-          { label: "Active accounts", value: overview ? formatCount(overview.users.active) : undefined, hint: audience ? `${formatCount(audience.mau)} active in the last 30 days` : undefined, icon: <UserIcon />, tone: "blue" },
-          { label: "Suspended", value: overview ? formatCount(overview.users.suspended) : undefined, hint: "Signed out and blocked", icon: <AlertIcon />, tone: "red", href: "/admin/users?status=suspended" },
-        ]}
-        label="Membership"
-      />
-
-      <RoleMix />
+      <UserInsights />
 
       {list.error && <ErrorBanner message={list.error} onRetry={list.reload} />}
       <Panel

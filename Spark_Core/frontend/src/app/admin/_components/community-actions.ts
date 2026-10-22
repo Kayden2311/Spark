@@ -1,4 +1,5 @@
-import type { Community, CommunityAction, CommunityState } from "../_lib/types";
+import type { Tone } from "../_lib/format";
+import type { Community, CommunityAction, CommunityHealthCounts, CommunityState } from "../_lib/types";
 
 // Mirrors the transitions staff_moderate_community accepts; the database is the authority.
 export const AVAILABLE: Record<CommunityState, CommunityAction[]> = {
@@ -26,17 +27,27 @@ export const COPY: Record<CommunityAction, { label: string; title: string; descr
   restore: { label: "Restore", title: "Restore this community?", description: "The community becomes active again. It is not re-featured automatically.", tone: "primary", done: "Community restored.", templates: ["The owner is reviving it.", "Archived by mistake."] },
 };
 
-export type Health = { label: string; tone: "red" | "green" | "amber" | "neutral" | "blue" };
+/** The badge tone of each health group. The Health mix donut takes its colours from the same tones. */
+export const HEALTH_TONE = {
+  growing: "green",
+  steady: "blue",
+  slowing: "amber",
+  quiet: "violet",
+  needsReview: "red",
+  archived: "neutral",
+} as const satisfies Record<keyof CommunityHealthCounts, Tone>;
+
+export type Health = { label: string; tone: (typeof HEALTH_TONE)[keyof typeof HEALTH_TONE] };
 
 /** A plain-language health signal from reports and the last 8 weeks of activity. */
 export function healthOf(community: Pick<Community, "openReports" | "weeklyActivity" | "state">): Health {
-  if (community.state === "archived") return { label: "Archived", tone: "neutral" };
-  if (community.openReports > 0) return { label: "Needs review", tone: "red" };
+  if (community.state === "archived") return { label: "Archived", tone: HEALTH_TONE.archived };
+  if (community.openReports > 0) return { label: "Needs review", tone: HEALTH_TONE.needsReview };
   const weeks = community.weeklyActivity ?? [];
   const recent = weeks.slice(-4).reduce((sum, value) => sum + value, 0);
   const before = weeks.slice(0, -4).reduce((sum, value) => sum + value, 0);
-  if (recent === 0) return { label: "Quiet", tone: "neutral" };
-  if (before === 0 || recent >= before * 1.25) return { label: "Growing", tone: "green" };
-  if (recent <= before * 0.6) return { label: "Slowing", tone: "amber" };
-  return { label: "Steady", tone: "blue" };
+  if (recent === 0) return { label: "Quiet", tone: HEALTH_TONE.quiet };
+  if (before === 0 || recent >= before * 1.25) return { label: "Growing", tone: HEALTH_TONE.growing };
+  if (recent <= before * 0.6) return { label: "Slowing", tone: HEALTH_TONE.slowing };
+  return { label: "Steady", tone: HEALTH_TONE.steady };
 }

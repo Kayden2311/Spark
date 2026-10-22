@@ -228,6 +228,66 @@ async function waitUntilBlocked(pid: number) {
   }
   return false;
 }
+type InsightFixture = { admin: Buffer; communityModerator: Buffer; contentModerator: Buffer; tenant: string; author: string; reporter: string };
+// Sessions for the three insight audiences plus a workspace, an author and a reporter for community and report fixtures.
+async function insightFixture(): Promise<InsightFixture> {
+  const admin = randomUUID(), communityModerator = randomUUID(), contentModerator = randomUUID(), author = randomUUID(), reporter = randomUUID(), tenant = randomUUID();
+  const tokens = [newTokenHash(), newTokenHash(), newTokenHash()] as const;
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Insight admin'),($2,'Community moderator'),($3,'Content moderator'),($4,'Insight author'),($5,'Insight reporter')`, [admin, communityModerator, contentModerator, author, reporter]);
+  await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'platform_admin',$1),($2,'community_moderator',$1),($3,'content_moderator',$1)`, [admin, communityModerator, contentModerator]);
+  await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$4,'password',$7),($2,$5,'password',$7),($3,$6,'password',$7)`, [admin, communityModerator, contentModerator, ...tokens, future()]);
+  await owner.query("BEGIN");
+  try {
+    await owner.query(`INSERT INTO ${table("workspaces")} (id,slug,name,created_by_user_id) VALUES ($1::uuid,$1::text,'Insight workspace',$2)`, [tenant, author]);
+    await owner.query(`INSERT INTO ${table("workspace_memberships")} (tenant_id,user_id,role) VALUES ($1,$2,'owner')`, [tenant, author]);
+    await owner.query("COMMIT");
+  } catch (error) { await owner.query("ROLLBACK"); throw error; }
+  return { admin: tokens[0], communityModerator: tokens[1], contentModerator: tokens[2], tenant, author, reporter };
+}
+// Noon (or `hour`) UTC on the day `daysAgo` days before today (UTC).
+function utcDay(daysAgo: number, hour = 12, minute = 0) {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysAgo, hour, minute));
+}
+// A community owned by the fixture author, created (and joined by its owner) at `createdAt`.
+async function insightCommunity(fixture: InsightFixture, name: string, createdAt = new Date()) {
+  const id = randomUUID();
+  await owner.query("SET ROLE spark_owner");
+  await owner.query("BEGIN");
+  try {
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id,created_at) VALUES ($1::uuid,$2,$1::text,$3,'Description','public',$4,$5)`, [id, fixture.tenant, name, fixture.author, createdAt]);
+    await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role,joined_at) VALUES ($1,$2,$3,'owner',$4)`, [fixture.tenant, id, fixture.author, createdAt]);
+    await owner.query("COMMIT");
+  } catch (error) { await owner.query("ROLLBACK"); throw error; }
+  return id;
+}
+// `count` visible posts at 01:00 UTC on the Monday `weeksAgo` weeks before the current UTC week.
+async function weeklyPosts(fixture: InsightFixture, community: string, weeksAgo: number, count: number) {
+  await owner.query(`INSERT INTO ${table("posts")} (tenant_id,community_id,author_user_id,title,body,created_at)
+    SELECT $1,$2,$3,'Post','Body',(date_trunc('week', now() AT TIME ZONE 'UTC') - make_interval(weeks => $4) + interval '1 hour') AT TIME ZONE 'UTC'
+    FROM generate_series(1,$5::integer)`, [fixture.tenant, community, fixture.author, weeksAgo, count]);
+}
+// A report on a new hidden post, so the fixture never adds visible community activity.
+async function insightReport(fixture: InsightFixture, community: string, reason: string, status = "open", createdAt = new Date(), resolvedAt: Date | null = null) {
+  const post = randomUUID();
+  await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body,moderation_status) VALUES ($1,$2,$3,$4,'Reported','Body','hidden')`, [post, fixture.tenant, community, fixture.author]);
+  await owner.query(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,reason_code,status,created_at,resolved_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [fixture.tenant, community, fixture.reporter, post, reason, status, createdAt, resolvedAt]);
+}
+/** One case of frontend/tests/fixtures/community-health.json (shared with the frontend healthOf test). */
+interface HealthCase { name: string; recentPosts: number; earlierPosts: number; openReports: number; resolvedReports: number; archived: boolean; expected: string }
+// Mirrors healthOf in frontend/src/app/admin/_components/community-actions.ts.
+function badgeOf(archived: boolean, openReports: number, weeks: number[]) {
+  if (archived) return "archived";
+  if (openReports > 0) return "needs_review";
+  const recent = weeks.slice(-4).reduce((sum, value) => sum + value, 0);
+  const before = weeks.slice(0, -4).reduce((sum, value) => sum + value, 0);
+  if (recent === 0) return "quiet";
+  if (before === 0 || recent >= before * 1.25) return "growing";
+  if (recent <= before * 0.6) return "slowing";
+  return "steady";
+}
 
 beforeAll(async () => {
   await owner.connect();
@@ -307,7 +367,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(22);
+    expect(result.rows[0].count).toBe(23);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -896,9 +956,9 @@ describe("Local PostgreSQL schema", () => {
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
       "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "is_community_member",
       "is_coworker", "is_session_user", "is_workspace_member", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
-      "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_health", "staff_community_series", "staff_engagement_heatmap", "staff_grant_role",
+      "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_daily", "staff_community_health", "staff_community_health_counts", "staff_community_series", "staff_engagement_heatmap", "staff_grant_role",
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
-      "staff_report_context", "staff_report_preview", "staff_report_stats", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
+      "staff_report_context", "staff_report_daily", "staff_report_preview", "staff_report_reasons", "staff_report_stats", "staff_report_top_communities", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
       "staff_user_sessions", "ws_accept_invitation", "ws_create_invitation", "ws_create_issue", "ws_create_project", "ws_create_workspace", "ws_invitation_preview",
       "ws_list_members", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role", "ws_update_issue", "ws_update_project",
@@ -1124,6 +1184,137 @@ describe("Local PostgreSQL schema", () => {
     const invoices = await call(adminToken, `SELECT * FROM ${fn("staff_list_invoices")}('open',NULL,NULL,10)`);
     expect(invoices).toHaveLength(1);
     expect(invoices[0]).toMatchObject({ plan_name: "Pro", total_minor: "2900", status: "open" });
+  });
+  it("classifies community health like the admin badges", async () => {
+    const fixture = await insightFixture();
+    const counts = async () => {
+      const rows = (await asSession(fixture.communityModerator, `SELECT * FROM ${fn("staff_community_health_counts")}()`)).rows;
+      expect(rows).toHaveLength(1);
+      return Object.fromEntries(Object.entries(rows[0] as Record<string, string>).map(([key, value]) => [key, Number(value)]));
+    };
+    const before = await counts();
+    // Shared with the frontend healthOf test, so the SQL counts and the table badges agree on the same cases.
+    const { cases } = JSON.parse(await readFile(resolve("../frontend/tests/fixtures/community-health.json"), "utf8")) as { cases: HealthCase[] };
+    const ids: string[] = [];
+    for (const { name, recentPosts, earlierPosts, openReports, resolvedReports, archived } of cases) {
+      const community = await insightCommunity(fixture, name);
+      if (recentPosts) await weeklyPosts(fixture, community, 2, recentPosts);
+      if (earlierPosts) await weeklyPosts(fixture, community, 5, earlierPosts);
+      for (let index = 0; index < openReports; index++) await insightReport(fixture, community, "spam");
+      // A resolved report does not make a community need review.
+      for (let index = 0; index < resolvedReports; index++) await insightReport(fixture, community, "spam", "resolved", new Date(), new Date());
+      if (archived) await owner.query(`UPDATE ${table("communities")} SET archived_at=now() WHERE id=$1`, [community]);
+      ids.push(community);
+    }
+    const after = await counts();
+    const expected = Object.fromEntries(Object.keys(after).map((key) => [key, cases.filter((entry) => entry.expected === key).length]));
+    expect(expected).toEqual({ growing: 2, steady: 1, slowing: 1, quiet: 1, needs_review: 1, archived: 1 });
+    expect(Object.fromEntries(Object.keys(after).map((key) => [key, after[key]! - before[key]!]))).toEqual(expected);
+    // The per-community health read feeds the table badges; classifying its output gives the same answers.
+    const health = (await asSession(fixture.communityModerator, `SELECT community_id,weekly_activity,open_reports FROM ${fn("staff_community_health")}($1::uuid[])`, [ids])).rows;
+    const archivedIds = new Set(ids.filter((_, index) => cases[index]!.archived));
+    const badges = new Map(health.map((row) => [row.community_id as string, badgeOf(archivedIds.has(row.community_id), Number(row.open_reports), (row.weekly_activity as string[]).map(Number))]));
+    expect(ids.map((id) => badges.get(id))).toEqual(cases.map((entry) => entry.expected));
+  });
+  it("returns one community row per day including empty days", async () => {
+    const fixture = await insightFixture();
+    const daily = async () => (await asSession(fixture.communityModerator, `SELECT day::text AS day,new_members,new_communities,live_communities FROM ${fn("staff_community_daily")}(7)`)).rows;
+    const before = await daily();
+    const community = await insightCommunity(fixture, "Daily Circle", utcDay(3));
+    const joiners = [randomUUID(), randomUUID()];
+    await owner.query(`INSERT INTO ${table("users")} (id,display_name) VALUES ($1,'Joiner one'),($2,'Joiner two')`, joiners);
+    for (const joiner of joiners) {
+      await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,joined_at) VALUES ($1,$2,$3,$4)`, [fixture.tenant, community, joiner, utcDay(1)]);
+    }
+    const after = await daily();
+    expect(after).toHaveLength(7);
+    expect(after.map((row) => row.day)).toEqual(Array.from({ length: 7 }, (_, index) => utcDay(6 - index).toISOString().slice(0, 10)));
+    // Archive times are overwritten on restore, so the live count cannot be rebuilt exactly and is never guessed.
+    expect(after.every((row) => row.live_communities === null)).toBe(true);
+    const delta = after.map((row, index) => [Number(row.new_members) - Number(before[index]!.new_members), Number(row.new_communities) - Number(before[index]!.new_communities)]);
+    expect(delta).toEqual([[0, 0], [0, 0], [0, 0], [1, 1], [0, 0], [2, 0], [0, 0]]);
+    expect(after.every((row) => row.new_members !== null && row.new_communities !== null)).toBe(true);
+  });
+  it("rebuilds the report backlog per day", async () => {
+    const fixture = await insightFixture();
+    const community = await insightCommunity(fixture, "Backlog Circle");
+    const daily = async () => (await asSession(fixture.contentModerator, `SELECT day::text AS day,opened,closed,backlog,median_hours_to_close FROM ${fn("staff_report_daily")}(30)`)).rows;
+    const before = await daily();
+    // Index i of the 30-day series is the day 29 - i days ago; no other fixture closes reports on these days.
+    const at = (daysAgo: number) => 29 - daysAgo;
+    expect([before[at(18)]!.closed, before[at(17)]!.closed]).toEqual(["0", "0"]);
+    await insightReport(fixture, community, "spam", "resolved", utcDay(20, 10), utcDay(18, 10));
+    await insightReport(fixture, community, "spam", "dismissed", utcDay(20, 12), utcDay(18, 16));
+    await insightReport(fixture, community, "abuse", "open", utcDay(19, 8));
+    await insightReport(fixture, community, "abuse", "resolved", utcDay(19, 9), utcDay(17, 9));
+    // Opened before the range, closed inside it: part of the backlog from the first day.
+    await insightReport(fixture, community, "abuse", "resolved", utcDay(40, 9), utcDay(17, 10));
+    const after = await daily();
+    expect(after).toHaveLength(30);
+    expect(after[29]!.day).toBe(utcDay(0).toISOString().slice(0, 10));
+    const delta = (key: string) => after.map((row, index) => Number(row[key]) - Number(before[index]![key]));
+    const expectedOpened = Array(30).fill(0), expectedClosed = Array(30).fill(0), expectedBacklog = Array(30).fill(1);
+    expectedOpened[at(20)] = 2; expectedOpened[at(19)] = 2;
+    expectedClosed[at(18)] = 2; expectedClosed[at(17)] = 2;
+    expectedBacklog[at(20)] = 3; expectedBacklog[at(19)] = 5; expectedBacklog[at(18)] = 3;
+    expect(delta("opened")).toEqual(expectedOpened);
+    expect(delta("closed")).toEqual(expectedClosed);
+    expect(delta("backlog")).toEqual(expectedBacklog);
+    // 48 h and 52 h on one day; 48 h and 553 h on the next.
+    expect([after[at(18)]!.median_hours_to_close, after[at(17)]!.median_hours_to_close]).toEqual(["50.0", "300.5"]);
+    // Today's end-of-day backlog is the live queue.
+    const [stats] = (await asSession(fixture.contentModerator, `SELECT backlog FROM ${fn("staff_report_stats")}(30)`)).rows;
+    expect(after[29]!.backlog).toBe(stats.backlog);
+  });
+  it("groups open reports by reason and community", async () => {
+    const fixture = await insightFixture();
+    const busy = await insightCommunity(fixture, "Busy Reports"), calm = await insightCommunity(fixture, "Calm Reports");
+    const reasonA = `reason-${randomUUID()}`, reasonB = `reason-${randomUUID()}`;
+    for (let index = 0; index < 3; index++) await insightReport(fixture, busy, reasonA);
+    await insightReport(fixture, busy, reasonB, "reviewing");
+    await insightReport(fixture, calm, reasonB);
+    // Closed reports are not part of the queue.
+    await insightReport(fixture, calm, reasonA, "dismissed", new Date(), new Date());
+    await insightReport(fixture, calm, reasonA, "resolved", new Date(), new Date());
+    const reasons = (await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_reasons")}()`)).rows;
+    expect(reasons.find((row) => row.reason === reasonA)).toEqual({ reason: reasonA, open_count: "3" });
+    expect(reasons.find((row) => row.reason === reasonB)).toEqual({ reason: reasonB, open_count: "2" });
+    const reasonCounts = reasons.map((row) => Number(row.open_count));
+    expect(reasonCounts).toEqual([...reasonCounts].sort((a, b) => b - a));
+    const top = (await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_top_communities")}(20)`)).rows;
+    expect(top.length).toBeLessThanOrEqual(20);
+    expect(top.find((row) => row.community_id === busy)).toEqual({ community_id: busy, name: "Busy Reports", slug: busy, open_count: "4" });
+    expect(top.find((row) => row.community_id === calm)).toMatchObject({ open_count: "1" });
+    const topCounts = top.map((row) => Number(row.open_count));
+    expect(topCounts).toEqual([...topCounts].sort((a, b) => b - a));
+    expect((await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_top_communities")}(1)`)).rows).toHaveLength(1);
+  });
+  it("refuses report insights to a community moderator and community stats to a content moderator", async () => {
+    const fixture = await insightFixture();
+    const reportReads = [`SELECT * FROM ${fn("staff_report_reasons")}()`, `SELECT * FROM ${fn("staff_report_top_communities")}(5)`, `SELECT * FROM ${fn("staff_report_daily")}(7)`];
+    const communityReads = [`SELECT * FROM ${fn("staff_community_health_counts")}()`, `SELECT * FROM ${fn("staff_community_daily")}(7)`];
+    for (const sql of reportReads) await expect(asSession(fixture.communityModerator, sql)).rejects.toMatchObject({ code: "42501" });
+    for (const sql of communityReads) await expect(asSession(fixture.contentModerator, sql)).rejects.toMatchObject({ code: "42501" });
+    for (const sql of [...reportReads, ...communityReads]) {
+      await expect(asSession(null, sql)).rejects.toMatchObject({ code: "28000" });
+      await expect(asSession(fixture.admin, sql)).resolves.toBeDefined();
+    }
+    await expect(asSession(fixture.contentModerator, reportReads[2]!)).resolves.toBeDefined();
+    await expect(asSession(fixture.communityModerator, communityReads[1]!)).resolves.toBeDefined();
+  });
+  it("rejects ranges outside 7–365", async () => {
+    const fixture = await insightFixture();
+    for (const days of [6, 366, null]) {
+      await expect(asSession(fixture.admin, `SELECT * FROM ${fn("staff_community_daily")}($1)`, [days])).rejects.toMatchObject({ code: "22023", message: "Invalid range" });
+      await expect(asSession(fixture.admin, `SELECT * FROM ${fn("staff_report_daily")}($1)`, [days])).rejects.toMatchObject({ code: "22023", message: "Invalid range" });
+    }
+    for (const days of [7, 365]) {
+      expect((await asSession(fixture.admin, `SELECT * FROM ${fn("staff_community_daily")}($1)`, [days])).rows).toHaveLength(days);
+      expect((await asSession(fixture.admin, `SELECT * FROM ${fn("staff_report_daily")}($1)`, [days])).rows).toHaveLength(days);
+    }
+    for (const limit of [0, 21, null]) {
+      await expect(asSession(fixture.admin, `SELECT * FROM ${fn("staff_report_top_communities")}($1)`, [limit])).rejects.toMatchObject({ code: "22023", message: "Invalid limit" });
+    }
   });
   it("creates a workspace with its owner atomically", async () => {
     const alice = await account("Alice Owner");

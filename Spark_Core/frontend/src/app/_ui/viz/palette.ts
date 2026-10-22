@@ -28,6 +28,8 @@ export const SERIES = {
   comments: { label: "Comments", color: VIZ.yellow },
   reportsOpened: { label: "Reports opened", color: VIZ.violet },
   reportsClosed: { label: "Reports closed", color: VIZ.magenta },
+  /** Reports still open (the backlog), on Overview, Reports and Communities alike. */
+  reportBacklog: { label: "Open reports", color: VIZ.orange },
   newMembers: { label: "New members", color: VIZ.orange },
   mrr: { label: "MRR", color: VIZ.blue },
   newPaid: { label: "New paid", color: VIZ.aqua },

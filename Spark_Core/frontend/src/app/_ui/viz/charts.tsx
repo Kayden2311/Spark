@@ -1,9 +1,10 @@
 "use client";
 
-import { useId, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { isValidElement, useId, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { formatCount, shortDate } from "./format";
+import { motionClass, useReducedMotion } from "./motion";
 import { CHART_INK, sequential } from "./palette";
 
 export { Sparkline } from "./sparkline";
@@ -20,19 +21,6 @@ export interface TableSpec {
 }
 
 type Formatter = (value: number) => string;
-
-const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-
-function subscribeReducedMotion(onChange: () => void): () => void {
-  if (typeof window.matchMedia !== "function") return () => undefined;
-  const query = window.matchMedia(REDUCED_MOTION);
-  query.addEventListener?.("change", onChange);
-  return () => query.removeEventListener?.("change", onChange);
-}
-
-function useReducedMotion(): boolean {
-  return useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia?.(REDUCED_MOTION).matches ?? false, () => false);
-}
 
 /** Series key: a swatch plus the name, so identity never relies on color alone. */
 export function ChartLegend({ series }: { series: Array<{ label: string; color: string; value?: ReactNode }> }) {
@@ -177,6 +165,25 @@ function TooltipBox({ active, payload, label, labelFormat, valueFormat, series }
   );
 }
 
+/** Room on the right for the last date tick, which is centred on the final point. */
+const CHART_MARGIN = { top: 8, right: 22, bottom: 0, left: 0 } as const;
+
+/**
+ * Y-axis width that fits the widest tick label (for example "1,000 ms"). Ticks are rounded up from the
+ * largest value, so the estimate formats that value rounded up to its leading digit.
+ */
+function axisWidth(data: Array<Record<string, unknown>>, series: ChartSeries[], stacked: boolean, valueFormat: Formatter) {
+  let max = 0;
+  for (const row of data) {
+    const values = series.map((item) => Number(row[item.key] ?? 0)).filter(Number.isFinite);
+    const top = stacked ? values.reduce((sum, value) => sum + value, 0) : Math.max(0, ...values);
+    if (top > max) max = top;
+  }
+  const step = max > 0 ? 10 ** Math.floor(Math.log10(max)) : 1;
+  const label = valueFormat(Math.ceil(max / step) * step);
+  return Math.min(84, Math.max(44, label.length * 7 + 12));
+}
+
 interface TrendChartProps {
   data: Array<Record<string, unknown>>;
   series: ChartSeries[];
@@ -197,7 +204,7 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
     <>
       <CartesianGrid stroke={CHART_INK.grid} strokeDasharray="0" vertical={false} />
       <XAxis axisLine={false} dataKey={xKey} minTickGap={28} tick={axis} tickFormatter={(value: string) => xFormat(String(value))} tickLine={false} tickMargin={8} />
-      <YAxis allowDecimals={false} axisLine={false} tick={axis} tickFormatter={(value: number) => valueFormat(value)} tickLine={false} width={52} />
+      <YAxis allowDecimals={false} axisLine={false} tick={axis} tickFormatter={(value: number) => valueFormat(value)} tickLine={false} width={axisWidth(data, series, stacked, valueFormat)} />
       <Tooltip
         content={(props) => <TooltipBox {...(props as unknown as { active?: boolean; payload?: TooltipEntry[]; label?: string })} labelFormat={xFormat} series={series} valueFormat={valueFormat} />}
         cursor={kind === "bar" ? { fill: "rgba(148, 163, 184, .12)" } : { stroke: CHART_INK.cursor, strokeWidth: 1 }}
@@ -209,7 +216,7 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
     <div className="vizChartCanvas" style={{ height }}>
       <ResponsiveContainer debounce={180} height="100%" initialDimension={{ width: 640, height }} width="100%">
         {kind === "bar" ? (
-          <BarChart barCategoryGap="18%" data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <BarChart barCategoryGap="18%" data={data} margin={CHART_MARGIN}>
             {shared}
             {series.map((item, index) => (
               <Bar
@@ -227,14 +234,14 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
             ))}
           </BarChart>
         ) : kind === "line" ? (
-          <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <LineChart data={data} margin={CHART_MARGIN}>
             {shared}
             {series.map((item) => (
               <Line activeDot={{ r: 4, stroke: CHART_INK.surface, strokeWidth: 2 }} dataKey={item.key} dot={false} isAnimationActive={!reduced} key={item.key} name={item.label} stroke={item.color} strokeWidth={2} type="monotone" />
             ))}
           </LineChart>
         ) : (
-          <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <AreaChart data={data} margin={CHART_MARGIN}>
             <defs>
               {series.map((item) => (
                 <linearGradient id={`${gradientBase}-${item.key}`} key={item.key} x1="0" x2="0" y1="0" y2="1">
@@ -344,14 +351,23 @@ export function DonutChart({ data, centerValue, centerLabel, valueFormat = forma
   );
 }
 
+/** True for a label that is itself a link (an <a> or next/link, both of which take `href`). */
+function isLinkLabel(label: ReactNode): boolean {
+  return isValidElement<{ href?: unknown }>(label) && (label.type === "a" || label.props.href !== undefined);
+}
+
 /** Ranked magnitudes as horizontal bars, labelled with names and values (no legend needed). Bars grow
- * in on mount and highlight on hover, with the exact value and its share of the total as a tooltip. */
-export function BarList({ items, color, valueFormat = formatCount, emptyText = "Nothing to rank yet." }: {
+ * in from the left on mount (unless reduced motion is set) and highlight on hover, with the exact value
+ * and its share of the total as a tooltip. */
+export function BarList({ items, color, valueFormat = formatCount, emptyText = "Nothing to rank yet.", share: showShare = true }: {
   items: Array<{ key: string; label: ReactNode; value: number; hint?: ReactNode }>;
   color: string;
   valueFormat?: Formatter;
   emptyText?: string;
+  /** Show each row's share of the total. Off for values that do not add up, such as response times. */
+  share?: boolean;
 }) {
+  const reduced = useReducedMotion();
   const max = Math.max(1, ...items.map((item) => item.value));
   const total = items.reduce((sum, item) => sum + item.value, 0);
   if (items.length === 0) return <p className="vizChartEmpty">{emptyText}</p>;
@@ -360,17 +376,20 @@ export function BarList({ items, color, valueFormat = formatCount, emptyText = "
       {items.map((item, index) => {
         const share = total ? Math.round((item.value / total) * 100) : 0;
         return (
-          <li key={item.key} title={`${valueFormat(item.value)} · ${share}% of ${valueFormat(total)}`}>
+          // A row whose label is already a link is reached through that link; any other row is its own tab
+          // stop, so the share tooltip below shows on keyboard focus as it does on hover.
+          <li key={item.key} tabIndex={isLinkLabel(item.label) ? undefined : 0}>
             <div className="vizBarListText">
               <span className="vizBarListLabel">{item.label}</span>
               {item.hint && <span className="vizBarListHint">{item.hint}</span>}
             </div>
             <span className="vizBarListValue">
               {valueFormat(item.value)}
-              <span className="vizBarListPercent">{share}%</span>
+              {showShare && <span className="vizBarListPercent">{share}%</span>}
             </span>
+            <span aria-hidden="true" className="vizBarListTip">{showShare ? `${valueFormat(item.value)} · ${share}% of ${valueFormat(total)}` : valueFormat(item.value)}</span>
             <span aria-hidden="true" className="vizBarListTrack">
-              <span style={{ "--viz-bar-w": `${Math.max(2, (item.value / max) * 100)}%`, "--viz-bar-delay": `${Math.min(index, 8) * 45}ms`, background: color } as CSSProperties} />
+              <span className={reduced ? undefined : "admGrowIn"} style={{ "--viz-bar-w": `${Math.max(2, (item.value / max) * 100)}%`, "--viz-bar-delay": `${Math.min(index, 8) * 45}ms`, background: color } as CSSProperties} />
             </span>
           </li>
         );
@@ -393,9 +412,9 @@ export function InlineBar({ ratio, color, wide, title, className }: { ratio: num
  * center. Always paired by the caller with a text label, so meaning never rests on color alone.
  */
 export function Gauge({ ratio, valueText, tone, size = 56, thickness = 6 }: { ratio: number; valueText: string; tone: string; size?: number; thickness?: number }) {
+  const reduced = useReducedMotion();
   const clamped = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
   const radius = (size - thickness) / 2;
-  const circumference = 2 * Math.PI * radius;
   return (
     <div className="vizGauge" style={{ width: size, height: size }}>
       <svg height={size} viewBox={`0 0 ${size} ${size}`} width={size}>
@@ -405,12 +424,15 @@ export function Gauge({ ratio, valueText, tone, size = 56, thickness = 6 }: { ra
           cy={size / 2}
           fill="none"
           r={radius}
+          className={reduced ? undefined : "admGaugeIn"}
+          // pathLength 1 lets the ring sweep in from empty to its value (CSS keyframe with only a `from`).
+          pathLength={1}
           stroke={tone}
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - clamped)}
+          strokeDasharray={1}
+          strokeDashoffset={Number((1 - clamped).toFixed(4))}
           strokeLinecap="round"
           strokeWidth={thickness}
-          style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: "stroke-dashoffset .3s ease" }}
+          style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: reduced ? undefined : "stroke-dashoffset .3s ease" }}
         />
       </svg>
       <span className="vizGaugeValue">{valueText}</span>
@@ -418,37 +440,113 @@ export function Gauge({ ratio, valueText, tone, size = 56, thickness = 6 }: { ra
   );
 }
 
+const GAUGE = { cx: 60, cy: 60, r: 48 } as const;
+const TARGET_TONES = { within: "#047857", over: "#dc2626" } as const;
+
+/** The half arc from the left end to `ratio` (0–1) of the way round to the right end, over the top. */
+function halfArc(ratio: number): string {
+  const angle = Math.PI * (1 - ratio);
+  const x = GAUGE.cx + GAUGE.r * Math.cos(angle);
+  const y = GAUGE.cy - GAUGE.r * Math.sin(angle);
+  return `M${GAUGE.cx - GAUGE.r} ${GAUGE.cy} A${GAUGE.r} ${GAUGE.r} 0 0 1 ${Number(x.toFixed(2))} ${Number(y.toFixed(2))}`;
+}
+
+/** "Within target", or how many times over it, to one decimal ("2× over target", "1.5× over target"). */
+export function targetStatus(value: number, target: number): { over: boolean; text: string } {
+  if (target <= 0) return value > 0 ? { over: true, text: "Over target" } : { over: false, text: "Within target" };
+  if (value <= target) return { over: false, text: "Within target" };
+  return { over: true, text: `${Number((value / target).toFixed(1))}× over target` };
+}
+
+/**
+ * A half-arc gauge for a count measured against a target (e.g. the report backlog). The arc is full at
+ * twice the target; green with "Within target" up to the target, red with "N× over target" beyond it, so
+ * the status is always stated in words as well as colour. The fill draws in unless reduced motion is set.
+ */
+export function TargetGauge({ value, target, label, valueFormat = formatCount }: { value: number; target: number; label: string; valueFormat?: Formatter }) {
+  const reduced = useReducedMotion();
+  const status = targetStatus(value, target);
+  const ratio = target > 0 ? Math.max(0, Math.min(value / (2 * target), 1)) : value > 0 ? 1 : 0;
+  const tone = status.over ? TARGET_TONES.over : TARGET_TONES.within;
+  return (
+    <div aria-label={`${label}: ${valueFormat(value)}, ${status.text}`} className={`vizTargetGauge${status.over ? " vizTargetGaugeOver" : ""}`} role="img">
+      <svg aria-hidden="true" className="vizTargetGaugeArc" viewBox="0 0 120 68">
+        <path className="vizTargetGaugeTrack" d={halfArc(1)} fill="none" stroke={CHART_INK.grid} strokeLinecap="round" strokeWidth={10} />
+        {ratio > 0 && (
+          <path className={`vizTargetGaugeFill${motionClass(reduced, "admDrawIn")}`} d={halfArc(ratio)} fill="none" pathLength={1} stroke={tone} strokeLinecap="round" strokeWidth={10} />
+        )}
+      </svg>
+      <div className="vizTargetGaugeText">
+        <strong>{valueFormat(value)}</strong>
+        <span style={{ color: tone }}>{status.text}</span>
+        <span className="vizTargetGaugeTarget">Target {valueFormat(target)}</span>
+      </div>
+    </div>
+  );
+}
+
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/** Day-of-week by hour-of-day activity (UTC), shaded with one hue from light to dark. */
+/**
+ * Day-of-week by hour-of-day activity (UTC), shaded with one hue from light to dark. The grid is one
+ * keyboard stop: focusing it selects the busiest cell, arrow keys (and Home/End) move the selection,
+ * and the polite live readout above states the selected cell's exact value, as hovering does.
+ */
 export function Heatmap({ cells }: { cells: Array<{ dow: number; hour: number; events: number }> }) {
-  const [hover, setHover] = useState<{ dow: number; hour: number; events: number } | null>(null);
+  const reduced = useReducedMotion();
+  const [active, setActive] = useState<{ dow: number; hour: number } | null>(null);
   const grid = new Map(cells.map((cell) => [`${cell.dow}:${cell.hour}`, cell.events]));
   const max = Math.max(1, ...cells.map((cell) => cell.events));
   const busiest = cells.reduce<{ dow: number; hour: number; events: number } | null>((best, cell) => (!best || cell.events > best.events ? cell : best), null);
+  const eventsAt = (dow: number, hour: number) => grid.get(`${dow}:${hour}`) ?? 0;
   const describe = (cell: { dow: number; hour: number; events: number }) =>
     `${DAYS[cell.dow - 1]} ${String(cell.hour).padStart(2, "0")}:00 UTC: ${formatCount(cell.events)} ${cell.events === 1 ? "event" : "events"}`;
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const from = active ?? { dow: 1, hour: 0 };
+    const moves: Record<string, { dow: number; hour: number }> = {
+      ArrowLeft: { dow: from.dow, hour: Math.max(0, from.hour - 1) },
+      ArrowRight: { dow: from.dow, hour: Math.min(23, from.hour + 1) },
+      ArrowUp: { dow: Math.max(1, from.dow - 1), hour: from.hour },
+      ArrowDown: { dow: Math.min(7, from.dow + 1), hour: from.hour },
+      Home: { dow: from.dow, hour: 0 },
+      End: { dow: from.dow, hour: 23 },
+    };
+    const next = moves[event.key];
+    if (!next) return;
+    event.preventDefault();
+    setActive(next);
+  };
   return (
     <div className="vizHeatmap">
       <p aria-live="polite" className="vizHeatmapReadout">
-        {hover ? describe(hover) : busiest && busiest.events > 0 ? `Busiest hour: ${describe(busiest)}` : "No activity recorded in this period."}
+        {active
+          ? describe({ ...active, events: eventsAt(active.dow, active.hour) })
+          : busiest && busiest.events > 0 ? `Busiest hour: ${describe(busiest)}` : "No activity recorded in this period."}
       </p>
-      <div aria-hidden="true" className="vizHeatmapGrid" onMouseLeave={() => setHover(null)}>
-        <span />
-        {Array.from({ length: 24 }, (_, hour) => <span className="vizHeatmapHour" key={hour}>{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</span>)}
+      <div
+        aria-label="Activity by day and hour (UTC). Use the arrow keys to read each hour."
+        className="vizHeatmapGrid"
+        onBlur={() => setActive(null)}
+        onFocus={() => setActive(busiest && busiest.events > 0 ? { dow: busiest.dow, hour: busiest.hour } : { dow: 1, hour: 0 })}
+        onKeyDown={onKeyDown}
+        onMouseLeave={() => setActive(null)}
+        role="group"
+        tabIndex={0}
+      >
+        <span aria-hidden="true" />
+        {Array.from({ length: 24 }, (_, hour) => <span aria-hidden="true" className="vizHeatmapHour" key={hour}>{hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</span>)}
         {DAYS.map((day, index) => (
-          <div className="vizHeatmapRow" key={day}>
+          <div aria-hidden="true" className="vizHeatmapRow" key={day}>
             <span className="vizHeatmapDay">{day}</span>
             {Array.from({ length: 24 }, (_, hour) => {
-              const events = grid.get(`${index + 1}:${hour}`) ?? 0;
-              const shade = sequential(events / max);
+              const shade = sequential(eventsAt(index + 1, hour) / max);
+              const selected = active?.dow === index + 1 && active.hour === hour;
               return (
                 <span
-                  className="vizHeatmapCell"
+                  className={`vizHeatmapCell${selected ? " vizHeatmapCellActive" : ""}${motionClass(reduced, "admFadeIn")}`}
                   key={hour}
-                  onMouseEnter={() => setHover({ dow: index + 1, hour, events })}
-                  style={{ background: shade.background }}
-                  title={describe({ dow: index + 1, hour, events })}
+                  onMouseEnter={() => setActive({ dow: index + 1, hour })}
+                  style={{ background: shade.background, "--viz-fade-delay": `${index * 70}ms` } as CSSProperties}
                 />
               );
             })}
