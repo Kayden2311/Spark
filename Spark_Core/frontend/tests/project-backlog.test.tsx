@@ -249,6 +249,15 @@ describe("scrum backlog", () => {
     expect(warning).toHaveTextContent("Over capacity: 24 pts planned is 114% of velocity.");
   });
 
+  it("compares capacity unrounded, so 110.5% is flagged", async () => {
+    // 23.2 / 21 = 110.48%: above 110% although it reads "110%".
+    const heavy = { ...BOARD, issues: BOARD.issues.map((issue) => (issue.id === "a3" ? { ...issue, storyPoints: 23.2 } : issue)) };
+    mockApi({ routes: { [BOARD_KEY]: json(heavy) } });
+    await renderBacklog();
+    const warning = await within(await screen.findByRole("region", { name: "Sprint 4" })).findByText(/Over capacity/u);
+    expect(warning).toHaveTextContent("Over capacity: 23.2 pts planned is 110% of velocity.");
+  });
+
   it("moves a task between lanes with the keyboard and sends sprintId with If-Match", async () => {
     mockApi();
     await renderBacklog();
@@ -349,7 +358,16 @@ describe("scrum backlog", () => {
 
   it("starts a planned sprint with its saved dates", async () => {
     const started = { ...NEXT, status: "active", startedAt: "2026-10-23T10:00:00.000Z", committedPoints: 8, committedCount: 1, version: 3 };
-    mockApi({ sprints: [NEXT, LATER, ...DONE_SPRINTS], routes: { "POST /api/v1/sprints/s-next/start": json(started, 200, { ETag: "\"v3\"" }) } });
+    let isStarted = false;
+    mockApi({
+      routes: {
+        [SPRINTS_KEY]: () => json({ items: [isStarted ? started : NEXT, LATER, ...DONE_SPRINTS] })(undefined),
+        "POST /api/v1/sprints/s-next/start": () => {
+          isStarted = true;
+          return json(started, 200, { ETag: "\"v3\"" })(undefined);
+        },
+      },
+    });
     await renderBacklog();
     await userEvent.click(await within(await screen.findByRole("region", { name: "Sprint 4" })).findByRole("button", { name: "Start sprint" }));
     const dialog = screen.getByRole("dialog", { name: "Start Sprint 4" });
@@ -363,6 +381,9 @@ describe("scrum backlog", () => {
     expect(await screen.findByText("Sprint 4 started.")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(requests(SPRINTS_KEY)).toHaveLength(2));
+    // The Start buttons are gone, so focus lands on the new active lane's Complete button, not <body>.
+    await waitFor(() => expect(within(lane("Sprint 4")).getByRole("button", { name: "Complete sprint" })).toHaveFocus());
+    expect(within(lane("Sprint 4")).getByText("Active")).toBeInTheDocument();
   });
 
   it("pre-fills a sprint without dates with the project's sprint length and saves them before starting", async () => {
@@ -398,6 +419,80 @@ describe("scrum backlog", () => {
     expect(screen.getByRole("dialog", { name: "Start Sprint 4" })).toBeInTheDocument();
   });
 
+  it("reloads the plan after a refused start so the teammate's active sprint appears", async () => {
+    let refused = false;
+    mockApi({
+      routes: {
+        [SPRINTS_KEY]: () => json({ items: refused ? [ACTIVE, NEXT, LATER] : [NEXT, LATER] })(undefined),
+        "POST /api/v1/sprints/s-next/start": () => {
+          refused = true;
+          return problem(409, "sprint_already_active", "Another sprint is already active in this project. Complete it first.")(undefined);
+        },
+      },
+    });
+    await renderBacklog();
+    await userEvent.click(await within(await screen.findByRole("region", { name: "Sprint 4" })).findByRole("button", { name: "Start sprint" }));
+    const dialog = screen.getByRole("dialog", { name: "Start Sprint 4" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start sprint" }));
+    await within(dialog).findByRole("alert");
+    await waitFor(() => expect(requests(SPRINTS_KEY)).toHaveLength(2));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(await within(await screen.findByRole("region", { name: "Sprint 3" })).findByRole("button", { name: "Complete sprint" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start sprint" })).not.toBeInTheDocument();
+  });
+
+  it("reloads the plan when the dates were saved but the start failed, and retries without saving them again", async () => {
+    const dated = { ...LATER, startsOn: day(0), endsOn: day(14), version: 2 };
+    let attempts = 0;
+    mockApi({
+      sprints: [NEXT, LATER],
+      routes: {
+        "PATCH /api/v1/sprints/s-later": json(dated),
+        "POST /api/v1/sprints/s-later/start": () => {
+          attempts += 1;
+          return attempts === 1 ? problem(503, "database_unavailable", "The database is unavailable.")(undefined) : json({ ...dated, status: "active", version: 3 })(undefined);
+        },
+      },
+    });
+    await renderBacklog();
+    await userEvent.click(await within(await screen.findByRole("region", { name: "Sprint 5" })).findByRole("button", { name: "Start sprint" }));
+    const dialog = screen.getByRole("dialog", { name: "Start Sprint 5" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start sprint" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("The database is unavailable.");
+    await waitFor(() => expect(requests(SPRINTS_KEY)).toHaveLength(2));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start sprint" }));
+    await waitFor(() => expect(requests("POST")).toHaveLength(2));
+    expect(requests("PATCH")).toHaveLength(1);
+    expect(requests("POST")[1]).toMatchObject({ key: "POST /api/v1/sprints/s-later/start", ifMatch: "\"v2\"" });
+  });
+
+  it("takes a teammate's newer sprint on 412 in the start dialog and starts with its version", async () => {
+    const newer = { ...NEXT, goal: "Search, revised", version: 3 };
+    let attempts = 0;
+    mockApi({
+      sprints: [NEXT, LATER],
+      routes: {
+        "POST /api/v1/sprints/s-next/start": () => {
+          attempts += 1;
+          return attempts === 1
+            ? problem(412, "version_mismatch", "The resource changed since you loaded it.", { current: newer })(undefined)
+            : json({ ...newer, status: "active", version: 4 })(undefined);
+        },
+      },
+    });
+    await renderBacklog();
+    await userEvent.click(await within(await screen.findByRole("region", { name: "Sprint 4" })).findByRole("button", { name: "Start sprint" }));
+    const dialog = screen.getByRole("dialog", { name: "Start Sprint 4" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start sprint" }));
+    expect(await within(dialog).findByText("Updated by a teammate — review the sprint and try again.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Search, revised")).toBeInTheDocument();
+    await waitFor(() => expect(requests(SPRINTS_KEY)).toHaveLength(2));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Start sprint" }));
+    await waitFor(() => expect(requests("POST")).toHaveLength(2));
+    expect(requests("POST")[1].ifMatch).toBe("\"v3\"");
+    expect(await screen.findByText("Sprint 4 started.")).toBeInTheDocument();
+  });
+
   it("refuses a sprint longer than 28 days before sending anything", async () => {
     mockApi({ sprints: [NEXT] });
     await renderBacklog();
@@ -423,6 +518,8 @@ describe("scrum backlog", () => {
     await waitFor(() => expect(requests("POST")).toHaveLength(1));
     expect(requests("POST")[0]).toEqual({ key: "POST /api/v1/sprints/s-active/complete", body: { carryToSprintId: "s-next" }, ifMatch: "\"v4\"" });
     expect(await screen.findByText("Sprint 3 completed. 1 unfinished task moved to Sprint 4.")).toBeInTheDocument();
+    // The Complete button left with the active lane; focus goes to Create sprint instead of <body>.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create sprint" })).toHaveFocus());
   });
 
   it("completes the active sprint sending unfinished work to the backlog", async () => {
@@ -484,7 +581,7 @@ describe("scrum backlog", () => {
     expect(card$("ATLAS-4")).not.toHaveAttribute("draggable", "true");
 
     card$("ATLAS-4").focus();
-    await userEvent.keyboard(" {ArrowUp}{Enter}");
+    await userEvent.keyboard(" {ArrowUp}{Escape}");
     expect(cardsIn("Backlog")).toEqual(["ATLAS-4", "ATLAS-7", "ATLAS-5"]);
     expect(requests("PATCH")).toHaveLength(0);
 

@@ -72,18 +72,18 @@ function DateFields({ startsOn, endsOn, error, onStart, onEnd, disabled = false 
 export function SprintFormDialog({ projectId, sprint, defaults, onClose, onSaved }: {
   projectId: string;
   sprint: Sprint | null;
-  /** The new sprint's pre-filled values. */
-  defaults: SprintFields;
+  /** The new sprint's pre-filled values (create only). */
+  defaults?: SprintFields;
   onClose(): void;
   onSaved(sprint: Sprint): void;
 }) {
   const id = useId();
   const [base, setBase] = useState<Sprint | null>(sprint);
   const initial = (from: Sprint | null) => ({
-    name: from?.name ?? defaults.name,
-    goal: from ? from.goal ?? "" : defaults.goal ?? "",
-    startsOn: from ? from.startsOn ?? "" : defaults.startsOn ?? "",
-    endsOn: from ? from.endsOn ?? "" : defaults.endsOn ?? "",
+    name: from ? from.name : defaults?.name ?? "",
+    goal: from ? from.goal ?? "" : defaults?.goal ?? "",
+    startsOn: from ? from.startsOn ?? "" : defaults?.startsOn ?? "",
+    endsOn: from ? from.endsOn ?? "" : defaults?.endsOn ?? "",
   });
   const [values, setValues] = useState(() => initial(sprint));
   const [nameError, setNameError] = useState<string | null>(null);
@@ -104,11 +104,12 @@ export function SprintFormDialog({ projectId, sprint, defaults, onClose, onSaved
     if (saving) return;
     const name = values.name.trim();
     const goal = values.goal.trim();
-    const nameProblem = name === "" ? "Give the sprint a name." : name.length > SPRINT_NAME_MAX ? `Keep the name under ${SPRINT_NAME_MAX} characters.` : null;
+    const nameProblem = name === "" ? "Give the sprint a name." : name.length > SPRINT_NAME_MAX ? `Use at most ${SPRINT_NAME_MAX} characters.` : null;
     const dateProblem = datesProblem(values.startsOn, values.endsOn, false);
     setNameError(nameProblem);
     setDatesError(dateProblem);
-    if (nameProblem || dateProblem || goal.length > SPRINT_GOAL_MAX) return;
+    // The goal needs no check here: its field's maxLength already stops at SPRINT_GOAL_MAX.
+    if (nameProblem || dateProblem) return;
 
     const fields: SprintFields = { name, goal: goal || null, startsOn: values.startsOn || null, endsOn: values.endsOn || null };
     let patch: Partial<SprintFields> = fields;
@@ -190,7 +191,7 @@ export function SprintFormDialog({ projectId, sprint, defaults, onClose, onSaved
  * Starts a planned sprint. Dates come from the sprint, else today and today + the project's sprint length;
  * changed dates are saved first (If-Match), then the start command runs with the sprint's new version.
  */
-export function StartSprintDialog({ sprint, lengthDays, today, commitment, onClose, onStarted, onStale }: {
+export function StartSprintDialog({ sprint, lengthDays, today, commitment, onClose, onStarted, onRefresh }: {
   sprint: Sprint;
   lengthDays: number;
   today: string;
@@ -198,8 +199,11 @@ export function StartSprintDialog({ sprint, lengthDays, today, commitment, onClo
   commitment: { count: number; points: number };
   onClose(): void;
   onStarted(sprint: Sprint): void;
-  /** A teammate changed the sprint (seen on 412); the page refreshes its copy. */
-  onStale(): void;
+  /**
+   * The start failed after reaching the API: the server's plan may differ from the page's (a teammate started
+   * another sprint, changed this one, or our date change was saved before the start failed), so the page reloads it.
+   */
+  onRefresh(): void;
 }) {
   const [current, setCurrent] = useState(sprint);
   const initialStart = sprint.startsOn ?? today;
@@ -229,6 +233,7 @@ export function StartSprintDialog({ sprint, lengthDays, today, commitment, onClo
       onStarted(await startSprint(target));
     } catch (error) {
       setSaving(false);
+      onRefresh();
       const newer = staleSprint(error);
       if (newer) {
         setCurrent(newer);
@@ -237,7 +242,6 @@ export function StartSprintDialog({ sprint, lengthDays, today, commitment, onClo
           setEndsOn(newer.endsOn);
         }
         setConflict(true);
-        onStale();
         return;
       }
       setConflict(false);
@@ -279,7 +283,7 @@ export function StartSprintDialog({ sprint, lengthDays, today, commitment, onClo
 const BACKLOG_CHOICE = "";
 
 /** Completes the active sprint; unfinished work moves to a planned sprint (the next one by default) or the backlog. */
-export function CompleteSprintDialog({ sprint, planned, doneCount, totalCount, onClose, onCompleted, onStale }: {
+export function CompleteSprintDialog({ sprint, planned, doneCount, totalCount, onClose, onCompleted, onRefresh }: {
   sprint: Sprint;
   /** Planned sprints in plan order; the first is "next". */
   planned: readonly Sprint[];
@@ -288,7 +292,8 @@ export function CompleteSprintDialog({ sprint, planned, doneCount, totalCount, o
   onClose(): void;
   /** `targetName` is where unfinished work went: a sprint's name, or null for the backlog. */
   onCompleted(result: CompletedSprint, targetName: string | null): void;
-  onStale(): void;
+  /** The completion failed after reaching the API; the page reloads its sprints and board. */
+  onRefresh(): void;
 }) {
   const id = useId();
   const [current, setCurrent] = useState(sprint);
@@ -309,11 +314,11 @@ export function CompleteSprintDialog({ sprint, planned, doneCount, totalCount, o
       onCompleted(result, planned.find((item) => item.id === carryTo)?.name ?? null);
     } catch (error) {
       setSaving(false);
+      onRefresh();
       const newer = staleSprint(error);
       if (newer) {
         setCurrent(newer);
         setConflict(true);
-        onStale();
         return;
       }
       setConflict(false);

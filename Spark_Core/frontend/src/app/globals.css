@@ -4593,5 +4593,4 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 @media (prefers-reduced-motion: reduce) {
   .wsBacklogLane, .wsBacklogCard, .wsBacklogChoice, .wsBacklogBar > span { transition: none; }
   .wsBacklogCard[data-picked] { transform: none; }
-  .wsBacklogSkeleton span { animation: none; }
 }

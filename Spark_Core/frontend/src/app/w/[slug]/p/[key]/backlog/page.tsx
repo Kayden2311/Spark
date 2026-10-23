@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import { initials } from "../../../../../components";
 import { useAuth } from "../../../../../auth-context";
-import { ApiError, messageOf, workspaceApi } from "../../../../_lib/api";
+import { ApiError, messageOf } from "../../../../_lib/api";
 import { removeCard, replaceCard } from "../../../../_lib/board-moves";
 import { boardPath, toCard, typeLabel, type BoardState, type IssueCard, type IssueDetail } from "../../../../_lib/issues";
 import {
@@ -34,6 +34,7 @@ import {
   type Velocity,
 } from "../../../../_lib/planning";
 import { daysBetween, formatShortDay, methodologyOf, todayIso } from "../../../../_lib/projects";
+import { useOptimisticBoard } from "../../../../_lib/use-optimistic-board";
 import { useWorkspaceData } from "../../../../_lib/use-workspace-data";
 import { useWorkspace } from "../../../workspace-context";
 import { MoveMenu } from "../move-menu";
@@ -76,13 +77,8 @@ function ScrumBacklog() {
   const { user } = useAuth();
   const planner = canPlan(workspace.role, project, user?.id);
   const path = boardPath(project.id);
-  const loadedBoard = useWorkspaceData<BoardState>(path);
+  const { loaded: loadedBoard, base, committed, pendingRef, update, refresh } = useOptimisticBoard(path);
   const loadedSprints = useWorkspaceData<{ items: Sprint[] }>(sprintsPath(project.id));
-  const base = loadedBoard.dataPath === path ? loadedBoard.data : null;
-  // Optimistic moves apply to the loaded copy they were made on; a reload (or 412 refresh) drops them.
-  const [local, setLocal] = useState<{ source: BoardState; board: BoardState } | null>(null);
-  const committed = base && local?.source === base ? local.board : base;
-  const baseRef = useRef<BoardState | null>(null);
   // Sprint writes show at once; the reload that follows replaces them with the server's list.
   const sprintBase = loadedSprints.data;
   const [sprintLocal, setSprintLocal] = useState<{ source: unknown; items: Sprint[] } | null>(null);
@@ -95,10 +91,6 @@ function ScrumBacklog() {
   const [drawer, setDrawer] = useState<{ id: string; key: string } | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const helpId = useId();
-
-  useEffect(() => {
-    baseRef.current = base;
-  }, [base]);
 
   // Moving a task to another lane remounts its card, so focus follows it explicitly.
   useEffect(() => {
@@ -139,26 +131,8 @@ function ScrumBacklog() {
   const lengthDays = project.sprintLengthDays ?? DEFAULT_SPRINT_DAYS;
 
   const focusCard = (issueId: string) => setFocusRequest((current) => ({ selector: `[data-card-id="${issueId}"]`, serial: (current?.serial ?? 0) + 1 }));
+  const focusSelector = (selector: string) => setFocusRequest((current) => ({ selector, serial: (current?.serial ?? 0) + 1 }));
   const focusMoveButton = (issueId: string) => setFocusRequest((current) => ({ selector: `[data-move-for="${issueId}"]`, serial: (current?.serial ?? 0) + 1 }));
-
-  /** Applies a change to the board copy that `from` was loaded as; changes for an outdated copy are dropped. */
-  const update = (from: BoardState, change: (current: BoardState) => BoardState) => {
-    if (baseRef.current !== null && from !== baseRef.current) return;
-    setLocal((previous) => ({ source: from, board: change(previous && previous.source === from ? previous.board : from) }));
-  };
-
-  /** Refetches the board without a loading state and puts it in place of the local copy. Resolves false on failure. */
-  const refresh = async (): Promise<boolean> => {
-    const from = baseRef.current;
-    if (!from) return false;
-    try {
-      const { data } = await workspaceApi<BoardState>(path);
-      if (baseRef.current === from) setLocal({ source: from, board: data });
-      return true;
-    } catch {
-      return false;
-    }
-  };
 
   const upsertSprint = (sprint: Sprint) => {
     const items = sprints.some((item) => item.id === sprint.id) ? sprints.map((item) => (item.id === sprint.id ? sprint : item)) : [...sprints, sprint];
@@ -178,6 +152,7 @@ function ScrumBacklog() {
     update(source, (current) => withSprint(current, issueId, sprintId));
     announce(how === "keyboard" ? `Dropped ${issue.key} in ${laneName(targetKey)}.` : `Moved ${issue.key} to ${laneName(targetKey)}.`);
     setBusy((current) => ({ ...current, [issueId]: true }));
+    pendingRef.current += 1;
     let stale = false;
     assignIssueToSprint(issue, sprintId)
       .then((detail) => update(source, (current) => replaceCard(current, toCard(detail))))
@@ -187,6 +162,7 @@ function ScrumBacklog() {
         else notify(messageOf(error), "error");
       })
       .finally(() => {
+        pendingRef.current -= 1;
         setBusy((current) => {
           const next = { ...current };
           delete next[issueId];
@@ -194,7 +170,7 @@ function ScrumBacklog() {
         });
         if (stale) {
           loadedSprints.reload();
-          void refresh().then((ok) => notify(ok ? BACKLOG_REFRESHED : BACKLOG_REFRESH_FAILED, "info"));
+          void refresh(true).then((ok) => notify(ok ? BACKLOG_REFRESHED : BACKLOG_REFRESH_FAILED, "info"));
         }
       });
   };
@@ -286,7 +262,7 @@ function ScrumBacklog() {
       </p>
       <div className="wsBacklogToolbar">
         {planner
-          ? <button className="sparkPrimary wsBacklogCreate" onClick={() => setDialog({ kind: "create" })} type="button">
+          ? <button className="sparkPrimary wsBacklogCreate" data-create-sprint onClick={() => setDialog({ kind: "create" })} type="button">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
               Create sprint
             </button>
@@ -310,7 +286,7 @@ function ScrumBacklog() {
           <BacklogLane
             actions={planner && sprint ? (
               kind === "active"
-                ? <button className="sparkPrimary wsBacklogAction" onClick={() => setDialog({ kind: "complete", sprint })} type="button">Complete sprint</button>
+                ? <button className="sparkPrimary wsBacklogAction" data-complete-for={sprint.id} onClick={() => setDialog({ kind: "complete", sprint })} type="button">Complete sprint</button>
                 : <>
                     <button aria-label={`Edit ${sprint.name}`} className="sparkSecondary wsBacklogAction" onClick={() => setDialog({ kind: "edit", sprint })} type="button">Edit</button>
                     {!active && <button className="sparkPrimary wsBacklogAction" onClick={() => setDialog({ kind: "start", sprint })} type="button">Start sprint</button>}
@@ -415,7 +391,6 @@ function ScrumBacklog() {
       )}
       {dialog?.kind === "edit" && (
         <SprintFormDialog
-          defaults={createDefaults()}
           onClose={() => setDialog(null)}
           onSaved={(sprint) => {
             setDialog(null);
@@ -433,10 +408,12 @@ function ScrumBacklog() {
             commitment={{ count: issues.length, points: sumPoints(issues) }}
             lengthDays={lengthDays}
             onClose={() => setDialog(null)}
-            onStale={() => loadedSprints.reload()}
+            onRefresh={() => loadedSprints.reload()}
             onStarted={(sprint) => {
               setDialog(null);
               upsertSprint(sprint);
+              // The Start buttons go away with a sprint active, so focus moves to the new active lane's Complete button.
+              focusSelector(`[data-complete-for="${sprint.id}"]`);
               notify(`${sprint.name} started.`);
             }}
             sprint={dialog.sprint}
@@ -454,13 +431,18 @@ function ScrumBacklog() {
             onCompleted={({ sprint, movedIssues }, targetName) => {
               setDialog(null);
               upsertSprint(sprint);
-              void refresh();
+              // The Complete button left with the active lane; Create sprint is always there for planners.
+              focusSelector("[data-create-sprint]");
+              void refresh(true);
               reloadProject();
               notify(movedIssues === 0
                 ? `${sprint.name} completed.`
                 : `${sprint.name} completed. ${movedIssues} unfinished ${movedIssues === 1 ? "task" : "tasks"} moved to ${targetName ?? "the backlog"}.`);
             }}
-            onStale={() => loadedSprints.reload()}
+            onRefresh={() => {
+              loadedSprints.reload();
+              void refresh(true);
+            }}
             planned={planned}
             sprint={dialog.sprint}
             totalCount={issues.length}
@@ -502,6 +484,7 @@ function ActiveProgress({ sprint, donePoints, today }: { sprint: Sprint; donePoi
 
 function Capacity({ planned, velocity }: { planned: number; velocity: Velocity | null }) {
   const percent = capacityPercent(planned, velocity);
+  // Compared unrounded: 110.4% is above 110%, though it reads "110%".
   const over = percent !== null && percent > OVER_CAPACITY_PERCENT;
   return (
     <div className="wsBacklogCapacity" data-over={over || undefined}>
@@ -510,7 +493,7 @@ function Capacity({ planned, velocity }: { planned: number; velocity: Velocity |
         <span className="wsBacklogVelocity">{velocityLabel(velocity)}</span>
       </p>
       {percent !== null && <span aria-hidden="true" className="wsBacklogBar"><span style={{ width: `${Math.min(100, percent)}%` }} /></span>}
-      {over && <p className="wsBacklogWarning" role="note">Over capacity: {pointsLabel(planned)} planned is {percent}% of velocity.</p>}
+      {over && <p className="wsBacklogWarning" role="note">Over capacity: {pointsLabel(planned)} planned is {Math.round(percent)}% of velocity.</p>}
     </div>
   );
 }

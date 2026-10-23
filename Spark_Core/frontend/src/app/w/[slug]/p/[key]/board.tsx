@@ -4,11 +4,11 @@ import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, typ
 import { useSearchParams } from "next/navigation";
 
 import { initials } from "../../../../components";
-import { ApiError, messageOf, workspaceApi } from "../../../_lib/api";
+import { ApiError, messageOf } from "../../../_lib/api";
 import { addCard, columnIssues, currentTarget, keyboardTarget, moveCard, positionOf, removeCard, replaceCard, wipBlocked, wipMessage, type ArrowKey, type MoveTarget } from "../../../_lib/board-moves";
 import { boardPath, createIssue, moveIssue, priorityLabel, toCard, typeLabel, type BoardState, type BoardStatus, type IssueCard, type IssueDetail, type IssueMove } from "../../../_lib/issues";
 import { formatDay, methodologyOf, todayIso } from "../../../_lib/projects";
-import { useWorkspaceData } from "../../../_lib/use-workspace-data";
+import { useOptimisticBoard } from "../../../_lib/use-optimistic-board";
 import { useWorkspace } from "../../workspace-context";
 import { MoveMenu } from "./move-menu";
 import { useProject } from "./project-context";
@@ -55,14 +55,7 @@ export function ProjectBoard() {
   const { workspace } = useWorkspace();
   const issueParam = useSearchParams().get(ISSUE_PARAM);
   const path = boardPath(project.id);
-  const loaded = useWorkspaceData<BoardState>(path);
-  const base = loaded.dataPath === path ? loaded.data : null;
-  // Optimistic edits apply to the loaded copy they were made on; a reload (or 412 refresh) drops them.
-  const [local, setLocal] = useState<{ source: BoardState; board: BoardState } | null>(null);
-  const committed = base && local?.source === base ? local.board : base;
-  const baseRef = useRef<BoardState | null>(null);
-  // Moves still waiting for the API; the silent refresh after a move waits until none are left.
-  const pendingRef = useRef(0);
+  const { loaded, base, committed, pendingRef, update, refresh } = useOptimisticBoard(path);
   const [pickup, setPickup] = useState<Pickup | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -96,10 +89,6 @@ export function ProjectBoard() {
     notify(missingLink.truncated ? TASK_NOT_LOADED : TASK_GONE, missingLink.truncated ? "info" : "error");
   }, [missingLink, notify]);
 
-  useEffect(() => {
-    baseRef.current = base;
-  }, [base]);
-
   // Moving a card to another column remounts it, so focus follows it explicitly.
   useEffect(() => {
     if (focusRequest) document.querySelector<HTMLElement>(focusRequest.selector)?.focus();
@@ -107,30 +96,6 @@ export function ProjectBoard() {
 
   const focusCard = (issueId: string) => setFocusRequest((current) => ({ selector: `[data-card-id="${issueId}"]`, serial: (current?.serial ?? 0) + 1 }));
   const focusMoveButton = (issueId: string) => setFocusRequest((current) => ({ selector: `[data-move-for="${issueId}"]`, serial: (current?.serial ?? 0) + 1 }));
-
-  /** Applies a change to the board copy that `source` was loaded as; changes for an outdated copy are dropped. */
-  const update = (source: BoardState, change: (board: BoardState) => BoardState) => {
-    if (baseRef.current !== null && source !== baseRef.current) return;
-    setLocal((previous) => ({ source, board: change(previous && previous.source === source ? previous.board : source) }));
-  };
-
-  /**
-   * Refetches the board without a loading state and puts it in place of the local copy, so versions
-   * reranked by the server and counts stay current. A silent refresh is skipped while other moves are
-   * in flight (the last one to settle refreshes again); `force` applies it regardless. Resolves false
-   * when the board could not be fetched.
-   */
-  const refresh = async (force: boolean): Promise<boolean> => {
-    const source = baseRef.current;
-    if (!source) return false;
-    try {
-      const { data } = await workspaceApi<BoardState>(path);
-      if (baseRef.current === source && (force || pendingRef.current === 0)) setLocal({ source, board: data });
-      return true;
-    } catch {
-      return false;
-    }
-  };
 
   const setNotice = (statusId: string, text: string | null) =>
     setNotices((current) => {

@@ -146,10 +146,10 @@ export function velocityLabel(velocity: Velocity | null): string {
   return velocity ? `Velocity ${pointsLabel(Math.round(velocity.points))} (last ${velocity.sprints})` : "No velocity yet";
 }
 
-/** Planned points as a share of velocity (114 for 114%), or null without a positive velocity. */
+/** Planned points as a share of velocity in percent, unrounded (114.3 for 114.3%), or null without a positive velocity. */
 export function capacityPercent(plannedPoints: number, velocity: Velocity | null): number | null {
   if (!velocity || velocity.points <= 0) return null;
-  return Math.round((plannedPoints / velocity.points) * 100);
+  return (plannedPoints / velocity.points) * 100;
 }
 
 /** Planning more than 110% of velocity is flagged. */
