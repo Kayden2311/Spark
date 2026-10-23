@@ -204,6 +204,43 @@ async function issueEvents(issue: string) {
   await owner.query("SET ROLE spark_owner");
   return (await owner.query(`SELECT event_type,actor_user_id,from_version,to_version,changes FROM ${table("issue_events")} WHERE issue_id=$1 ORDER BY to_version`, [issue])).rows;
 }
+// A Scrum project with the M2 template statuses and an optional lead, created through ws_create_project.
+async function scrumProject(who: Account, workspace?: string, lead: string | null = null) {
+  const tenant = workspace ?? (await createWorkspace(who)).workspace_id!;
+  const key = `S${randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`;
+  const created = await createProject(who, tenant, { key, name: "Rocket", methodology: "scrum", sprint: 14, lead });
+  if (created.outcome !== "ok") throw new Error(`Project not created: ${created.outcome}`);
+  return { workspace: tenant, project: created.project_id!, key };
+}
+type SprintCreated = { outcome: string; sprint_id: string | null; sprint_version: number | null };
+type SprintResult = { outcome: string; sprint_version: number | null };
+const createSprintCall = `SELECT * FROM "${namespace}".ws_create_sprint($1,$2,$3,$4,$5)`;
+async function createSprint(who: Account, project: string, name: unknown = "Sprint", goal: string | null = null, starts: string | null = null, ends: string | null = null) {
+  return (await asSession(who.token, createSprintCall, [project, name, goal, starts, ends])).rows[0] as SprintCreated;
+}
+async function updateSprint(who: Account, sprint: string, version: number, patch: unknown) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_update_sprint")}($1,$2,$3)`, [sprint, version, JSON.stringify(patch)])).rows[0] as SprintResult;
+}
+const startSprintCall = `SELECT * FROM "${namespace}".ws_start_sprint($1,$2)`;
+async function startSprint(who: Account, sprint: string, version: number) {
+  return (await asSession(who.token, startSprintCall, [sprint, version])).rows[0] as SprintResult;
+}
+async function completeSprint(who: Account, sprint: string, version: number, carryTo: string | null) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_complete_sprint")}($1,$2,$3)`, [sprint, version, carryTo])).rows[0] as SprintResult & { moved_issues: number | null };
+}
+async function sprintRow(sprint: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT name,goal,status,version,(starts_at AT TIME ZONE 'UTC')::date::text AS starts_on,(ends_at AT TIME ZONE 'UTC')::date::text AS ends_on,
+    started_at IS NOT NULL AS started,completed_at IS NOT NULL AS completed,committed_points::text AS committed_points,committed_count,
+    completed_points::text AS completed_points,completed_count FROM ${table("sprints")} WHERE id=$1`, [sprint])).rows[0];
+}
+// Creates an issue and puts it into a sprint; returns the issue id (at version 2).
+async function sprintIssue(who: Account, project: string, sprint: string, input: IssueInput = {}) {
+  const issue = (await createIssue(who, project, input)).issue_id!;
+  const moved = await updateIssue(who, issue, 1, { sprintId: sprint });
+  if (moved.outcome !== "ok") throw new Error(`Issue not planned: ${moved.outcome}`);
+  return issue;
+}
 // Opens two runtime connections, each in a transaction bound to one session.
 async function sessionPair(accounts: [Account, Account]) {
   const clients = [0, 1].map(() => new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 })) as [pg.Client, pg.Client];
@@ -367,7 +404,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(23);
+    expect(result.rows[0].count).toBe(24);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -960,9 +997,9 @@ describe("Local PostgreSQL schema", () => {
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
       "staff_report_context", "staff_report_daily", "staff_report_preview", "staff_report_reasons", "staff_report_stats", "staff_report_top_communities", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
-      "staff_user_sessions", "ws_accept_invitation", "ws_create_invitation", "ws_create_issue", "ws_create_project", "ws_create_workspace", "ws_invitation_preview",
-      "ws_list_members", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role", "ws_update_issue", "ws_update_project",
-      "ws_update_workspace",
+      "staff_user_sessions", "ws_accept_invitation", "ws_complete_sprint", "ws_create_invitation", "ws_create_issue", "ws_create_project", "ws_create_sprint",
+      "ws_create_workspace", "ws_invitation_preview", "ws_list_members", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role",
+      "ws_start_sprint", "ws_update_issue", "ws_update_project", "ws_update_sprint", "ws_update_workspace",
     ]);
   });
   it("protects admin-tier accounts, drops revoked roles at once and guards promotions of closed communities", async () => {
@@ -2522,7 +2559,9 @@ describe("Local PostgreSQL schema", () => {
       expect(updateIssue(alice, issue, 1, patch)).rejects.toMatchObject({ code: "22023", message });
     await rejects({}, "Invalid issue patch");
     await rejects({ methodology: "x" }, "Invalid issue patch");
-    await rejects({ title: "Fine", sprintId: null }, "Invalid issue patch");
+    await rejects({ title: "Fine", sprint: null }, "Invalid issue patch");
+    // Sprints belong to Scrum projects only.
+    for (const sprintId of [null, randomUUID()]) await rejects({ sprintId }, "Invalid sprint");
     await rejects(["title"], "Invalid issue patch");
     await rejects({ archived: "yes" }, "Invalid issue patch");
     for (const title of ["   ", "x".repeat(201), 42]) await rejects({ title }, "Invalid issue title");
@@ -2755,5 +2794,243 @@ describe("Local PostgreSQL schema", () => {
     await deliveredAgo(daveNotices[0]!, 61);
     expect(await statusOf(last)).toBe("pending");
     expect(await statusOf((await noticesOf(other, bob.id))[0]!)).toBe("pending");
+  });
+  it("creates and edits sprints", async () => {
+    const alice = await account("Sprint Owner"), bob = await account("Sprint Lead"), carol = await account("Sprint Member"), dave = await account("Sprint Stranger");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const { project } = await scrumProject(alice, workspace, bob.id);
+    // The project lead may plan although a plain member.
+    const created = await createSprint(bob, project, "  Sprint 1  ", "  Ship sign-in  ", "2026-11-02", "2026-11-16");
+    expect(created).toEqual({ outcome: "ok", sprint_id: expect.any(String), sprint_version: 1 });
+    const sprint = created.sprint_id!;
+    expect(await sprintRow(sprint)).toEqual({ name: "Sprint 1", goal: "Ship sign-in", status: "planned", version: 1, starts_on: "2026-11-02", ends_on: "2026-11-16",
+      started: false, completed: false, committed_points: null, committed_count: null, completed_points: null, completed_count: null });
+    const refused = (outcome: string): SprintCreated => ({ outcome, sprint_id: null, sprint_version: null });
+    expect(await createSprint(carol, project, "Member sprint")).toEqual(refused("forbidden"));
+    expect(await createSprint(dave, project, "Stranger sprint")).toEqual(refused("not_found"));
+    expect(await createSprint(alice, randomUUID(), "Missing project")).toEqual(refused("not_found"));
+    // Strangers learn nothing from invalid input or the methodology either.
+    expect(await createSprint(dave, project, " ")).toEqual(refused("not_found"));
+    const kanban = await kanbanProject(alice, workspace);
+    expect(await createSprint(dave, kanban.project, "Kanban sprint")).toEqual(refused("not_found"));
+    expect(await createSprint(carol, kanban.project, "Kanban sprint")).toEqual(refused("forbidden"));
+    await expect(createSprint(alice, kanban.project, "Kanban sprint")).rejects.toMatchObject({ code: "22023", message: "Invalid methodology" });
+    const createRejects = async (args: [unknown, string | null, string | null, string | null], message: string) =>
+      expect(createSprint(alice, project, ...args)).rejects.toMatchObject({ code: "22023", message });
+    for (const name of ["   ", "x".repeat(81), null]) await createRejects([name, null, null, null], "Invalid sprint name");
+    await createRejects(["Sprint", "x".repeat(501), null, null], "Invalid sprint goal");
+    const badDates: [string | null, string | null][] = [["2026-11-02", null], [null, "2026-11-16"], ["2026-11-02", "2026-11-02"], ["2026-11-02", "2026-11-01"],
+      ["2026-11-02", "2026-12-01"], ["1999-12-30", "2000-01-02"], ["2100-12-30", "2101-01-02"], ["infinity", "infinity"]];
+    for (const [starts, ends] of badDates) await createRejects(["Sprint", null, starts, ends], "Invalid sprint dates");
+    // Limits: an 80-character name, a 500-character goal and 28 days.
+    expect(await createSprint(alice, project, "x".repeat(80), "x".repeat(500), "2026-11-02", "2026-11-30")).toMatchObject({ outcome: "ok", sprint_version: 1 });
+    const undated = (await createSprint(alice, project, "Later", "   ")).sprint_id!;
+    expect(await sprintRow(undated)).toMatchObject({ goal: null, starts_on: null, ends_on: null, status: "planned" });
+
+    expect(await updateSprint(bob, sprint, 1, { name: "  Sprint One  " })).toEqual({ outcome: "ok", sprint_version: 2 });
+    expect(await updateSprint(bob, sprint, 1, { name: "Stale" })).toEqual({ outcome: "version_mismatch", sprint_version: 2 });
+    expect(await updateSprint(carol, sprint, 2, { name: "Member" })).toEqual({ outcome: "forbidden", sprint_version: null });
+    expect(await updateSprint(dave, sprint, 2, { name: "Stranger" })).toEqual({ outcome: "not_found", sprint_version: null });
+    expect(await updateSprint(dave, sprint, 2, { bogus: true })).toEqual({ outcome: "not_found", sprint_version: null });
+    expect(await updateSprint(alice, randomUUID(), 1, { name: "Missing" })).toEqual({ outcome: "not_found", sprint_version: null });
+    expect(await updateSprint(alice, sprint, 2, { goal: null, startsOn: "2026-11-03", endsOn: "2026-11-17" })).toEqual({ outcome: "ok", sprint_version: 3 });
+    expect(await updateSprint(alice, sprint, 3, { endsOn: "2026-11-30" })).toEqual({ outcome: "ok", sprint_version: 4 });
+    // A patch that changes nothing writes nothing.
+    expect(await updateSprint(alice, sprint, 4, { name: "Sprint One", goal: null, startsOn: "2026-11-03" })).toEqual({ outcome: "ok", sprint_version: 4 });
+    expect(await sprintRow(sprint)).toMatchObject({ name: "Sprint One", goal: null, starts_on: "2026-11-03", ends_on: "2026-11-30", version: 4 });
+    const updateRejects = async (patch: unknown, message: string) =>
+      expect(updateSprint(alice, sprint, 4, patch)).rejects.toMatchObject({ code: "22023", message });
+    for (const patch of [{}, ["name"], "name", { status: "active" }, { name: "Fine", startsAt: "2026-11-03" }]) await updateRejects(patch, "Invalid sprint");
+    for (const name of [" ", "x".repeat(81), 5, null]) await updateRejects({ name }, "Invalid sprint name");
+    for (const goal of ["x".repeat(501), 5]) await updateRejects({ goal }, "Invalid sprint goal");
+    for (const patch of [{ startsOn: "2026-02-30" }, { startsOn: 20261103 }, { startsOn: "infinity" }, { startsOn: null }, { endsOn: "2026-12-02" }, { startsOn: "2026-11-30" }])
+      await updateRejects(patch, "Invalid sprint dates");
+    expect(await updateSprint(alice, sprint, 4, { startsOn: null, endsOn: null })).toEqual({ outcome: "ok", sprint_version: 5 });
+    expect(await updateSprint(alice, sprint, 5, { startsOn: "2026-11-02", endsOn: "2026-11-16" })).toEqual({ outcome: "ok", sprint_version: 6 });
+
+    // Name and goal stay editable while active; dates only while planned; history is closed.
+    expect(await startSprint(bob, sprint, 6)).toEqual({ outcome: "ok", sprint_version: 7 });
+    expect(await updateSprint(bob, sprint, 7, { name: "Sprint 1", goal: "Ship sign-in" })).toEqual({ outcome: "ok", sprint_version: 8 });
+    expect(await updateSprint(bob, sprint, 8, { endsOn: "2026-11-20" })).toEqual({ outcome: "not_editable", sprint_version: null });
+    expect(await completeSprint(bob, sprint, 8, null)).toEqual({ outcome: "ok", sprint_version: 9, moved_issues: 0 });
+    expect(await updateSprint(bob, sprint, 9, { name: "History" })).toEqual({ outcome: "not_editable", sprint_version: null });
+    expect(await sprintRow(sprint)).toMatchObject({ name: "Sprint 1", goal: "Ship sign-in", status: "completed", version: 9, completed_points: "0.00", completed_count: 0 });
+
+    // Once the project leaves Scrum its sprints are history only.
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET methodology='kanban',sprint_length_days=NULL WHERE id=$1`, [project]);
+    await expect(updateSprint(alice, undated, 1, { name: "Kanban now" })).rejects.toMatchObject({ code: "22023", message: "Invalid methodology" });
+    await expect(startSprint(alice, undated, 1)).rejects.toMatchObject({ code: "22023", message: "Invalid methodology" });
+    expect(await updateSprint(dave, undated, 1, { name: "Kanban now" })).toEqual({ outcome: "not_found", sprint_version: null });
+    await expect(asSession(newTokenHash(), createSprintCall, [project, "No session", null, null, null])).rejects.toMatchObject({ code: "28000" });
+  });
+  it("starts one sprint at a time", async () => {
+    const alice = await account("Start Owner"), bob = await account("Start Admin"), carol = await account("Start Member"), dave = await account("Start Stranger");
+    const { workspace, project } = await scrumProject(alice);
+    await addMember(workspace, bob, "admin");
+    await addMember(workspace, carol, "member");
+    const first = (await createSprint(alice, project, "First", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    const second = (await createSprint(bob, project, "Second", null, "2026-11-16", "2026-11-30")).sprint_id!;
+    const undated = (await createSprint(alice, project, "Undated")).sprint_id!;
+    expect(await startSprint(carol, first, 1)).toEqual({ outcome: "forbidden", sprint_version: null });
+    expect(await startSprint(dave, first, 1)).toEqual({ outcome: "not_found", sprint_version: null });
+    expect(await startSprint(alice, randomUUID(), 1)).toEqual({ outcome: "not_found", sprint_version: null });
+    expect(await startSprint(alice, first, 2)).toEqual({ outcome: "version_mismatch", sprint_version: 1 });
+    expect(await startSprint(alice, undated, 1)).toEqual({ outcome: "missing_dates", sprint_version: null });
+    const clients = await sessionPair([alice, bob]);
+    try {
+      const [one, two] = clients;
+      expect((await one.query(startSprintCall, [first, 1])).rows[0]).toEqual({ outcome: "ok", sprint_version: 2 });
+      const pid = await backendPid(two);
+      const competing = two.query(startSprintCall, [second, 1]);
+      expect(await waitUntilBlocked(pid)).toBe(true);
+      await one.query("COMMIT");
+      expect((await competing).rows[0]).toEqual({ outcome: "already_active", sprint_version: null });
+      await two.query("COMMIT");
+    } finally { await closePair(clients); }
+    expect(await countRows(`${table("sprints")} WHERE project_id=$1 AND status='active'`, [project])).toBe(1);
+    expect(await sprintRow(first)).toMatchObject({ status: "active", version: 2, started: true, committed_points: "0.00", committed_count: 0 });
+    expect(await sprintRow(second)).toMatchObject({ status: "planned", version: 1, started: false });
+    // Starting the active sprint again, or a finished one.
+    expect(await startSprint(bob, first, 2)).toEqual({ outcome: "already_active", sprint_version: null });
+    expect(await completeSprint(bob, first, 2, null)).toEqual({ outcome: "ok", sprint_version: 3, moved_issues: 0 });
+    expect(await startSprint(bob, first, 3)).toEqual({ outcome: "not_planned", sprint_version: null });
+    expect(await startSprint(bob, second, 1)).toEqual({ outcome: "ok", sprint_version: 2 });
+  });
+  it("snapshots commitments on start", async () => {
+    const alice = await account("Commit Owner");
+    const { project } = await scrumProject(alice);
+    const sprint = (await createSprint(alice, project, "Committed", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    const five = await sprintIssue(alice, project, sprint, { points: "5" });
+    const half = await sprintIssue(alice, project, sprint, { points: "2.5" });
+    const unestimated = await sprintIssue(alice, project, sprint);
+    const shelved = await sprintIssue(alice, project, sprint, { points: "8" });
+    expect(await updateIssue(alice, shelved, 2, { archived: true })).toMatchObject({ outcome: "ok" });
+    const backlogIssue = (await createIssue(alice, project, { points: "13" })).issue_id!;
+    expect(await startSprint(alice, sprint, 1)).toEqual({ outcome: "ok", sprint_version: 2 });
+    const commitments = async () => {
+      await owner.query("SET ROLE spark_owner");
+      return (await owner.query(`SELECT issue_id,story_points::text AS points FROM ${table("sprint_commitments")} WHERE sprint_id=$1 ORDER BY issue_id`, [sprint])).rows;
+    };
+    const expected = [{ issue_id: five, points: "5.00" }, { issue_id: half, points: "2.50" }, { issue_id: unestimated, points: null }]
+      .sort((left, right) => (left.issue_id < right.issue_id ? -1 : 1));
+    expect(await commitments()).toEqual(expected);
+    expect(await sprintRow(sprint)).toMatchObject({ committed_points: "7.50", committed_count: 3 });
+    // Later estimates and scope changes leave the snapshot alone.
+    expect(await updateIssue(alice, five, 2, { storyPoints: 8 })).toMatchObject({ outcome: "ok" });
+    expect(await updateIssue(alice, backlogIssue, 1, { sprintId: sprint })).toMatchObject({ outcome: "ok" });
+    expect(await updateIssue(alice, half, 2, { sprintId: null })).toMatchObject({ outcome: "ok" });
+    expect(await commitments()).toEqual(expected);
+    expect(await sprintRow(sprint)).toMatchObject({ committed_points: "7.50", committed_count: 3 });
+    await rollback(async () => {
+      await rejectInside(`UPDATE ${table("sprint_commitments")} SET story_points=1 WHERE sprint_id=$1`, [sprint], "23514");
+      await rejectInside(`DELETE FROM ${table("sprint_commitments")} WHERE sprint_id=$1`, [sprint], "23514");
+    });
+    expect((await asSession(alice.token, `SELECT count(*)::integer AS total FROM ${table("sprint_commitments")} WHERE sprint_id=$1`, [sprint])).rows[0].total).toBe(3);
+  });
+  it("notifies assignees when a sprint starts", async () => {
+    const alice = await account("Notify Owner"), bob = await account("Notify Bob"), carol = await account("Notify Carol"), dave = await account("Notify Leaver"), erin = await account("Notify Outsider");
+    const { workspace, project } = await scrumProject(alice);
+    for (const who of [bob, carol, dave, erin]) await addMember(workspace, who, "member");
+    const sprint = (await createSprint(alice, project, "Launch", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    for (const assignee of [bob.id, bob.id, carol.id, alice.id, dave.id, null]) await sprintIssue(alice, project, sprint, { assignee });
+    // Not in the sprint: no notification.
+    await createIssue(alice, project, { assignee: erin.id });
+    expect(await outcome(dave, "ws_remove_member($1,$2)", [workspace, dave.id])).toBe("ok");
+    expect(await startSprint(alice, sprint, 1)).toEqual({ outcome: "ok", sprint_version: 2 });
+    await owner.query("SET ROLE spark_owner");
+    const outbox = (await owner.query(`SELECT id,event_type,aggregate_version,processed_at IS NOT NULL AS processed,payload FROM ${table("outbox_events")} WHERE aggregate_type='sprint' AND aggregate_id=$1`, [sprint])).rows;
+    expect(outbox).toEqual([{ id: expect.any(String), event_type: "sprint.started", aggregate_version: 2, processed: true, payload: { sprintId: sprint, projectId: project, actorUserId: alice.id } }]);
+    const byRecipient = (left: { recipient_user_id: string }, right: { recipient_user_id: string }) => (left.recipient_user_id < right.recipient_user_id ? -1 : 1);
+    const notices = (await owner.query(`SELECT recipient_user_id,outbox_event_id,kind,title,resource_type,resource_id,read_at FROM ${table("notifications")} WHERE tenant_id=$1 AND kind='sprint_started'`, [workspace])).rows;
+    const expected = (who: Account) => ({ recipient_user_id: who.id, outbox_event_id: outbox[0].id, kind: "sprint_started", title: "Rocket: Launch started", resource_type: "sprint", resource_id: sprint, read_at: null });
+    expect(notices.sort(byRecipient)).toEqual([expected(bob), expected(carol)].sort(byRecipient));
+    // Recipients read their own notification.
+    expect((await asSession(bob.token, `SELECT kind,title FROM ${table("notifications")} WHERE resource_id=$1`, [sprint])).rows).toEqual([{ kind: "sprint_started", title: "Rocket: Launch started" }]);
+  });
+  it("completes and carries over open work", async () => {
+    const alice = await account("Complete Owner"), carol = await account("Complete Member"), dave = await account("Complete Stranger");
+    const { workspace, project } = await scrumProject(alice);
+    await addMember(workspace, carol, "member");
+    const done = await statusNamed(project, "Done"), progress = await statusNamed(project, "In progress");
+    const current = (await createSprint(alice, project, "Current", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    const next = (await createSprint(alice, project, "Next", null, "2026-11-16", "2026-11-30")).sprint_id!;
+    const finished = await sprintIssue(alice, project, current, { points: "3" });
+    const finishedToo = await sprintIssue(alice, project, current, { points: "2" });
+    const open = await sprintIssue(alice, project, current, { points: "5" });
+    const started = await sprintIssue(alice, project, current, { status: progress });
+    const shelved = await sprintIssue(alice, project, current);
+    expect(await updateIssue(alice, shelved, 2, { archived: true })).toMatchObject({ outcome: "ok" });
+    expect(await startSprint(alice, current, 1)).toEqual({ outcome: "ok", sprint_version: 2 });
+    for (const issue of [finished, finishedToo]) expect(await updateIssue(alice, issue, 2, { statusId: done })).toMatchObject({ outcome: "ok", issue_version: 3 });
+
+    const refused = (outcome: string) => ({ outcome, sprint_version: null, moved_issues: null });
+    expect(await completeSprint(carol, current, 2, next)).toEqual(refused("forbidden"));
+    expect(await completeSprint(dave, current, 2, next)).toEqual(refused("not_found"));
+    expect(await completeSprint(alice, randomUUID(), 2, next)).toEqual(refused("not_found"));
+    expect(await completeSprint(alice, current, 1, next)).toEqual({ outcome: "version_mismatch", sprint_version: 2, moved_issues: null });
+    expect(await completeSprint(alice, next, 1, null)).toEqual(refused("not_active"));
+    const other = await scrumProject(alice, workspace);
+    const foreign = (await createSprint(alice, other.project, "Foreign")).sprint_id!;
+    for (const target of [current, foreign, randomUUID()]) expect(await completeSprint(alice, current, 2, target)).toEqual(refused("invalid_carry_target"));
+
+    expect(await completeSprint(alice, current, 2, next)).toEqual({ outcome: "ok", sprint_version: 3, moved_issues: 2 });
+    expect(await sprintRow(current)).toMatchObject({ status: "completed", version: 3, completed: true, committed_points: "10.00", committed_count: 4, completed_points: "5.00", completed_count: 2 });
+    await owner.query("SET ROLE spark_owner");
+    const placement = async () => (await owner.query(`SELECT id,sprint_id,version FROM ${table("issues")} WHERE project_id=$1 ORDER BY number`, [project])).rows;
+    expect(await placement()).toEqual([
+      { id: finished, sprint_id: current, version: 3 }, { id: finishedToo, sprint_id: current, version: 3 },
+      { id: open, sprint_id: next, version: 3 }, { id: started, sprint_id: next, version: 3 }, { id: shelved, sprint_id: current, version: 3 },
+    ]);
+    for (const [issue, category] of [[open, "backlog"], [started, "in_progress"]] as const) {
+      const events = await issueEvents(issue);
+      expect(events).toHaveLength(3);
+      expect(events[2]).toMatchObject({ event_type: "issue.updated", actor_user_id: alice.id, from_version: 2, to_version: 3 });
+      expect(events[2].changes).toEqual({ fields: ["sprintId"], after: { statusId: expect.any(String), category, assigneeUserId: null, storyPoints: issue === open ? 5 : null, phaseId: null, sprintId: next, archived: false } });
+      const outbox = (await owner.query(`SELECT event_type,processed_at IS NOT NULL AS processed FROM ${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=3`, [issue])).rows;
+      expect(outbox).toEqual([{ event_type: "issue.updated", processed: true }]);
+    }
+    // The totals are frozen: later edits to finished work leave them alone.
+    expect(await updateIssue(alice, finished, 3, { storyPoints: 13 })).toMatchObject({ outcome: "ok" });
+    expect(await updateIssue(alice, finishedToo, 3, { statusId: progress })).toMatchObject({ outcome: "ok" });
+    expect(await sprintRow(current)).toMatchObject({ completed_points: "5.00", completed_count: 2 });
+    expect(await completeSprint(alice, current, 3, null)).toEqual(refused("not_active"));
+
+    // Without a target, open work returns to the backlog; a finished sprint is no target.
+    expect(await startSprint(alice, next, 1)).toEqual({ outcome: "ok", sprint_version: 2 });
+    expect(await completeSprint(alice, next, 2, current)).toEqual(refused("invalid_carry_target"));
+    expect(await completeSprint(alice, next, 2, null)).toEqual({ outcome: "ok", sprint_version: 3, moved_issues: 2 });
+    await owner.query("SET ROLE spark_owner");
+    expect((await placement()).filter((row) => row.id === open || row.id === started)).toEqual([{ id: open, sprint_id: null, version: 4 }, { id: started, sprint_id: null, version: 4 }]);
+    expect((await issueEvents(open))[3].changes).toMatchObject({ fields: ["sprintId"], after: { sprintId: null } });
+    expect(await sprintRow(next)).toMatchObject({ status: "completed", committed_points: "5.00", committed_count: 2, completed_points: "0.00", completed_count: 0 });
+  });
+  it("assigns issues to sprints through ws_update_issue", async () => {
+    const alice = await account("Planner Owner"), carol = await account("Planner Member"), dave = await account("Planner Stranger");
+    const { workspace, project } = await scrumProject(alice);
+    await addMember(workspace, carol, "member");
+    const planned = (await createSprint(alice, project, "Planned", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    const active = (await createSprint(alice, project, "Active", null, "2026-10-19", "2026-11-02")).sprint_id!;
+    const finished = (await createSprint(alice, project, "Finished", null, "2026-10-05", "2026-10-19")).sprint_id!;
+    expect(await startSprint(alice, finished, 1)).toMatchObject({ outcome: "ok" });
+    expect(await completeSprint(alice, finished, 2, null)).toMatchObject({ outcome: "ok" });
+    expect(await startSprint(alice, active, 1)).toMatchObject({ outcome: "ok" });
+    const other = await scrumProject(alice, workspace);
+    const foreign = (await createSprint(alice, other.project, "Foreign")).sprint_id!;
+    const issue = (await createIssue(carol, project, { title: "Plan me" })).issue_id!;
+    // Any member may plan an issue; strangers get not_found even for an invalid sprint.
+    expect(await updateIssue(dave, issue, 1, { sprintId: "nope" })).toEqual({ outcome: "not_found", issue_version: null });
+    expect(await updateIssue(carol, issue, 1, { sprintId: planned })).toEqual({ outcome: "ok", issue_version: 2 });
+    expect(await updateIssue(carol, issue, 2, { sprintId: active, title: "Plan me now" })).toEqual({ outcome: "ok", issue_version: 3 });
+    expect(await updateIssue(carol, issue, 3, { sprintId: active })).toEqual({ outcome: "ok", issue_version: 3 });
+    expect(await updateIssue(carol, issue, 3, { sprintId: null })).toEqual({ outcome: "ok", issue_version: 4 });
+    const history = await issueEvents(issue);
+    expect(history.slice(1).map((row) => [row.changes.fields, row.changes.after.sprintId])).toEqual([[["sprintId"], planned], [["sprintId", "title"], active], [["sprintId"], null]]);
+    const rejects = (patch: unknown) => expect(updateIssue(carol, issue, 4, patch)).rejects.toMatchObject({ code: "22023", message: "Invalid sprint" });
+    for (const sprintId of [finished, foreign, randomUUID(), "nope", 5, issue]) await rejects({ sprintId });
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT sprint_id,version FROM ${table("issues")} WHERE id=$1`, [issue])).rows[0]).toEqual({ sprint_id: null, version: 4 });
   });
 });
