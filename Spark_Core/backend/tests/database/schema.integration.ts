@@ -282,6 +282,57 @@ async function projectPlanState(project: string) {
 }
 // A phase plan entry as ws_save_phases accepts it.
 const phaseEntry = (name: string, plannedStart: string, plannedEnd: string, id?: string) => (id ? { id, name, plannedStart, plannedEnd } : { name, plannedStart, plannedEnd });
+type StatusResult = { outcome: string; settings_version: number | null };
+async function updateStatus(who: Account, statusId: string, version: number, name: unknown, wipLimit: unknown = null, clearWip: boolean | null = false) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_update_status")}($1,$2,$3,$4,$5)`, [statusId, version, name, wipLimit, clearWip])).rows[0] as StatusResult;
+}
+type SwitchResult = { outcome: string; settings_version: number | null; moved_issues: number | null };
+type SwitchInput = { to: unknown; columns: unknown; mapping?: unknown; sprintLength?: number | null; start?: string | null; target?: string | null; phases?: unknown; reason?: unknown };
+const switchCall = `SELECT * FROM "${namespace}".ws_switch_methodology($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`;
+const switchArgs = (project: string, version: number, input: SwitchInput) => [project, version, input.to, JSON.stringify(input.columns),
+  JSON.stringify(input.mapping === undefined ? {} : input.mapping), input.sprintLength ?? null, input.start ?? null, input.target ?? null,
+  input.phases === undefined ? null : JSON.stringify(input.phases), input.reason === undefined ? "Team decision" : input.reason];
+async function switchMethodology(who: Account, project: string, version: number, input: SwitchInput) {
+  return (await asSession(who.token, switchCall, switchArgs(project, version, input))).rows[0] as SwitchResult;
+}
+const refusedSwitch = (outcome: string): SwitchResult => ({ outcome, settings_version: null, moved_issues: null });
+type ColumnRow = { id: string; name: string; category: string; position: number; wip_limit: number | null };
+// The statuses of a project in board order.
+async function boardColumns(project: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id,name,category,position::integer AS position,wip_limit FROM ${table("issue_statuses")} WHERE project_id=$1 ORDER BY position,id`, [project])).rows as ColumnRow[];
+}
+// A switch column that keeps an existing status, optionally renamed, recategorised or with another WIP limit.
+const keepColumn = (row: ColumnRow, changes: { name?: string; category?: string; wipLimit?: number | null } = {}) =>
+  ({ id: row.id, name: row.name, category: row.category, wipLimit: row.wip_limit, ...changes });
+type IssueState = { id: string; status_id: string; sprint_id: string | null; phase_id: string | null; version: number; archived: boolean };
+async function issueStates(project: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id,status_id,sprint_id,phase_id,version,archived_at IS NOT NULL AS archived FROM ${table("issues")} WHERE project_id=$1 ORDER BY id`, [project])).rows as IssueState[];
+}
+async function methodologyPeriods(project: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT methodology,started_at,ended_at,changed_by_user_id,reason FROM ${table("project_methodology_periods")} WHERE project_id=$1 ORDER BY started_at,id`, [project])).rows;
+}
+async function projectSettings(project: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT methodology,sprint_length_days,start_date::text AS start_date,target_date::text AS target_date,settings_version,baselined_at
+    FROM ${table("projects")} WHERE id=$1`, [project])).rows[0] as { methodology: string; sprint_length_days: number | null; start_date: string | null; target_date: string | null; settings_version: number; baselined_at: Date | null };
+}
+// After a switch every issue sits on a status of the project and keeps its sprint and phase, and the periods
+// form one unbroken history (each closed period ends where the next starts) ending in one open period.
+async function expectSwitchInvariants(project: string, before: IssueState[], methodology: string) {
+  const statusIds = (await boardColumns(project)).map((row) => row.id);
+  const after = await issueStates(project);
+  for (const row of after) expect(statusIds).toContain(row.status_id);
+  const history = (rows: IssueState[]) => rows.map(({ id, sprint_id, phase_id }) => ({ id, sprint_id, phase_id }));
+  expect(history(after)).toEqual(history(before));
+  const periods = await methodologyPeriods(project);
+  expect(periods.filter((row) => row.ended_at === null)).toHaveLength(1);
+  expect(periods.at(-1)).toMatchObject({ methodology, ended_at: null });
+  for (const [index, row] of periods.slice(0, -1).entries()) expect(row.ended_at).toEqual(periods[index + 1]!.started_at);
+  expect((await projectSettings(project)).methodology).toBe(methodology);
+}
 // Opens two runtime connections, each in a transaction bound to one session.
 async function sessionPair(accounts: [Account, Account]) {
   const clients = [0, 1].map(() => new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 })) as [pg.Client, pg.Client];
@@ -445,7 +496,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(25);
+    expect(result.rows[0].count).toBe(26);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -1040,7 +1091,7 @@ describe("Local PostgreSQL schema", () => {
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
       "staff_user_sessions", "ws_accept_invitation", "ws_complete_sprint", "ws_create_invitation", "ws_create_issue", "ws_create_milestone", "ws_create_project", "ws_create_sprint",
       "ws_create_workspace", "ws_invitation_preview", "ws_list_members", "ws_rebaseline_project", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_save_phases", "ws_set_member_role",
-      "ws_start_sprint", "ws_update_issue", "ws_update_milestone", "ws_update_project", "ws_update_sprint", "ws_update_workspace",
+      "ws_start_sprint", "ws_switch_methodology", "ws_update_issue", "ws_update_milestone", "ws_update_project", "ws_update_sprint", "ws_update_status", "ws_update_workspace",
     ]);
   });
   it("protects admin-tier accounts, drops revoked roles at once and guards promotions of closed communities", async () => {
@@ -3305,5 +3356,387 @@ describe("Local PostgreSQL schema", () => {
     expect((await auditRows(project)).slice(1)).toEqual([{ action: "project.rebaselined", actor_user_id: bob.id, resource_type: "project", metadata: { reason: "Scope grew after review" } }]);
     expect(await rebaseline(alice, project, 3, "x".repeat(200))).toEqual({ outcome: "ok", settings_version: 4 });
     await expect(asSession(newTokenHash(), `SELECT * FROM ${fn("ws_rebaseline_project")}($1,$2,$3)`, [project, 4, "No session"])).rejects.toMatchObject({ code: "28000" });
+  });
+  it("edits column names and WIP limits", async () => {
+    const alice = await account("Column Owner"), bob = await account("Column Lead"), carol = await account("Column Member"), dave = await account("Column Stranger");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const project = (await createProject(alice, workspace, { key: `C${randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`, methodology: "kanban", lead: bob.id })).project_id!;
+    const progress = await statusNamed(project, "In progress");
+    const cards: string[] = [];
+    for (const title of ["One", "Two", "Three"]) cards.push((await createIssue(alice, project, { title, status: progress })).issue_id!);
+    const issuesBefore = await issueStates(project);
+    const others = (await boardColumns(project)).filter((row) => row.id !== progress);
+    const column = async () => (await boardColumns(project)).find((row) => row.id === progress)!;
+
+    expect(await updateStatus(bob, progress, 1, "  Doing  ", 3)).toEqual({ outcome: "ok", settings_version: 2 });
+    expect(await column()).toMatchObject({ name: "Doing", category: "in_progress", wip_limit: 3 });
+    // Below the three cards in the column: refused, and nothing changes.
+    expect(await updateStatus(bob, progress, 2, "Busy", 2)).toEqual({ outcome: "wip_below_occupancy", settings_version: null });
+    expect(await column()).toMatchObject({ name: "Doing", wip_limit: 3 });
+    expect((await projectSettings(project)).settings_version).toBe(2);
+    // Names are unique in the project ignoring case; changing the case of the column's own name is fine.
+    expect(await updateStatus(alice, progress, 2, " dONE ", null)).toEqual({ outcome: "name_taken", settings_version: null });
+    expect(await updateStatus(alice, progress, 2, "DOING", null)).toEqual({ outcome: "ok", settings_version: 3 });
+    // A call that changes nothing writes nothing.
+    expect(await updateStatus(alice, progress, 3, "DOING", 3)).toEqual({ outcome: "ok", settings_version: 3 });
+    expect(await updateStatus(alice, progress, 3, null, null)).toEqual({ outcome: "ok", settings_version: 3 });
+    // Archived cards do not occupy the column.
+    expect(await updateIssue(alice, cards[0]!, 1, { archived: true })).toMatchObject({ outcome: "ok" });
+    expect(await updateStatus(alice, progress, 3, null, 2)).toEqual({ outcome: "ok", settings_version: 4 });
+    expect(await updateStatus(alice, progress, 4, null, null, true)).toEqual({ outcome: "ok", settings_version: 5 });
+    expect(await column()).toMatchObject({ name: "DOING", wip_limit: null, position: 3072 });
+
+    const refused = (outcome: string): StatusResult => ({ outcome, settings_version: null });
+    expect(await updateStatus(carol, progress, 5, "Member")).toEqual(refused("forbidden"));
+    expect(await updateStatus(dave, progress, 5, "Stranger")).toEqual(refused("not_found"));
+    expect(await updateStatus(dave, progress, 5, " ", 0)).toEqual(refused("not_found"));
+    expect(await updateStatus(alice, randomUUID(), 5, "Missing")).toEqual(refused("not_found"));
+    expect(await updateStatus(alice, progress, 4, "Stale")).toEqual({ outcome: "version_mismatch", settings_version: 5 });
+    for (const name of ["   ", "x".repeat(41)])
+      await expect(updateStatus(alice, progress, 5, name)).rejects.toMatchObject({ code: "22023", message: "Invalid status name" });
+    for (const [wip, clear] of [[0, false], [100, false], [5, true]] as const)
+      await expect(updateStatus(alice, progress, 5, null, wip, clear)).rejects.toMatchObject({ code: "22023", message: "Invalid WIP limit" });
+    expect(await updateStatus(alice, progress, 5, "x".repeat(40), 99)).toEqual({ outcome: "ok", settings_version: 6 });
+    expect((await boardColumns(project)).filter((row) => row.id !== progress)).toEqual(others);
+    expect((await issueStates(project)).map((row) => row.version)).toEqual(issuesBefore.map((row) => (row.id === cards[0] ? 2 : 1)));
+    // No audit row: column edits are plain settings changes (audited are membership, methodology and baselines).
+    expect((await auditRows(project)).map((row) => row.action)).toEqual(["project.created"]);
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [project]);
+    expect(await updateStatus(alice, progress, 6, "Archived")).toEqual(refused("not_found"));
+    await expect(asSession(newTokenHash(), `SELECT * FROM ${fn("ws_update_status")}($1,$2,$3,$4,$5)`, [progress, 6, "No session", null, false])).rejects.toMatchObject({ code: "28000" });
+  });
+  it("switches Kanban to Scrum", async () => {
+    const alice = await account("Kanban Leaver");
+    const { project } = await kanbanProject(alice);
+    const [backlog, ready, progress, review, done] = await boardColumns(project);
+    for (const row of [backlog!, ready!, progress!, done!]) await createIssue(alice, project, { status: row.id });
+    const before = await issueStates(project);
+    const result = await switchMethodology(alice, project, 1, { to: "scrum", sprintLength: 10, reason: "  Fixed release cadence  ",
+      columns: [keepColumn(backlog!), keepColumn(ready!, { name: "To do", wipLimit: null }), keepColumn(progress!, { wipLimit: null }),
+        keepColumn(review!, { name: "In review", wipLimit: null }), keepColumn(done!)] });
+    expect(result).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 0 });
+    expect((await boardColumns(project)).map((row) => [row.id, row.name, row.category, row.position, row.wip_limit])).toEqual([
+      [backlog!.id, "Backlog", "backlog", 1024, null], [ready!.id, "To do", "todo", 2048, null], [progress!.id, "In progress", "in_progress", 3072, null],
+      [review!.id, "In review", "in_progress", 4096, null], [done!.id, "Done", "done", 5120, null]]);
+    expect(await projectSettings(project)).toMatchObject({ methodology: "scrum", sprint_length_days: 10, settings_version: 2, baselined_at: null });
+    // No issue moved, so none got a new version.
+    expect(await issueStates(project)).toEqual(before);
+    const periods = await methodologyPeriods(project);
+    expect(periods).toEqual([
+      { methodology: "kanban", started_at: expect.any(Date), ended_at: periods[1]!.started_at, changed_by_user_id: alice.id, reason: "Project created" },
+      { methodology: "scrum", started_at: expect.any(Date), ended_at: null, changed_by_user_id: alice.id, reason: "Fixed release cadence" }]);
+    expect((await auditRows(project)).slice(1)).toEqual([{ action: "project.methodology_switched", actor_user_id: alice.id, resource_type: "project", metadata: { from: "kanban", to: "scrum" } }]);
+    await expectSwitchInvariants(project, before, "scrum");
+    expect((await createSprint(alice, project, "Sprint 1")).outcome).toBe("ok");
+  });
+  it("refuses to leave Scrum with an active sprint", async () => {
+    const alice = await account("Sprint Holder");
+    const { project } = await scrumProject(alice);
+    const sprint = (await createSprint(alice, project, "Current", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    await sprintIssue(alice, project, sprint);
+    expect(await startSprint(alice, sprint, 1)).toMatchObject({ outcome: "ok" });
+    const columns = (await boardColumns(project)).map((row) => keepColumn(row));
+    const toKanban: SwitchInput = { to: "kanban", columns };
+    expect(await switchMethodology(alice, project, 1, toKanban)).toEqual(refusedSwitch("active_sprint"));
+    expect(await switchMethodology(alice, project, 1, { to: "waterfall", columns, start: "2026-11-02", target: "2026-12-11", phases: waterfallPhases }))
+      .toEqual(refusedSwitch("active_sprint"));
+    expect(await projectSettings(project)).toMatchObject({ methodology: "scrum", sprint_length_days: 14, settings_version: 1 });
+    expect(await methodologyPeriods(project)).toHaveLength(1);
+    expect(await phasePlan(project)).toEqual([]);
+    // "Complete sprint now", then switch.
+    expect(await completeSprint(alice, sprint, 2, null)).toMatchObject({ outcome: "ok", moved_issues: 1 });
+    const before = await issueStates(project);
+    expect(await switchMethodology(alice, project, 1, toKanban)).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 0 });
+    expect(await projectSettings(project)).toMatchObject({ methodology: "kanban", sprint_length_days: null });
+    // The sprint stays as read-only history.
+    expect(await sprintRow(sprint)).toMatchObject({ status: "completed", version: 3, committed_count: 1 });
+    await expect(createSprint(alice, project, "Next")).rejects.toMatchObject({ code: "22023", message: "Invalid methodology" });
+    await expectSwitchInvariants(project, before, "kanban");
+  });
+  it("switches Scrum to Waterfall with a phase plan", async () => {
+    const alice = await account("Waterfall Enterer");
+    const { project } = await scrumProject(alice);
+    const [backlog, todo, progress, review, done] = await boardColumns(project);
+    const finished = (await createSprint(alice, project, "Finished", null, "2026-10-01", "2026-10-15")).sprint_id!;
+    const planned = (await createSprint(alice, project, "Planned", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    await sprintIssue(alice, project, finished, { status: done!.id });
+    expect(await startSprint(alice, finished, 1)).toMatchObject({ outcome: "ok" });
+    expect(await completeSprint(alice, finished, 2, null)).toMatchObject({ outcome: "ok", moved_issues: 0 });
+    await sprintIssue(alice, project, planned, { status: backlog!.id });
+    for (const title of ["Idea", "Wish"]) await createIssue(alice, project, { title, status: backlog!.id });
+    await createIssue(alice, project, { title: "Started", status: progress!.id });
+    const sprintsBefore = [await sprintRow(finished), await sprintRow(planned)];
+    const before = await issueStates(project);
+    const toWaterfall: SwitchInput = { to: "waterfall", start: "2026-11-02", target: "2026-12-11", phases: waterfallPhases, mapping: { [backlog!.id]: 0 },
+      columns: [keepColumn(todo!, { name: "Not started" }), keepColumn(progress!), keepColumn(review!), keepColumn(done!)] };
+    const rejects = (input: Partial<SwitchInput>, message: string) =>
+      expect(switchMethodology(alice, project, 1, { ...toWaterfall, ...input })).rejects.toMatchObject({ code: "22023", message });
+    // Dates and a phase plan are required; reversed dates are refused by the phase-plan helper itself.
+    await rejects({ start: null }, "Invalid project dates");
+    await rejects({ target: null }, "Invalid project dates");
+    await rejects({ start: "2026-12-12" }, "Invalid project dates");
+    for (const phases of [undefined, null, [], [phaseEntry("Build", "2026-11-01", "2026-11-09")],
+      [phaseEntry("Build", "2026-11-02", "2026-11-09"), phaseEntry("Test", "2026-11-09", "2026-11-16")]]) await rejects({ phases }, "Invalid project phases");
+    await rejects({ sprintLength: 14 }, "Invalid sprint length");
+    expect(await projectSettings(project)).toMatchObject({ methodology: "scrum", settings_version: 1, start_date: null });
+    expect(await phasePlan(project)).toEqual([]);
+
+    // The Backlog column is removed and its three cards (one in the planned sprint) move to Not started.
+    expect(await switchMethodology(alice, project, 1, toWaterfall)).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 3 });
+    const settings = await projectSettings(project);
+    expect(settings).toMatchObject({ methodology: "waterfall", sprint_length_days: null, start_date: "2026-11-02", target_date: "2026-12-11", settings_version: 2 });
+    expect(settings.baselined_at).toBeInstanceOf(Date);
+    // New phases start with baseline = plan.
+    expect((await phasePlan(project)).map((row) => [row.name, row.position, row.planned_start, row.planned_end, row.baseline_start, row.baseline_end, row.version]))
+      .toEqual(waterfallPhases.map((phase, index) => [phase.name, index + 1, phase.plannedStart, phase.plannedEnd, phase.plannedStart, phase.plannedEnd, 1]));
+    expect((await boardColumns(project)).map((row) => [row.id, row.name, row.position])).toEqual([
+      [todo!.id, "Not started", 1024], [progress!.id, "In progress", 2048], [review!.id, "In review", 3072], [done!.id, "Done", 4096]]);
+    // Sprints are kept as history; every issue is unphased until someone plans it.
+    expect([await sprintRow(finished), await sprintRow(planned)]).toEqual(sprintsBefore);
+    expect((await issueStates(project)).every((row) => row.phase_id === null)).toBe(true);
+    await expectSwitchInvariants(project, before, "waterfall");
+    expect((await auditRows(project)).slice(1)).toEqual([{ action: "project.methodology_switched", actor_user_id: alice.id, resource_type: "project", metadata: { from: "scrum", to: "waterfall" } }]);
+  });
+  it("switches Waterfall to Kanban keeping phases and milestones read-only", async () => {
+    const alice = await account("Waterfall Leaver");
+    const { project } = await waterfallProject(alice);
+    const [notStarted, progress, review, done] = await boardColumns(project);
+    const phases = await phasePlan(project);
+    for (let index = 0; index < 5; index++) await createIssue(alice, project, { title: `Build ${index}`, status: progress!.id, phase: phases[2]!.id });
+    await createIssue(alice, project, { title: "Unphased", status: notStarted!.id });
+    const milestones = await milestoneRows(project);
+    const before = await issueStates(project);
+    const toKanban = (wipLimit: number): SwitchInput => ({ to: "kanban", columns: [{ name: "Backlog", category: "backlog", wipLimit: null },
+      keepColumn(notStarted!, { name: "Ready", wipLimit: 8 }), keepColumn(progress!, { wipLimit }), keepColumn(review!, { name: "Review", wipLimit: 3 }), keepColumn(done!)] });
+    // The template proposes 4 in progress, but five cards are there.
+    expect(await switchMethodology(alice, project, 1, toKanban(4))).toEqual(refusedSwitch("wip_below_occupancy"));
+    expect(await boardColumns(project)).toEqual([notStarted, progress, review, done]);
+    expect(await projectSettings(project)).toMatchObject({ methodology: "waterfall", settings_version: 1 });
+    expect(await switchMethodology(alice, project, 1, toKanban(5))).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 0 });
+    expect((await boardColumns(project)).map((row) => [row.name, row.category, row.position, row.wip_limit])).toEqual([
+      ["Backlog", "backlog", 1024, null], ["Ready", "todo", 2048, 8], ["In progress", "in_progress", 3072, 5], ["Review", "in_progress", 4096, 3], ["Done", "done", 5120, null]]);
+    expect(await phasePlan(project)).toEqual(phases);
+    expect(await milestoneRows(project)).toEqual(milestones);
+    const settings = await projectSettings(project);
+    expect(settings).toMatchObject({ methodology: "kanban", start_date: "2026-11-02", target_date: "2026-12-11", sprint_length_days: null });
+    await expectSwitchInvariants(project, before, "kanban");
+    // Phases are read-only history now; milestones keep working.
+    await expect(savePhases(alice, project, 2, phases.map((row) => phaseEntry(row.name, row.planned_start, row.planned_end, row.id))))
+      .rejects.toMatchObject({ code: "22023", message: "Invalid methodology" });
+    expect(await updateMilestone(alice, milestones[0]!.id, 1, { completed: true })).toEqual({ outcome: "ok", milestone_version: 2 });
+    expect((await createMilestone(alice, project, "Kanban release", "2026-12-01", phases[4]!.id)).outcome).toBe("ok");
+
+    // Kanban to Waterfall again: the old phases are kept by id (baselines untouched), a new one gets baseline = plan.
+    const kanbanColumns = await boardColumns(project);
+    const beforeReturn = await issueStates(project);
+    const plan = [...phases.map((row) => phaseEntry(row.name, row.planned_start, row.planned_end, row.id)), phaseEntry("Hypercare", "2026-12-12", "2026-12-18")];
+    expect(await switchMethodology(alice, project, 2, { to: "waterfall", start: "2026-11-02", target: "2026-12-18", phases: plan, mapping: { [kanbanColumns[0]!.id]: 0 },
+      columns: [keepColumn(kanbanColumns[1]!, { name: "Not started", wipLimit: null }), keepColumn(kanbanColumns[2]!, { wipLimit: null }),
+        keepColumn(kanbanColumns[3]!, { name: "In review", wipLimit: null }), keepColumn(kanbanColumns[4]!)] })).toEqual({ outcome: "ok", settings_version: 3, moved_issues: 0 });
+    const replanned = await phasePlan(project);
+    expect(replanned.slice(0, 5)).toEqual(phases);
+    expect(replanned[5]).toMatchObject({ name: "Hypercare", position: 6, planned_start: "2026-12-12", planned_end: "2026-12-18", baseline_start: "2026-12-12", baseline_end: "2026-12-18", version: 1 });
+    expect(await projectSettings(project)).toMatchObject({ methodology: "waterfall", target_date: "2026-12-18", settings_version: 3, baselined_at: settings.baselined_at });
+    expect(await countRows(`${table("issue_statuses")} WHERE id=$1`, [kanbanColumns[0]!.id])).toBe(0);
+    await expectSwitchInvariants(project, beforeReturn, "waterfall");
+    expect((await methodologyPeriods(project)).map((row) => row.methodology)).toEqual(["waterfall", "kanban", "waterfall"]);
+    expect((await savePhases(alice, project, 3, plan.slice(0, 5))).outcome).toBe("ok");
+  });
+  it("switches Scrum to Kanban and Waterfall to Scrum", async () => {
+    const alice = await account("Reverse Switcher");
+    const scrum = await scrumProject(alice);
+    const [backlog, todo, progress, review, done] = await boardColumns(scrum.project);
+    const sprint = (await createSprint(alice, scrum.project, "Planned", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    await sprintIssue(alice, scrum.project, sprint, { status: todo!.id });
+    const reviewed = (await createIssue(alice, scrum.project, { status: review!.id })).issue_id!;
+    const scrumBefore = await issueStates(scrum.project);
+    // In review is replaced by a new Review column with the Kanban template limit.
+    expect(await switchMethodology(alice, scrum.project, 1, { to: "kanban", mapping: { [review!.id]: 3 },
+      columns: [keepColumn(backlog!), keepColumn(todo!, { name: "Ready", wipLimit: 8 }), keepColumn(progress!, { wipLimit: 4 }),
+        { name: "Review", category: "in_progress", wipLimit: 3 }, keepColumn(done!)] })).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 1 });
+    const kanbanColumns = await boardColumns(scrum.project);
+    expect(kanbanColumns.map((row) => [row.name, row.wip_limit])).toEqual([["Backlog", null], ["Ready", 8], ["In progress", 4], ["Review", 3], ["Done", null]]);
+    expect((await issueStates(scrum.project)).find((row) => row.id === reviewed)).toMatchObject({ status_id: kanbanColumns[3]!.id, version: 2 });
+    expect(await projectSettings(scrum.project)).toMatchObject({ methodology: "kanban", sprint_length_days: null });
+    expect(await sprintRow(sprint)).toMatchObject({ status: "planned", version: 1 });
+    await expectSwitchInvariants(scrum.project, scrumBefore, "kanban");
+
+    const waterfall = await waterfallProject(alice);
+    const [notStarted, building, reviewing, finished] = await boardColumns(waterfall.project);
+    const phases = await phasePlan(waterfall.project);
+    await createIssue(alice, waterfall.project, { status: building!.id, phase: phases[2]!.id });
+    await createIssue(alice, waterfall.project, { status: notStarted!.id, phase: phases[0]!.id });
+    const waterfallBefore = await issueStates(waterfall.project);
+    // Without a sprint length the project gets the default of 14 days; open issues stay in the backlog.
+    expect(await switchMethodology(alice, waterfall.project, 1, { to: "scrum",
+      columns: [{ name: "Backlog", category: "backlog", wipLimit: null }, keepColumn(notStarted!, { name: "To do" }), keepColumn(building!), keepColumn(reviewing!), keepColumn(finished!)] }))
+      .toEqual({ outcome: "ok", settings_version: 2, moved_issues: 0 });
+    expect(await projectSettings(waterfall.project)).toMatchObject({ methodology: "scrum", sprint_length_days: 14 });
+    expect((await issueStates(waterfall.project)).every((row) => row.sprint_id === null)).toBe(true);
+    expect(await phasePlan(waterfall.project)).toEqual(phases);
+    await expectSwitchInvariants(waterfall.project, waterfallBefore, "scrum");
+  });
+  it("maps removed columns and moves every issue", async () => {
+    const alice = await account("Column Mapper");
+    const { project } = await kanbanProject(alice);
+    const [backlog, ready, progress, review, done] = await boardColumns(project);
+    const resting = (await createIssue(alice, project, { title: "Resting", status: backlog!.id })).issue_id!;
+    const started = (await createIssue(alice, project, { title: "Started", status: progress!.id })).issue_id!;
+    const fromReady = [(await createIssue(alice, project, { title: "Ready 1", status: ready!.id })).issue_id!, (await createIssue(alice, project, { title: "Ready 2", status: ready!.id })).issue_id!];
+    const reviewOpen = (await createIssue(alice, project, { title: "In review", status: review!.id, points: "3" })).issue_id!;
+    const reviewArchived = (await createIssue(alice, project, { title: "Shelved", status: review!.id })).issue_id!;
+    expect(await updateIssue(alice, reviewArchived, 1, { archived: true })).toMatchObject({ outcome: "ok", issue_version: 2 });
+    const before = await issueStates(project);
+    const columns = (progressLimit: number | null, todoLimit: number | null = null) => [keepColumn(backlog!), { name: "To do", category: "todo", wipLimit: todoLimit },
+      keepColumn(progress!, { wipLimit: progressLimit }), keepColumn(done!)];
+    const mapping = { [ready!.id]: 1, [review!.id]: 2 };
+    // Occupancy after the remap counts the cards that would arrive, but not archived ones.
+    expect(await switchMethodology(alice, project, 1, { to: "scrum", columns: columns(1), mapping })).toEqual(refusedSwitch("wip_below_occupancy"));
+    expect(await switchMethodology(alice, project, 1, { to: "scrum", columns: columns(2, 1), mapping })).toEqual(refusedSwitch("wip_below_occupancy"));
+    expect(await issueStates(project)).toEqual(before);
+    expect(await boardColumns(project)).toEqual([backlog, ready, progress, review, done]);
+
+    expect(await switchMethodology(alice, project, 1, { to: "scrum", columns: columns(2, 2), mapping })).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 4 });
+    const after = await boardColumns(project);
+    expect(after.map((row) => [row.name, row.category, row.position, row.wip_limit])).toEqual([
+      ["Backlog", "backlog", 1024, null], ["To do", "todo", 2048, 2], ["In progress", "in_progress", 3072, 2], ["Done", "done", 4096, null]]);
+    const todo = after[1]!.id;
+    expect(await countRows(`${table("issue_statuses")} WHERE id = ANY($1::uuid[])`, [[ready!.id, review!.id]])).toBe(0);
+    expect(await countRows(`${table("issues")} i WHERE i.project_id=$1 AND NOT EXISTS (SELECT 1 FROM ${table("issue_statuses")} s WHERE s.id=i.status_id AND s.project_id=i.project_id)`, [project])).toBe(0);
+    // Each moved issue is one change set: version + 1, one issue.updated event and one processed outbox row.
+    const targets = new Map([[fromReady[0]!, [todo, "todo"]], [fromReady[1]!, [todo, "todo"]], [reviewOpen, [progress!.id, "in_progress"]], [reviewArchived, [progress!.id, "in_progress"]]]);
+    const versions = new Map(before.map((row) => [row.id, row.version]));
+    for (const [issue, [statusId, category]] of targets) {
+      const from = versions.get(issue)!;
+      expect(await issueVersion(issue)).toBe(from + 1);
+      expect((await issueEvents(issue)).at(-1)).toEqual({ event_type: "issue.updated", actor_user_id: alice.id, from_version: from, to_version: from + 1, changes: {
+        fields: ["statusId"], after: { statusId, category, assigneeUserId: null, storyPoints: issue === reviewOpen ? 3 : null, phaseId: null, sprintId: null, archived: issue === reviewArchived } } });
+      expect(await countRows(`${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=$2 AND event_type='issue.updated' AND processed_at IS NOT NULL`, [issue, from + 1])).toBe(1);
+    }
+    for (const issue of [resting, started]) expect(await issueVersion(issue)).toBe(1);
+    // Moved cards land after the cards already in the target column, in their old order; archived ones stay off the board.
+    expect(await columnOrder(todo)).toEqual(fromReady);
+    expect(await columnOrder(progress!.id)).toEqual([started, reviewOpen]);
+    expect((await issueStates(project)).find((row) => row.id === reviewArchived)).toMatchObject({ status_id: progress!.id, archived: true });
+    await expectSwitchInvariants(project, before, "scrum");
+  });
+  it("rejects incomplete mappings and category changes of referenced columns", async () => {
+    const alice = await account("Mapping Checker");
+    const { workspace, project } = await kanbanProject(alice);
+    const other = await kanbanProject(alice, workspace);
+    const foreign = (await boardColumns(other.project))[0]!.id;
+    const [backlog, ready, progress, review, done] = await boardColumns(project);
+    await createIssue(alice, project, { status: ready!.id });
+    const archived = (await createIssue(alice, project, { status: progress!.id })).issue_id!;
+    expect(await updateIssue(alice, archived, 1, { archived: true })).toMatchObject({ outcome: "ok" });
+    const columns = [keepColumn(backlog!), keepColumn(ready!), keepColumn(progress!), keepColumn(done!)];
+    const valid: SwitchInput = { to: "scrum", columns, mapping: { [review!.id]: 2 } };
+    const rejects = (input: Partial<SwitchInput>, message: string) =>
+      expect(switchMethodology(alice, project, 1, { ...valid, ...input })).rejects.toMatchObject({ code: "22023", message });
+    // Every removed status needs exactly one mapping to an existing index of the column list.
+    for (const mapping of [undefined, null, "map", [2], { [review!.id]: 4 }, { [review!.id]: -1 }, { [review!.id]: 1.5 }, { [review!.id]: "2" }, { [review!.id]: null },
+      { [review!.id]: 2, [ready!.id]: 1 }, { [review!.id]: 2, [randomUUID()]: 1 }, { [review!.id]: 2, [foreign]: 1 }, { [review!.id]: 2, nope: 1 }]) await rejects({ mapping }, "Invalid status mapping");
+    await rejects({ columns: [columns[0]!, ...columns.slice(2)], mapping: { [review!.id]: 1 } }, "Invalid status mapping");
+    // Kept ids must be distinct statuses of this project.
+    for (const id of [foreign, randomUUID(), "nope", 5, null])
+      await rejects({ columns: [{ ...columns[0]!, id }, ...columns.slice(1)], mapping: { [review!.id]: 2, [backlog!.id]: 0 } }, "Invalid status mapping");
+    await rejects({ columns: [...columns, keepColumn(backlog!, { name: "Again" })] }, "Invalid status mapping");
+    // A referenced column (archived cards count) keeps its category: add a new column and map to it instead.
+    await rejects({ columns: [columns[0]!, keepColumn(ready!, { category: "in_progress" }), ...columns.slice(2)] }, "Invalid status mapping");
+    await rejects({ columns: [...columns.slice(0, 2), keepColumn(progress!, { category: "todo" }), columns[3]!] }, "Invalid status mapping");
+    // The column list follows the M2 status rules.
+    const thirteen = Array.from({ length: 13 }, (_, index) => ({ name: `Column ${index}`, category: index === 12 ? "done" : "todo", wipLimit: null }));
+    for (const shape of [null, "columns", [], [columns[3]], thirteen, [{ ...columns[0]!, color: "red" }, ...columns.slice(1)],
+      [keepColumn(backlog!, { name: "  " }), ...columns.slice(1)], [keepColumn(backlog!, { name: "x".repeat(41) }), ...columns.slice(1)],
+      [keepColumn(backlog!, { category: "blocked" }), ...columns.slice(1)], [{ name: 5, category: "todo", wipLimit: null }, ...columns],
+      ...[0, 100, 1.5, "3"].map((wipLimit) => [keepColumn(backlog!, { wipLimit: wipLimit as number }), ...columns.slice(1)]),
+      [...columns, { name: " in PROGRESS ", category: "in_progress", wipLimit: null }],
+      columns.slice(0, 3), [keepColumn(backlog!, { category: "done" }), keepColumn(ready!, { category: "done" }), keepColumn(progress!, { category: "done" }), columns[3]]])
+      await rejects({ columns: shape }, "Invalid project statuses");
+    expect(await boardColumns(project)).toEqual([backlog, ready, progress, review, done]);
+    expect((await projectSettings(project)).settings_version).toBe(1);
+    // An unreferenced kept column may change its category; kept columns may swap names, and a new column may
+    // take the name of a removed one.
+    expect(await switchMethodology(alice, project, 1, { ...valid, mapping: { [review!.id]: 3 }, columns: [keepColumn(backlog!, { name: "Inbox", category: "todo" }),
+      keepColumn(ready!, { name: "In progress" }), keepColumn(progress!, { name: "Ready" }), { name: "Review", category: "in_progress", wipLimit: null }, columns[3]!] }))
+      .toEqual({ outcome: "ok", settings_version: 2, moved_issues: 0 });
+    const after = await boardColumns(project);
+    expect(after.map((row) => [row.name, row.category])).toEqual([["Inbox", "todo"], ["In progress", "todo"], ["Ready", "in_progress"], ["Review", "in_progress"], ["Done", "done"]]);
+    expect(after.slice(0, 3).map((row) => row.id)).toEqual([backlog!.id, ready!.id, progress!.id]);
+    expect(after[3]!.id).not.toBe(review!.id);
+  });
+  it("guards the methodology switch", async () => {
+    const alice = await account("Switch Owner"), bob = await account("Switch Lead"), carol = await account("Switch Member"), dave = await account("Switch Stranger");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const project = (await createProject(alice, workspace, { key: `G${randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`, methodology: "kanban", lead: bob.id })).project_id!;
+    const toScrum: SwitchInput = { to: "scrum", columns: (await boardColumns(project)).map((row) => keepColumn(row, { wipLimit: null })) };
+    expect(await switchMethodology(carol, project, 1, toScrum)).toEqual(refusedSwitch("forbidden"));
+    expect(await switchMethodology(dave, project, 1, toScrum)).toEqual(refusedSwitch("not_found"));
+    // Strangers learn nothing from invalid input either.
+    expect(await switchMethodology(dave, project, 1, { to: "agile", columns: "x", reason: " " })).toEqual(refusedSwitch("not_found"));
+    expect(await switchMethodology(alice, randomUUID(), 1, toScrum)).toEqual(refusedSwitch("not_found"));
+    expect(await switchMethodology(bob, project, 2, toScrum)).toEqual({ outcome: "version_mismatch", settings_version: 1, moved_issues: null });
+    expect(await switchMethodology(bob, project, 1, { ...toScrum, to: "kanban" })).toEqual(refusedSwitch("same_methodology"));
+    const rejects = (input: Partial<SwitchInput>, message: string) =>
+      expect(switchMethodology(bob, project, 1, { ...toScrum, ...input })).rejects.toMatchObject({ code: "22023", message });
+    for (const to of ["agile", null, "Scrum"]) await rejects({ to }, "Invalid methodology");
+    for (const reason of ["   ", "x".repeat(201), null]) await rejects({ reason }, "Invalid switch reason");
+    for (const sprintLength of [6, 29]) await rejects({ sprintLength }, "Invalid sprint length");
+    // Dates and phases belong to a switch into Waterfall only.
+    await rejects({ start: "2026-11-02", target: "2026-12-11" }, "Invalid project dates");
+    await rejects({ phases: waterfallPhases }, "Invalid project phases");
+    expect(await projectSettings(project)).toMatchObject({ methodology: "kanban", settings_version: 1 });
+    expect(await methodologyPeriods(project)).toHaveLength(1);
+    expect(await switchMethodology(bob, project, 1, { ...toScrum, sprintLength: 28, reason: "x".repeat(200) })).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 0 });
+    expect((await auditRows(project)).at(-1)).toMatchObject({ action: "project.methodology_switched", actor_user_id: bob.id });
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [project]);
+    expect(await switchMethodology(alice, project, 2, { ...toScrum, to: "kanban" })).toEqual(refusedSwitch("not_found"));
+    await expect(asSession(newTokenHash(), switchCall, switchArgs(project, 2, { ...toScrum, to: "kanban" }))).rejects.toMatchObject({ code: "28000" });
+    // The runtime role cannot write statuses or periods directly.
+    await expect(asSession(alice.token, `UPDATE ${table("issue_statuses")} SET wip_limit=1 WHERE project_id=$1`, [project])).rejects.toMatchObject({ code: "42501" });
+    await expect(asSession(alice.token, `UPDATE ${table("project_methodology_periods")} SET reason='x' WHERE project_id=$1`, [project])).rejects.toMatchObject({ code: "42501" });
+  });
+  it("serializes a methodology switch and an issue move on the project lock", async () => {
+    const alice = await account("Switch Racer"), bob = await account("Move Racer");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    const [backlog, ready, progress, review, done] = await boardColumns(project);
+    const onReview = (await createIssue(alice, project, { title: "Reviewing", status: review!.id })).issue_id!;
+    const onBacklog = (await createIssue(alice, project, { title: "Waiting", status: backlog!.id })).issue_id!;
+    // The switch holds the project lock; the move waits, then finds its card already moved by the switch.
+    let clients = await sessionPair([alice, bob]);
+    try {
+      const [one, two] = clients;
+      const args = switchArgs(project, 1, { to: "scrum", columns: [keepColumn(backlog!), keepColumn(ready!), keepColumn(progress!), keepColumn(done!)], mapping: { [review!.id]: 2 } });
+      expect((await one.query(switchCall, args)).rows[0]).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 1 });
+      const pid = await backendPid(two);
+      const move = two.query(updateIssueCall, [onReview, 1, JSON.stringify({ statusId: done!.id })]);
+      expect(await waitUntilBlocked(pid)).toBe(true);
+      await one.query("COMMIT");
+      expect((await move).rows[0]).toEqual({ outcome: "version_mismatch", issue_version: 2 });
+      await two.query("COMMIT");
+    } finally { await closePair(clients); }
+    expect((await issueStates(project)).find((row) => row.id === onReview)).toMatchObject({ status_id: progress!.id, version: 2 });
+    // The other way round: a move into Ready commits first, and the waiting switch moves that card on as well.
+    clients = await sessionPair([bob, alice]);
+    try {
+      const [one, two] = clients;
+      expect((await one.query(updateIssueCall, [onBacklog, 1, JSON.stringify({ statusId: ready!.id })])).rows[0]).toEqual({ outcome: "ok", issue_version: 2 });
+      const pid = await backendPid(two);
+      const args = switchArgs(project, 2, { to: "kanban", columns: [keepColumn(backlog!), keepColumn(progress!), keepColumn(done!)], mapping: { [ready!.id]: 0 } });
+      const switched = two.query(switchCall, args);
+      expect(await waitUntilBlocked(pid)).toBe(true);
+      await one.query("COMMIT");
+      expect((await switched).rows[0]).toEqual({ outcome: "ok", settings_version: 3, moved_issues: 1 });
+      await two.query("COMMIT");
+    } finally { await closePair(clients); }
+    expect((await issueStates(project)).find((row) => row.id === onBacklog)).toMatchObject({ status_id: backlog!.id, version: 3 });
+    expect((await issueEvents(onBacklog)).map((row) => row.to_version)).toEqual([1, 2, 3]);
+    expect((await boardColumns(project)).map((row) => row.name)).toEqual(["Backlog", "In progress", "Done"]);
+    expect((await methodologyPeriods(project)).map((row) => row.methodology)).toEqual(["kanban", "scrum", "kanban"]);
   });
 });
