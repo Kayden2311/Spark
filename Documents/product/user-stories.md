@@ -300,9 +300,65 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
   - Given a plain member opens `/w/{slug}/projects/new`, then they see "Only owners and admins can create projects" instead of a form.
   - The workspace home lists every project with its key, methodology pill, lead and progress (`done/total`, or "No tasks yet"); the sidebar lists up to 8 projects with a methodology-colored dot, and only owners and admins see "New project".
   - The project overview shows the header, the board columns with WIP limits, the methodology section (Scrum sprint length; Kanban WIP summary; Waterfall phase timeline with baseline bars, milestone markers and a today marker) and the methodology's practices; an unknown key shows a not-found card.
-  - Owners, admins and the project lead can edit name, description, lead, dates and (Scrum) sprint length; saves send `If-Match`. Given a teammate saved first, then the save gets `412`, the dialog stays open with the teammate's values and says "Updated by a teammate — review the latest values and save again."
+  - Owners, admins and the project lead can edit name, description, lead, dates and (Scrum) sprint length in the General section of the Settings tab (`/w/[slug]/p/[key]/settings`, the only place to edit them; the project header has no Settings button); saves send `If-Match`. Given a teammate saved first, then the save gets `412`, the form shows the teammate's values and says "Updated by a teammate — review the latest values and save again."
   - Projects created before methodologies existed still list and open, shown as Kanban.
-  - The methodology cannot be changed yet; switching is planned for a later milestone.
+  - The methodology can be changed later through the switch wizard (US-E11).
+
+### US-E8: Plan sprints
+
+- **Actor**: Workspace Owner, Admin or the project lead (plan); any Workspace Member (read)
+- **Priority**: Must
+- **Status**: Implemented (`GET`/`POST /api/v1/projects/{projectId}/sprints`, `GET`/`PATCH /api/v1/sprints/{sprintId}`, `POST /api/v1/sprints/{sprintId}/start`, `POST /api/v1/sprints/{sprintId}/complete`, `PATCH /api/v1/issues/{issueId}` with `sprintId`; migration `0023`; screen: the Backlog tab `/w/[slug]/p/[key]/backlog`, Scrum projects only)
+- **Story**: As a planner of a Scrum project, I want to plan work into sprints, start one sprint at a time and close it with its unfinished work carried over so that the team commits to a realistic amount of work.
+- **Acceptance criteria**:
+  - The Backlog tab shows, top to bottom, the active sprint (goal, dates, days left, done against committed points), the planned sprints (name, goal, dates) and the Backlog (open tasks without a sprint, in board order). Every lane shows its task count and points. The next planned sprint compares its planned points with the velocity — the average completed points of the last 3 completed sprints ("Velocity 21 pts (last 3)", or "No velocity yet") — and above 110% warns "Over capacity: 16 pts planned is 160% of velocity."
+  - "Create sprint" proposes the next name and dates that follow the open sprint ending last (or start today) and last the project's sprint length. Names are 1–80 characters, goals at most 500, and a sprint lasts 1 to 28 days. Only planned sprints change their dates; completed sprints are history and are not shown as lanes.
+  - Tasks move between lanes by drag and drop, by keyboard (Space picks up, arrows move between lanes, Enter or Space drops, Escape cancels, each step announced) and through "Move to…" (always visible on phones). Each move PATCHes the task's `sprintId` with `If-Match`, shows at once and rolls back on failure; a stale task refreshes the backlog with "Updated by a teammate — the backlog was refreshed." Open tasks that still point at a completed sprint (reopened later) show in the Backlog lane.
+  - "Start sprint" confirms the dates and the commitment ("5 tasks · 21 pts will be committed."). Starting snapshots every task of the sprint with its points, sends each assignee other than the starter an in-app `sprint_started` notice ("<project>: <sprint> started"), and only one sprint can be active: a second start (another sprint is active, or two planners press Start at once) is refused with `409 sprint_already_active` and the dialog says "Another sprint is already active in this project. Complete it first."
+  - "Complete sprint" shows "3 of 5 tasks done · 2 unfinished tasks" and asks where unfinished work goes: the next planned sprint (the default) or the Backlog. Completing freezes the completed points and count, moves every open task (each with a new version, a history event and an outbox row) and says "Sprint 1 completed. 2 unfinished tasks moved to Sprint 2." Carrying to anything but a planned sprint of the project is refused with `422 invalid_carry_target`.
+  - Start, complete and edit send `If-Match` (missing: `428`; stale: `412` with the current sprint, and the dialog says "Updated by a teammate — review the sprint and try again."). Other refusals: `409 sprint_not_planned`, `sprint_not_active`, `sprint_not_editable` and `sprint_missing_dates`.
+  - Sprint writes are for Scrum projects only; the sprints of a project that left Scrum stay as read-only history. Through the API any active member may set a task's `sprintId` (an ordinary task edit), but the Backlog tab is read-only for members who cannot plan.
+  - A plain member sees every lane, total and the velocity but no planning control, and the note "Only owners, admins and the project lead can change the plan."; the API refuses their sprint writes with `403 insufficient_role`.
+
+### US-E9: Plan phases and milestones and re-baseline
+
+- **Actor**: Workspace Owner, Admin or the project lead (plan); any Workspace Member (read)
+- **Priority**: Must
+- **Status**: Implemented (`GET /api/v1/projects/{projectId}/plan`, `PUT /api/v1/projects/{projectId}/phases`, `POST /api/v1/projects/{projectId}/baseline`, `POST /api/v1/projects/{projectId}/milestones`, `GET`/`PATCH /api/v1/milestones/{milestoneId}`; migration `0024`; screen: the Timeline tab `/w/[slug]/p/[key]/timeline`)
+- **Story**: As a planner of a Waterfall project, I want to keep the phase plan and milestones current and see how far they moved from the baseline so that schedule slips are visible early.
+- **Acceptance criteria**:
+  - The Timeline draws a Gantt from the project start to the target date: per phase a dashed baseline bar, the planned bar filled by its done share (done tasks ÷ phase tasks) and a variance badge for planned end minus baseline end — "on baseline" (green), "−2 d" ahead (green), "+1 d" to "+7 d" late (amber), more than 7 days late (red), or "no baseline" for a phase added after the last re-baseline. Milestone diamonds sit on their due dates (filled when completed, red outline when overdue), a line marks today, and a "Plan details" table gives every date, baseline and variance as text.
+  - "Unphased N" counts the open tasks without a phase and links to the board filtered to them (`?phase=none`, "Showing unphased tasks" with Clear). Progress and counts come from the loaded board (at most 500 tasks; a banner says when it is cut).
+  - "Edit phases" edits 1 to 12 phases (names 1–60, inside the project dates, in order without overlap) and sends the whole plan with `If-Match` (the project ETag). Moving a phase end shows the variance at once ("+6 d"); baselines never change. A removed phase that still has tasks or milestones is refused ("A phase you removed still has tasks or milestones…").
+  - Milestones (name 1–80, due date inside the project dates, optional phase) can be added, edited, completed and reopened, in every methodology.
+  - "Re-baseline" requires a reason (1–200) and a confirmation. It copies the planned dates of every phase and milestone into the baseline, records `project.rebaselined` with the reason in the audit log and says "New baseline saved."
+  - A project that left Waterfall keeps a Timeline tab while it has phases or milestones: the phases are read-only history ("Plan from the Waterfall period. Phases are kept as history and can't change; milestones stay editable."), milestones stay editable, and Edit phases and Re-baseline are hidden.
+  - Every write sends `If-Match` (`428` when missing, `412` with the current plan or milestone when stale). A plain member sees the whole plan read-only with "Only owners, admins and the project lead can change the plan."; the API answers `403 insufficient_role`.
+
+### US-E10: Edit board columns and WIP limits
+
+- **Actor**: Workspace Owner, Admin or the project lead
+- **Priority**: Must
+- **Status**: Implemented (`PATCH /api/v1/projects/{projectId}/statuses/{statusId}` with `If-Match` = the project ETag; migration `0025`; screen: Board columns on the Settings tab)
+- **Story**: As a planner, I want to rename board columns and set work-in-progress limits so that the board reflects how the team works.
+- **Acceptance criteria**:
+  - Each column shows its name, category, card count and WIP limit with its own Save. Names are 1–40 characters and unique in the project ignoring case (`409 name_taken`); a limit is empty (no limit) or 1–99.
+  - A limit below the cards already in the column is refused with `409 wip_below_occupancy` and nothing is saved; the row says "4 cards are in this column; the limit can't be below that." and goes back to the saved limit.
+  - A teammate's newer project version (`412`) replaces the page's copy and the row says "Updated by a teammate — review the latest values and save again."
+  - Members who cannot plan have no Settings tab; opening `/settings` directly shows the columns read-only with the authority note and no Switch button. The API answers `403 insufficient_role`.
+
+### US-E11: Switch a project's methodology
+
+- **Actor**: Workspace Owner, Admin or the project lead
+- **Priority**: Must
+- **Status**: Implemented (`POST /api/v1/projects/{projectId}/methodology` with `If-Match`; the history in the `periods` of `GET /api/v1/projects/{projectId}/plan`; migration `0025`; screen: Methodology on the Settings tab and its switch wizard)
+- **Story**: As a planner, I want to switch a project between Scrum, Kanban and Waterfall without losing tasks or history so that the project can change how it works as it grows.
+- **Acceptance criteria**:
+  - The Methodology section shows the current methodology and its history ("Kanban since Oct 18", "Scrum Oct 3–Oct 18").
+  - The wizard has four steps. **1 Choose a methodology**: the three methodology cards; the current one is refused ("… already uses Scrum. Pick another way of working."). **2 Map columns**: the target template's columns are proposed; a current column with the same name and category is kept with its cards, every other current column is mapped to a target column of the same category, or must be chosen ("Choose where the cards in Backlog go."); columns can be renamed, added or removed (2 to 12), card counts are shown, and Kanban's WIP limits are proposed and editable. A limit below the cards a column would hold is refused before sending ("5 cards would be in this column; the limit can't be below that."). A kept column keeps its category; to change a category, add a new column and map to it. **3 Plan**: Scrum asks for the sprint length (1–4 weeks); Waterfall asks for the start and target dates and a phase plan (spread evenly from the template's five phases, or the phases of an earlier Waterfall period with their baselines); Kanban needs nothing. Leaving Scrum while a sprint is active is blocked ("Sprint 1 is still active. …") with "Complete sprint now", which opens the Backlog. **4 Confirm**: a summary ("4 open cards move, 3 columns removed, periods: Kanban → Waterfall") and a required reason (1–200).
+  - The switch is one transaction: every task on a removed column moves to its target column (each with a new version, history event and outbox row), the removed columns are deleted, the open methodology period closes and a new one opens with the reason, and `project.methodology_switched` `{from, to}` is audited. Success opens the board with "Switched to Waterfall. 4 cards moved."
+  - Sprints stay as history; entering Scrum leaves open tasks in the backlog (or in still-planned sprints of an earlier Scrum period). Leaving Waterfall keeps the phases read-only and the milestones usable; entering Waterfall gives tasks no phase, so they show as Unphased on the Timeline.
+  - Refusals: `409 active_sprint`, `409 same_methodology`, `409 wip_below_occupancy`, `412` when a teammate changed the project (the wizard keeps the plan, adapts it to the newer columns and says "Updated by a teammate — review the latest values and save again."), `428` without `If-Match` and `403 insufficient_role` for members who cannot plan.
 
 ## Epic F: Notifications (US-06)
 
@@ -432,7 +488,7 @@ Mentor matching, file uploads, rich realtime collaboration, AI summaries, and bi
 | US-02 | US-C1, US-C2, US-C3 | Journeys 1 and 2 |
 | US-03 | US-D1, US-D2, US-D3, US-D4 | Journey 2 |
 | US-04 | US-E1, US-E2, US-E3 | Journey 3 |
-| US-05 | US-E4, US-E5, US-E6, US-E7 | Journey 3 |
+| US-05 | US-E4 to US-E11 | Journey 3 |
 | US-06 | US-F1, US-F2 | Journey 3 |
 | US-07 | US-G1, US-G2, US-G3 | Journey 4 |
 | Auth and governance | US-A1 to US-A5, US-H1 to US-H4, US-I1 | Journeys 5 and 6 |
