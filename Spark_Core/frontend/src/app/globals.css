@@ -4516,3 +4516,82 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 @media (prefers-reduced-motion: reduce) {
   .wsModal[data-variant="drawer"], .wsDrawerConfirm, .wsDrawerSkeleton span { animation: none; }
 }
+
+/* Scrum backlog (M4): sprint lanes stacked top to bottom — active, planned, Backlog. */
+.wsBacklog { display: grid; gap: 1rem; min-width: 0; }
+.wsBacklogToolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .75rem; }
+.wsBacklogCreate svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.wsBacklogReadOnly { display: flex; flex: 1; align-items: center; gap: .55rem; padding: .7rem .95rem; border: 1px solid var(--line); border-radius: .75rem; color: var(--ink-secondary); background: #f4f7fb; font-size: .86rem; font-weight: 600; line-height: 1.5; }
+.wsBacklogReadOnly svg { width: 1.05rem; height: 1.05rem; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.wsBacklogLane { display: grid; gap: .75rem; min-width: 0; padding: 1rem 1rem .9rem; border: 1px solid var(--line); border-top: 3px solid #cbd5e1; border-radius: 1rem; background: #fff; box-shadow: 0 10px 28px -22px rgba(15, 36, 87, .25); transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.wsBacklogLane[data-kind="active"] { border-top-color: var(--method-accent); background: linear-gradient(180deg, color-mix(in srgb, var(--method-accent) 5%, #fff) 0, #fff 7rem); }
+.wsBacklogLane[data-kind="planned"] { border-top-color: color-mix(in srgb, var(--method-accent) 35%, #cbd5e1); }
+.wsBacklogLane[data-kind="backlog"] { background: #f7f9fc; }
+.wsBacklogLane[data-drop] { border-color: color-mix(in srgb, var(--method-accent) 55%, var(--line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--method-accent) 14%, transparent); }
+.wsBacklogLaneHead { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; }
+.wsBacklogLaneTitle { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; margin-right: auto; }
+.wsBacklogLaneTitle h2 { min-width: 0; color: var(--ink); font-size: 1.02rem; font-weight: 700; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.wsBacklogState { padding: .14rem .5rem; border-radius: 999px; color: #475569; background: #eef2f7; font-size: .68rem; font-weight: 800; letter-spacing: .03em; }
+.wsBacklogState[data-kind="active"] { color: color-mix(in srgb, var(--method-accent) 80%, #0f172a); background: color-mix(in srgb, var(--method-accent) 13%, #fff); }
+.wsBacklogDates { color: var(--muted); font-size: .8rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wsBacklogTotals { color: var(--ink-secondary); font-size: .82rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wsBacklogActions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.wsBacklogAction.sparkPrimary, .wsBacklogAction.sparkSecondary { min-height: 2.5rem; padding: .5rem .95rem; font-size: .84rem; }
+.wsBacklogGoal { color: var(--ink-secondary); font-size: .88rem; line-height: 1.5; overflow-wrap: anywhere; }
+.wsBacklogProgress, .wsBacklogCapacity { display: grid; gap: .4rem; }
+.wsBacklogProgressText, .wsBacklogCapacityText { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem 1rem; color: var(--ink-secondary); font-size: .8rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.wsBacklogDaysLeft, .wsBacklogVelocity { color: var(--muted); }
+.wsBacklogBar { position: relative; display: block; height: .45rem; overflow: hidden; border-radius: 999px; background: #e3eaf3; }
+.wsBacklogBar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--method-accent); transition: width .3s ease; }
+.wsBacklogCapacity[data-over] .wsBacklogBar > span { background: #d97706; }
+.wsBacklogWarning { padding: .5rem .7rem; border: 1px solid #fde68a; border-radius: .6rem; color: #854d0e; background: #fffbeb; font-size: .8rem; font-weight: 650; line-height: 1.45; }
+.wsBacklogList { display: grid; gap: .45rem; min-height: 3rem; margin: 0; padding: 0; list-style: none; }
+.wsBacklogEmpty { display: grid; min-height: 3rem; place-items: center; padding: .6rem; border: 1.5px dashed #cdd9ea; border-radius: .7rem; color: var(--muted); font-size: .82rem; text-align: center; }
+.wsBacklogItem { position: relative; }
+.wsBacklogCard { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .35rem .7rem; min-height: 3rem; padding: .55rem .75rem; border: 1px solid var(--line); border-radius: .7rem; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); cursor: pointer; outline: none; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease, opacity .15s ease; }
+.wsBacklogItem[data-planner] .wsBacklogCard { padding-right: 6.4rem; }
+.wsBacklogCard:hover { border-color: #c7d7f0; box-shadow: 0 8px 18px -10px rgba(15, 36, 87, .3); }
+.wsBacklogCard:focus-visible { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, .3); }
+.wsBacklogCard[data-picked] { border-color: var(--method-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--method-accent) 30%, transparent), 0 14px 26px -12px rgba(15, 36, 87, .4); transform: scale(1.01); }
+.wsBacklogCard[data-dragging] { opacity: .45; }
+.wsBacklogCard[data-busy] { cursor: progress; }
+.wsBacklogCard .wsKeyTag { font-size: .66rem; }
+.wsBacklogCardTitle { min-width: 0; color: var(--ink); font-size: .88rem; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.wsBacklogCard[data-done] .wsBacklogCardTitle { color: var(--muted); text-decoration: line-through; text-decoration-color: #a3b1c4; }
+.wsBacklogCardMeta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .3rem; }
+.wsBacklogStatus { padding: .12rem .45rem; border-radius: .35rem; color: #475569; background: #eef2f7; font-size: .66rem; font-weight: 700; white-space: nowrap; }
+.wsBacklogStatus[data-done] { color: #126b4b; background: #d8f5e7; }
+.wsBacklogCard .wsBoardPoints { min-width: 2.6rem; text-align: center; }
+.wsBacklogCard .wsBoardPoints[data-empty] { color: #94a3b8; background: #f1f5f9; }
+.wsBacklogCard .wsBoardAssignee { margin-left: 0; }
+.wsBacklogMove { position: absolute; top: 50%; right: .55rem; transform: translateY(-50%); }
+.wsBacklogItem:hover .wsBoardMoveButton, .wsBacklogItem:focus-within .wsBoardMoveButton { opacity: 1; }
+.wsBacklogChoices { display: grid; gap: .45rem; }
+.wsBacklogChoicesTitle { color: var(--ink); font-size: .84rem; font-weight: 650; }
+.wsBacklogChoice { display: flex; align-items: center; gap: .6rem; min-height: 2.75rem; padding: .55rem .8rem; border: 1.5px solid #dce5f1; border-radius: .65rem; color: var(--ink); background: #fff; font-size: .9rem; font-weight: 600; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.wsBacklogChoice:has(input:checked) { border-color: var(--method-accent, var(--blue)); background: color-mix(in srgb, var(--method-accent, var(--blue)) 6%, #fff); }
+.wsBacklogChoice:has(input:focus-visible) { outline: 3px solid rgba(37, 99, 235, .45); outline-offset: 1px; }
+.wsBacklogChoice input { width: 1.05rem; height: 1.05rem; margin: 0; accent-color: var(--method-accent, var(--blue)); }
+.wsBacklogDialogGoal { display: grid; gap: .2rem; padding: .65rem .8rem; border-radius: .65rem; color: var(--ink-secondary); background: #f4f7fb; font-size: .88rem; line-height: 1.5; overflow-wrap: anywhere; }
+.wsBacklogDialogGoal span { color: var(--muted); font-size: .72rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.wsBacklogSkeleton { display: grid; gap: 1rem; }
+.wsBacklogSkeleton span:not(.wsSrOnly) { display: block; height: 9rem; border-radius: 1rem; background: linear-gradient(90deg, #eaf0f8 0%, #f5f8fc 50%, #eaf0f8 100%); background-size: 200% 100%; animation: ws-shimmer 1.4s linear infinite; }
+
+@media (max-width: 640px) {
+  .wsBacklogToolbar { justify-content: stretch; }
+  .wsBacklogCreate { flex: 1 1 auto; }
+  .wsBacklogLane { padding: .85rem .75rem .75rem; }
+  .wsBacklogActions { width: 100%; }
+  .wsBacklogActions > * { flex: 1 1 7rem; }
+  /* Phones: key and title on top, tags below, the Move button under the tags. */
+  .wsBacklogCard, .wsBacklogItem[data-planner] .wsBacklogCard { grid-template-columns: auto minmax(0, 1fr); padding-right: .75rem; }
+  .wsBacklogCardMeta { grid-column: 1 / -1; justify-content: flex-start; }
+  .wsBacklogItem[data-planner] .wsBacklogCard { padding-bottom: 2.75rem; }
+  .wsBacklogMove { top: auto; right: .55rem; bottom: .5rem; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wsBacklogLane, .wsBacklogCard, .wsBacklogChoice, .wsBacklogBar > span { transition: none; }
+  .wsBacklogCard[data-picked] { transform: none; }
+  .wsBacklogSkeleton span { animation: none; }
+}

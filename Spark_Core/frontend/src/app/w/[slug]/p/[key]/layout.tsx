@@ -5,7 +5,7 @@ import { useParams, usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import { useAuth } from "../../../../auth-context";
-import { canManage } from "../../../_lib/api";
+import { canPlan } from "../../../_lib/planning";
 import { isValidProjectKey } from "../../../_lib/project-key";
 import { methodologyAccent, methodologyName, methodologyOf, projectEtag, type ProjectDetail } from "../../../_lib/projects";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
@@ -16,7 +16,7 @@ import { ProjectSettingsDialog } from "./settings-dialog";
 type Toast = { id: number; text: string; tone: ToastTone };
 type Announcement = { id: number; text: string };
 
-/** Shared header (name, methodology, Settings, view tabs) and the one live region for every project view. */
+/** Shared header (name, methodology, Settings, view tabs: Board · Backlog (Scrum) · Timeline (Waterfall) · Overview · Settings (planners)) and the one live region for every project view. */
 export default function ProjectLayout({ children }: { children: ReactNode }) {
   const { key = "" } = useParams<{ key: string }>();
   const pathname = usePathname();
@@ -79,12 +79,16 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
   } else {
     const base = `/w/${workspace.slug}/p/${encodeURIComponent(ready.key)}`;
     const methodology = methodologyOf(ready.methodology);
-    const canEdit = canManage(workspace.role) || (Boolean(user?.id) && ready.lead?.id === user?.id);
+    const canEdit = canPlan(workspace.role, ready, user?.id);
     const accent = { "--method-accent": methodologyAccent(ready.methodology) } as CSSProperties;
+    // Backlog belongs to Scrum and Timeline to Waterfall; Settings is for the people who can change the plan.
     const tabs = [
-      { href: base, label: "Board" },
-      { href: `${base}/overview`, label: "Overview" },
-    ];
+      { href: base, label: "Board", show: true },
+      { href: `${base}/backlog`, label: "Backlog", show: methodology === "scrum" },
+      { href: `${base}/timeline`, label: "Timeline", show: methodology === "waterfall" },
+      { href: `${base}/overview`, label: "Overview", show: true },
+      { href: `${base}/settings`, label: "Settings", show: canEdit },
+    ].filter((tab) => tab.show);
     content = (
       <div className="wsProject" style={accent}>
         <div aria-hidden="true" className="wsGlow" />

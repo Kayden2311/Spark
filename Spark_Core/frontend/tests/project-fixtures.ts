@@ -99,6 +99,7 @@ const card = (id: string, number: number, statusId: string, title: string, extra
   storyPoints: null as number | null,
   dueDate: null as string | null,
   phaseId: null as string | null,
+  sprintId: null as string | null,
   version: 1,
   completedAt: null as string | null,
   createdAt: "2026-10-19T09:00:00.000Z",

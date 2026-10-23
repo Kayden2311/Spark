@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { initials } from "../../../../components";
@@ -11,6 +10,7 @@ import { boardPath, createIssue, moveIssue, priorityLabel, toCard, typeLabel, ty
 import { formatDay, methodologyOf, todayIso } from "../../../_lib/projects";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useWorkspace } from "../../workspace-context";
+import { MoveMenu } from "./move-menu";
 import { useProject } from "./project-context";
 import { TASK_GONE, TaskDrawer } from "./task-drawer";
 
@@ -436,13 +436,17 @@ export function ProjectBoard() {
                     marker={over && over.afterIssueId === issue.id ? marker : null}
                     menu={menuFor === issue.id ? (
                       <MoveMenu
-                        board={committed}
-                        issue={issue}
+                        issueId={issue.id}
+                        label={`Move ${issue.key} to`}
                         onClose={(restoreFocus) => {
                           setMenuFor(null);
                           if (restoreFocus) focusMoveButton(issue.id);
                         }}
-                        onPick={(target) => moveToColumn(issue, target)}
+                        onPick={(option) => {
+                          const target = committed.statuses.find((item) => item.id === option.id);
+                          if (target) moveToColumn(issue, target);
+                        }}
+                        options={committed.statuses.map((item) => ({ id: item.id, name: item.name, current: item.id === issue.statusId, disabled: wipBlocked(committed, issue.id, item.id) }))}
                       />
                     ) : null}
                     menuOpen={menuFor === issue.id}
@@ -570,94 +574,6 @@ function BoardCardItem({ issue, helpId, picked, busy, dragging, overdue, phaseNa
       </li>
       {marker}
     </>
-  );
-}
-
-function MoveMenu({ issue, board, onClose, onPick }: {
-  issue: IssueCard;
-  board: BoardState;
-  onClose(restoreFocus: boolean): void;
-  onPick(status: BoardStatus): void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-
-  useEffect(() => {
-    closeRef.current = onClose;
-  }, [onClose]);
-
-  // The board scrolls sideways, which clips anything inside it, so the menu lives in <body> with fixed
-  // coordinates taken from its button: below it, or above it when the viewport has no room below.
-  useLayoutEffect(() => {
-    const menu = ref.current;
-    const anchor = document.querySelector<HTMLElement>(`[data-move-for="${issue.id}"]`);
-    if (!menu || !anchor) return;
-    const rect = anchor.getBoundingClientRect();
-    const margin = 8;
-    const below = window.innerHeight - rect.bottom;
-    const top = below >= menu.offsetHeight + margin || rect.top < menu.offsetHeight + margin ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
-    const left = Math.min(Math.max(margin, rect.right - menu.offsetWidth), window.innerWidth - menu.offsetWidth - margin);
-    menu.style.top = `${Math.max(margin, top)}px`;
-    menu.style.left = `${Math.max(margin, left)}px`;
-  }, [issue.id]);
-
-  useEffect(() => {
-    ref.current?.querySelector<HTMLElement>("[role=\"menuitemradio\"]:not([aria-disabled=\"true\"])")?.focus({ preventScroll: true });
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      const anchor = document.querySelector(`[data-move-for="${issue.id}"]`);
-      if (!ref.current?.contains(target) && !anchor?.contains(target)) closeRef.current(false);
-    };
-    // Fixed coordinates go stale when anything scrolls or the viewport changes.
-    const onMoved = (event: Event) => {
-      if (!(event.target instanceof Node && ref.current?.contains(event.target))) closeRef.current(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("scroll", onMoved, true);
-    window.addEventListener("resize", onMoved);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("scroll", onMoved, true);
-      window.removeEventListener("resize", onMoved);
-    };
-  }, [issue.id]);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=\"menuitemradio\"]") ?? []);
-    const index = items.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose(true);
-    } else if (event.key === "Tab") {
-      // The menu sits at the end of <body>; return to the button so Tab continues from the card.
-      event.preventDefault();
-      onClose(true);
-    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : -1;
-      items[(index + step + items.length) % items.length]?.focus();
-    } else if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      (event.key === "Home" ? items[0] : items.at(-1))?.focus();
-    }
-  };
-
-  return createPortal(
-    <div aria-label={`Move ${issue.key} to`} className="wsBoardMenu" onKeyDown={onKeyDown} ref={ref} role="menu">
-      {board.statuses.map((status) => {
-        const current = status.id === issue.statusId;
-        const full = !current && wipBlocked(board, issue.id, status.id);
-        return (
-          <button aria-checked={current} aria-disabled={full || undefined} aria-label={`${status.name}${current ? " (current)" : full ? " (full)" : ""}`} className="wsBoardMenuItem" key={status.id} onClick={() => !full && onPick(status)} role="menuitemradio" tabIndex={-1} type="button">
-            <span aria-hidden="true" className="wsBoardMenuCheck">{current && <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>}</span>
-            {status.name}
-            {current && <span className="wsBoardMenuHint"> (current)</span>}
-            {full && <span className="wsBoardMenuHint"> (full)</span>}
-          </button>
-        );
-      })}
-    </div>,
-    document.body,
   );
 }
 
