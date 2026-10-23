@@ -138,7 +138,7 @@ describe("project board", () => {
     expect(within(tabs).getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
     expect(within(tabs).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/w/northstar-labs/p/OPS/overview");
     expect(screen.getByRole("heading", { level: 1, name: "Ops desk" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(within(tabs).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/w/northstar-labs/p/OPS/settings");
     expect(screen.queryByText("Showing the first 500 tasks.")).not.toBeInTheDocument();
   });
 

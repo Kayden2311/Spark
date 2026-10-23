@@ -43,10 +43,18 @@ export interface Sprint {
   version: number;
 }
 
+/** Which methodology the project used when; `endedAt` null is the current period. */
+export interface MethodologyPeriod {
+  methodology: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
 export interface Plan {
   phases: Phase[];
   milestones: Milestone[];
   baselinedAt: string | null;
+  periods: MethodologyPeriod[];
   version: number;
 }
 
@@ -79,6 +87,10 @@ const planResponse = {
     phases: { type: "array", items: phaseResponse },
     milestones: { type: "array", items: milestoneResponse },
     baselinedAt: nullableString,
+    periods: {
+      type: "array",
+      items: { type: "object", properties: { methodology: { type: "string" }, startedAt: { type: "string" }, endedAt: nullableString } },
+    },
     version: { type: "integer" },
   },
 } as const;
@@ -150,10 +162,25 @@ async function readSprint(client: PoolClient, sprintId: string): Promise<Sprint 
   return row ? toSprint(row) : null;
 }
 
+/** The project's methodology history, oldest first (who changed it and why stay out of the plan). */
+async function readPeriods(client: PoolClient, tenantId: string, projectId: string): Promise<MethodologyPeriod[]> {
+  const found = await client.query<{ methodology: string; started_at: Date; ended_at: Date | null }>(
+    `SELECT mp.methodology, mp.started_at, mp.ended_at FROM spark.project_methodology_periods mp
+     WHERE mp.tenant_id = $1 AND mp.project_id = $2 ORDER BY mp.started_at, mp.id`,
+    [tenantId, projectId],
+  );
+  return found.rows.map((row) => ({ methodology: row.methodology, startedAt: row.started_at.toISOString(), endedAt: iso(row.ended_at) }));
+}
+
 async function readPlan(client: PoolClient, projectId: string): Promise<Plan | null> {
   const project = await readProjectRef(client, projectId);
   if (!project) return null;
-  return { ...(await readPlanItems(client, project.tenant_id, project.id)), baselinedAt: iso(project.baselined_at), version: project.settings_version };
+  return {
+    ...(await readPlanItems(client, project.tenant_id, project.id)),
+    baselinedAt: iso(project.baselined_at),
+    periods: await readPeriods(client, project.tenant_id, project.id),
+    version: project.settings_version,
+  };
 }
 
 /** True when the status is a column of the project (and visible to the actor). */

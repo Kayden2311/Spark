@@ -18,7 +18,7 @@ import {
   type ProjectPlan,
 } from "../../../_lib/planning";
 import { formatDay } from "../../../_lib/projects";
-import { TEAMMATE_UPDATE } from "./settings-dialog";
+import { TEAMMATE_UPDATE } from "./settings-form";
 
 export const PHASE_IN_USE = "A phase you removed still has tasks or milestones. Move them to another phase first, or keep the phase.";
 const PROJECT_DATES_MISSING = "Set the project's start and target dates in Settings before planning phases.";

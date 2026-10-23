@@ -105,10 +105,15 @@ const called = (calls: Array<{ sql: string; params: unknown[] }>, fn: string) =>
 
 const projectRefHandler: [string, QueryHandler] = ["FROM spark.projects p WHERE", () => [projectRef]];
 const sprintHandler = (row: object = sprintRow): [string, QueryHandler] => ["FROM spark.sprints s", () => [row]];
+const periodRows = [
+  { methodology: "kanban", started_at: new Date("2026-10-03T08:00:00Z"), ended_at: new Date("2026-10-18T09:30:00Z") },
+  { methodology: "scrum", started_at: new Date("2026-10-18T09:30:00Z"), ended_at: null },
+];
 const planHandlers: Array<[string, QueryHandler]> = [
   projectRefHandler,
   ["FROM spark.project_phases ph", () => [phaseRow]],
   ["FROM spark.project_milestones ms", () => [milestoneRow]],
+  ["FROM spark.project_methodology_periods mp", () => periodRows],
 ];
 const detailHandlers = (row: object = projectDetailRow): Array<[string, QueryHandler]> => [
   ["FROM spark.projects p\n", () => [row]],
@@ -462,10 +467,24 @@ describe("planning routes", () => {
         }],
         milestones: [{ id: milestoneId, name: "Beta", phaseId, dueDate: "2026-11-06", baselineDueDate: null, completedAt: null, version: 2 }],
         baselinedAt: "2026-10-18T09:00:00.000Z",
+        periods: [
+          { methodology: "kanban", startedAt: "2026-10-03T08:00:00.000Z", endedAt: "2026-10-18T09:30:00.000Z" },
+          { methodology: "scrum", startedAt: "2026-10-18T09:30:00.000Z", endedAt: null },
+        ],
         version: 4,
       });
       expect(paramsOf(calls, "FROM spark.project_phases ph")).toEqual([tenantId, projectId]);
       expect(paramsOf(calls, "FROM spark.project_milestones ms")).toEqual([tenantId, projectId]);
+    });
+
+    it("reads the methodology periods of the project, oldest first, with tenant and project filters", async () => {
+      const { calls } = await call({ method: "GET", url: planUrl }, planHandlers);
+      const periods = calls.find((c) => c.sql.includes("FROM spark.project_methodology_periods mp"));
+      expect(periods?.params).toEqual([tenantId, projectId]);
+      expect(periods?.sql).toMatch(/mp\.tenant_id = \$1 AND mp\.project_id = \$2/u);
+      expect(periods?.sql).toMatch(/ORDER BY mp\.started_at, mp\.id/u);
+      // The changer and the reason stay out of the plan.
+      expect(periods?.sql).not.toMatch(/reason|changed_by/u);
     });
 
     it("is 404 for a project that is not visible", async () => {

@@ -70,3 +70,15 @@ export function phasesValid(rows: readonly PhaseDraft[], startDate: string, targ
   }
   return true;
 }
+
+/** Re-spreads rows evenly over the project dates (names kept); dates are cleared when the range can't hold them. */
+export function respreadPhases<T extends PhaseDraft>(rows: readonly T[], startDate: string, targetDate: string): T[] {
+  const cleared = () => rows.map((row) => ({ ...row, plannedStart: "", plannedEnd: "" }));
+  if (!startDate || !targetDate || rows.length === 0) return cleared();
+  try {
+    const spread = spreadPhases(startDate, targetDate, rows.map((row) => row.name));
+    return rows.map((row, index) => ({ ...row, plannedStart: spread[index].plannedStart, plannedEnd: spread[index].plannedEnd }));
+  } catch {
+    return cleared();
+  }
+}

@@ -2,7 +2,8 @@
 
 import { canManage, workspaceApi } from "./api";
 import { issueEtag, type BoardState, type IssueCard, type IssueDetail } from "./issues";
-import { dayValue, daysBetween, projectEtag, type ProjectMilestone, type ProjectPhase } from "./projects";
+import type { MethodologyId, StatusCategory } from "./methodologies";
+import { dayValue, daysBetween, formatShortDay, methodologyName, projectEtag, type ProjectDetail, type ProjectMilestone, type ProjectPhase } from "./projects";
 
 /** Shown wherever a plan is visible but the viewer may not change it (the API's 403 says the same). */
 export const PLAN_AUTHORITY_MESSAGE = "Only owners, admins and the project lead can change the plan.";
@@ -214,11 +215,20 @@ export interface PlanMilestone extends ProjectMilestone {
   version: number;
 }
 
+/** Which methodology a project used when; `endedAt` null is the current period. */
+export interface MethodologyPeriod {
+  methodology: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
 /** GET /projects/{id}/plan, and the body of the phase-plan and re-baseline commands. `version` is the project's. */
 export interface ProjectPlan {
   phases: ProjectPhase[];
   milestones: PlanMilestone[];
   baselinedAt: string | null;
+  /** Methodology history, oldest first. */
+  periods: MethodologyPeriod[];
   version: number;
 }
 
@@ -338,4 +348,97 @@ export function planProgress(board: Pick<BoardState, "statuses" | "issues">, pha
 export function withMilestone(plan: ProjectPlan, milestone: PlanMilestone): ProjectPlan {
   const exists = plan.milestones.some((item) => item.id === milestone.id);
   return { ...plan, milestones: exists ? plan.milestones.map((item) => (item.id === milestone.id ? milestone : item)) : [...plan.milestones, milestone] };
+}
+
+// ---------- Board columns and the methodology switch ----------
+
+/** The API's column limits (the database enforces them; the screens check first). */
+export const COLUMN_NAME_MAX = 40;
+export const WIP_LIMIT_MAX = 99;
+export const COLUMNS_MIN = 2;
+export const COLUMNS_MAX = 12;
+export const SWITCH_REASON_MAX = 200;
+
+export interface StatusPatch {
+  name?: string;
+  /** null removes the limit. */
+  wipLimit?: number | null;
+}
+
+/** Renames a column or changes its WIP limit; answers with the whole project (its version is the next If-Match). */
+export async function updateStatus(projectId: string, statusId: string, etag: string, patch: StatusPatch): Promise<{ project: ProjectDetail; etag: string }> {
+  const { data, etag: next } = await workspaceApi<ProjectDetail>(`${projectPath(projectId)}/statuses/${encodeURIComponent(statusId)}`, { method: "PATCH", body: patch, ifMatch: etag });
+  return { project: data, etag: next ?? projectEtag(data.version) };
+}
+
+/** One column of the board after a switch: with `id` it keeps that column (and its cards). */
+export interface SwitchColumn {
+  id?: string;
+  name: string;
+  category: StatusCategory;
+  wipLimit: number | null;
+}
+
+/** POST /projects/{id}/methodology. `mapping` sends each removed column's cards to an index of `columns`. */
+export interface SwitchRequest {
+  to: MethodologyId;
+  columns: SwitchColumn[];
+  mapping: Record<string, number>;
+  sprintLengthDays?: number;
+  startDate?: string;
+  targetDate?: string;
+  phases?: PhasePlanEntry[];
+  reason: string;
+}
+
+export interface SwitchResult {
+  project: ProjectDetail;
+  movedIssues: number;
+}
+
+export async function switchMethodology(projectId: string, etag: string, request: SwitchRequest): Promise<SwitchResult> {
+  const { data } = await workspaceApi<SwitchResult>(`${projectPath(projectId)}/methodology`, { method: "POST", body: request, ifMatch: etag });
+  return data;
+}
+
+export const WIP_RULE = `Use a whole number from 1 to ${WIP_LIMIT_MAX}, or leave it empty for no limit.`;
+
+/** A WIP field's value: "" is no limit, otherwise a whole number 1–99; undefined when it is neither. */
+export function parseWipLimit(text: string): number | null | undefined {
+  const trimmed = text.trim();
+  if (trimmed === "") return null;
+  if (!/^\d+$/u.test(trimmed)) return undefined;
+  const value = Number(trimmed);
+  return value >= 1 && value <= WIP_LIMIT_MAX ? value : undefined;
+}
+
+/** Why a column name can't be used, or null. */
+export function columnNameProblem(name: string): string | null {
+  const trimmed = name.trim();
+  if (trimmed === "") return "Give the column a name.";
+  return trimmed.length > COLUMN_NAME_MAX ? `Keep column names to ${COLUMN_NAME_MAX} characters.` : null;
+}
+
+const CATEGORY_LABELS: Record<string, string> = { backlog: "Backlog", todo: "To do", in_progress: "In progress", done: "Done" };
+
+/** A status category in words ("In progress"). */
+export function categoryLabel(category: string): string {
+  return CATEGORY_LABELS[category] ?? category;
+}
+
+/** "2 cards", "1 card", "No cards". */
+export function cardCountLabel(count: number): string {
+  return count === 0 ? "No cards" : `${count} ${count === 1 ? "card" : "cards"}`;
+}
+
+/** The refusal for a WIP limit below the cards a column would hold after a switch (the API can't name the column). */
+export function wipBelowOccupancyMessage(cards: number): string {
+  return `${cards} ${cards === 1 ? "card" : "cards"} would be in this column; the limit can't be below that.`;
+}
+
+/** "Kanban since Oct 18" for the current period, "Scrum Oct 3–Oct 18" for a closed one (UTC calendar days). */
+export function periodLabel(period: MethodologyPeriod): string {
+  const from = formatShortDay(period.startedAt.slice(0, 10));
+  const name = methodologyName(period.methodology);
+  return period.endedAt ? `${name} ${from}–${formatShortDay(period.endedAt.slice(0, 10))}` : `${name} since ${from}`;
 }

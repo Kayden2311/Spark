@@ -9,7 +9,7 @@ import { MethodologyPicker } from "../../../_components/methodology-picker";
 import { PhaseRowsEditor } from "../../../_components/phase-rows-editor";
 import { ApiError, canManage, messageOf, workspaceApi, type Workspace, type WorkspaceMember } from "../../../_lib/api";
 import { METHODOLOGY_ACCENTS, useMethodologies, type MethodologyId, type MethodologyTemplate } from "../../../_lib/methodologies";
-import { appendedDates, PHASES_MAX, PHASES_RULE, phasesValid, spreadPhases } from "../../../_lib/phases";
+import { appendedDates, PHASES_MAX, PHASES_RULE, phasesValid, respreadPhases, spreadPhases } from "../../../_lib/phases";
 import { cleanKeyInput, deriveProjectKey, isValidProjectKey, PROJECT_KEY_MAX } from "../../../_lib/project-key";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useWorkspace } from "../../workspace-context";
@@ -76,17 +76,6 @@ function rangeProblem(startDate: string, targetDate: string, phaseCount: number)
   }
 }
 
-/** Re-spreads the phase dates over the project range; rows keep their names. Dates are cleared when they don't fit. */
-function respread(rows: PhaseRow[], startDate: string, targetDate: string): PhaseRow[] {
-  if (!startDate || !targetDate || rows.length === 0) return rows.map((row) => ({ ...row, plannedStart: "", plannedEnd: "" }));
-  try {
-    const spread = spreadPhases(startDate, targetDate, rows.map((row) => row.name));
-    return rows.map((row, index) => ({ ...row, plannedStart: spread[index].plannedStart, plannedEnd: spread[index].plannedEnd }));
-  } catch {
-    return rows.map((row) => ({ ...row, plannedStart: "", plannedEnd: "" }));
-  }
-}
-
 function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace; first: boolean; onCreated(): void }) {
   const router = useRouter();
   const { user } = useAuth();
@@ -134,7 +123,7 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
     if (id === "waterfall" && phases === null) {
       const names = templates.find((item) => item.id === id)?.defaults.phaseNames ?? [];
       const initial = names.map((phaseName, index) => ({ id: index, name: phaseName, plannedStart: "", plannedEnd: "" }));
-      setPhases(respread(initial, startDate, targetDate));
+      setPhases(respreadPhases(initial, startDate, targetDate));
       setNextPhaseId(names.length);
     }
   };
@@ -162,7 +151,7 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
     setStartError(null);
     setTargetError(null);
     setPhasesError(null);
-    if (!phaseDatesEdited) setPhases((current) => (current ? respread(current, nextStart, nextTarget) : current));
+    if (!phaseDatesEdited) setPhases((current) => (current ? respreadPhases(current, nextStart, nextTarget) : current));
   };
 
   const updatePhase = (id: number, patch: Partial<PhaseRow>) => {
@@ -175,7 +164,7 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
     if (rows.length >= PHASES_MAX) return;
     setPhasesError(null);
     const added = { id: nextPhaseId, name: `Phase ${rows.length + 1}`, plannedStart: "", plannedEnd: "" };
-    setPhases(phaseDatesEdited ? [...rows, { ...added, ...appendedDates(rows, startDate, targetDate) }] : respread([...rows, added], startDate, targetDate));
+    setPhases(phaseDatesEdited ? [...rows, { ...added, ...appendedDates(rows, startDate, targetDate) }] : respreadPhases([...rows, added], startDate, targetDate));
     setNextPhaseId((value) => value + 1);
   };
 
@@ -183,13 +172,13 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
     if (rows.length <= 1) return;
     setPhasesError(null);
     const kept = rows.filter((row) => row.id !== id);
-    setPhases(phaseDatesEdited ? kept : respread(kept, startDate, targetDate));
+    setPhases(phaseDatesEdited ? kept : respreadPhases(kept, startDate, targetDate));
   };
 
   const spreadEvenly = () => {
     setPhasesError(null);
     setPhaseDatesEdited(false);
-    setPhases(respread(rows, startDate, targetDate));
+    setPhases(respreadPhases(rows, startDate, targetDate));
   };
 
   const onSubmit = async (event: FormEvent) => {

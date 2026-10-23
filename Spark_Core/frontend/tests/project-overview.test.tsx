@@ -1,5 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CATALOG } from "./methodology-catalog";
@@ -63,8 +62,6 @@ async function renderOverview(key: string) {
   render(<WorkspaceLayout><ProjectLayout><ProjectOverviewPage /></ProjectLayout></WorkspaceLayout>);
 }
 
-const patches = () => calls.filter((call) => call.key.startsWith("PATCH"));
-
 beforeEach(() => window.localStorage.clear());
 afterEach(() => vi.unstubAllGlobals());
 
@@ -123,84 +120,18 @@ describe("project overview", () => {
     expect(screen.getByText("No lead")).toBeInTheDocument();
   });
 
+  it("has no header Settings button; settings live in the Settings tab", async () => {
+    mockApi(KANBAN);
+    await renderOverview("OPS");
+    const tabs = await screen.findByRole("navigation", { name: "Project views" });
+    expect(within(tabs).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/w/northstar-labs/p/OPS/settings");
+    expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+  });
+
   it("shows a not-found card for an unknown key", async () => {
     mockApi(null);
     await renderOverview("NOPE");
     expect(await screen.findByRole("heading", { name: "This project isn't available" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to workspace home" })).toHaveAttribute("href", "/w/northstar-labs");
-  });
-
-  it("hides Settings from a member who does not lead the project", async () => {
-    mockApi(KANBAN, { role: "member" });
-    await renderOverview("OPS");
-    await screen.findByRole("heading", { level: 1, name: "Ops desk" });
-    expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
-  });
-
-  it("shows Settings to the project lead even as a plain member", async () => {
-    mockApi({ ...KANBAN, lead: { id: "u-avery", displayName: "Avery Founder" } }, { role: "member" });
-    await renderOverview("OPS");
-    expect(await screen.findByRole("button", { name: "Settings" })).toBeInTheDocument();
-  });
-
-  it("saves settings with If-Match and confirms in a toast", async () => {
-    mockApi(KANBAN, { extra: { "PATCH /api/v1/projects/p-ops": json({ ...KANBAN, name: "Ops help desk", version: 4 }, 200, "\"v4\"") } });
-    await renderOverview("OPS");
-    await userEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    const dialog = screen.getByRole("dialog", { name: "Project settings" });
-    const name = within(dialog).getByLabelText("Project name");
-    expect(name).toHaveValue("Ops desk");
-    expect(within(dialog).queryByLabelText("Sprint length")).not.toBeInTheDocument();
-    await userEvent.clear(name);
-    await userEvent.type(name, "Ops help desk");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(patches()).toEqual([{ key: "PATCH /api/v1/projects/p-ops", body: { name: "Ops help desk" }, ifMatch: "\"v3\"" }]);
-    expect(screen.getByRole("heading", { level: 1, name: "Ops help desk" })).toBeInTheDocument();
-    expect((await screen.findByText("Project settings saved.")).closest("[aria-live]")).not.toBeNull();
-  });
-
-  it("offers the sprint length for Scrum projects", async () => {
-    mockApi(SCRUM, { extra: { "PATCH /api/v1/projects/p-atlas": json({ ...SCRUM, sprintLengthDays: 21, version: 4 }, 200, "\"v4\"") } });
-    await renderOverview("ATLAS");
-    await userEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    const dialog = screen.getByRole("dialog", { name: "Project settings" });
-    await userEvent.selectOptions(within(dialog).getByLabelText("Sprint length"), "3 weeks");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(patches()).toHaveLength(1));
-    expect(patches()[0].body).toEqual({ sprintLengthDays: 21 });
-  });
-
-  it("shows a teammate's newer values on 412 and saves again with the fresh version", async () => {
-    const current = { ...KANBAN, name: "Ops desk (renamed)", description: "Changed elsewhere.", version: 4 };
-    let attempt = 0;
-    mockApi(KANBAN, {
-      extra: {
-        "PATCH /api/v1/projects/p-ops": () => {
-          attempt += 1;
-          return attempt === 1
-            ? new Response(JSON.stringify({ status: 412, code: "version_mismatch", detail: "The resource changed since you loaded it.", current }), { status: 412, headers: { "content-type": "application/problem+json" } })
-            : new Response(JSON.stringify({ ...current, name: "Ops desk 2", version: 5 }), { status: 200, headers: { "content-type": "application/json", ETag: "\"v5\"" } });
-        },
-      },
-    });
-    await renderOverview("OPS");
-    await userEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    const dialog = screen.getByRole("dialog", { name: "Project settings" });
-    await userEvent.clear(within(dialog).getByLabelText("Project name"));
-    await userEvent.type(within(dialog).getByLabelText("Project name"), "Ops desk 2");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
-
-    expect(await within(dialog).findByText("Updated by a teammate — review the latest values and save again.")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Project settings" })).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("Project name")).toHaveValue("Ops desk (renamed)");
-    expect(within(dialog).getByLabelText("Description")).toHaveValue("Changed elsewhere.");
-
-    await userEvent.clear(within(dialog).getByLabelText("Project name"));
-    await userEvent.type(within(dialog).getByLabelText("Project name"), "Ops desk 2");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(patches().map((call) => call.ifMatch)).toEqual(["\"v3\"", "\"v4\""]);
-    expect(patches()[1].body).toEqual({ name: "Ops desk 2" });
   });
 });
