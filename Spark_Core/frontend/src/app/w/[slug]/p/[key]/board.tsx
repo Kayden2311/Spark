@@ -135,8 +135,14 @@ export function ProjectBoard() {
   const today = todayIso();
   const statusById = new Map(board.statuses.map((status) => [status.id, status]));
 
+  /**
+   * The cards the viewer sees: with ?phase=none only unphased ones. Keyboard targets, positions and focus
+   * use it, so a move steps over visible cards only; the API still places the card among all of them.
+   */
+  const view = (state: BoardState): BoardState => (unphasedOnly ? { ...state, issues: state.issues.filter((issue) => issue.phaseId === null) } : state);
+
   const describe = (state: BoardState, issue: IssueCard) => {
-    const where = positionOf(state, issue.id);
+    const where = positionOf(view(state), issue.id);
     const status = where ? state.statuses.find((item) => item.id === where.statusId) : undefined;
     return where && status ? `${status.name}, position ${where.position} of ${where.size}` : "";
   };
@@ -221,7 +227,7 @@ export function ProjectBoard() {
     }
     if (ARROWS.includes(key)) {
       event.preventDefault();
-      const target = keyboardTarget(pickup.preview, issue.id, key as ArrowKey);
+      const target = keyboardTarget(view(pickup.preview), issue.id, key as ArrowKey);
       if (!target) {
         announce(`${issue.key} in ${describe(pickup.preview, issue)}`);
         return;
@@ -269,7 +275,7 @@ export function ProjectBoard() {
     const issue = committed.issues.find((item) => item.id === issueId);
     const fallback = `[data-card-id]:not([data-card-id="${issueId}"])`;
     if (!issue) return fallback;
-    const column = columnIssues(committed, issue.statusId);
+    const column = columnIssues(view(committed), issue.statusId);
     const index = column.findIndex((item) => item.id === issueId);
     const neighbour = column[index + 1] ?? column[index - 1];
     if (neighbour) return `[data-card-id="${neighbour.id}"]`;
@@ -384,8 +390,7 @@ export function ProjectBoard() {
       )}
       <div className="wsBoardScroller">
         {board.statuses.map((status) => {
-          // The filter only hides cards: moves still place them among all of the column's cards.
-          const cards = unphasedOnly ? columnIssues(board, status.id).filter((issue) => issue.phaseId === null) : columnIssues(board, status.id);
+          const cards = columnIssues(view(board), status.id);
           const full = wipBlocked(committed, null, status.id);
           const notice = notices[status.id] ?? (full && status.category !== "done" ? wipMessage(status) : null);
           const noticeId = `${helpId}-notice-${status.id}`;

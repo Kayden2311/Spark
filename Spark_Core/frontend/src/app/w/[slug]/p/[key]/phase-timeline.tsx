@@ -39,20 +39,21 @@ export function progressLabel(progress: PhaseProgress): string {
  * A compact Gantt view: one row per phase on a day grid, the baseline as a ghost bar under the plan,
  * milestone diamonds on their due day and a marker for today when it falls inside the range.
  *
- * With `progress` (the Timeline tab) the grid runs from the project start to its target: each planned bar
- * fills with its share of done tasks, each phase carries a variance badge ("no baseline" for a phase added
+ * With `detailed` (the Timeline tab) the grid runs from the project start to its target: each planned bar
+ * fills with its share of done tasks once `progress` is known (no fill while it isn't), each phase carries a variance badge ("no baseline" for a phase added
  * after the last re-baseline), overdue milestones are marked, milestones without a phase get their own row,
  * and anything outside the project dates (a milestone from another methodology period) sits at the edge.
  */
-export function PhaseTimeline({ phases, milestones, startDate, targetDate, today, progress }: {
+export function PhaseTimeline({ phases, milestones, startDate, targetDate, today, detailed = false, progress = null }: {
   phases: ProjectPhase[];
   milestones: ProjectMilestone[];
   startDate: string | null;
   targetDate: string | null;
   today: string;
-  progress?: ReadonlyMap<string, PhaseProgress>;
+  detailed?: boolean;
+  /** Done and total tasks per phase; null while unknown (loading or failed). */
+  progress?: ReadonlyMap<string, PhaseProgress> | null;
 }) {
-  const detailed = progress !== undefined;
   const fixed = detailed && Boolean(startDate && targetDate) && (targetDate ?? "") >= (startDate ?? "");
   const start = fixed ? startDate ?? "" : earliest([startDate, ...phases.flatMap((phase) => [phase.plannedStart, phase.baselineStart]), ...milestones.map((item) => item.dueDate)]);
   const end = fixed ? targetDate ?? "" : latest([targetDate, ...phases.flatMap((phase) => [phase.plannedEnd, phase.baselineEnd]), ...milestones.map((item) => item.dueDate)]);
@@ -125,7 +126,7 @@ export function PhaseTimeline({ phases, milestones, startDate, targetDate, today
               </span>
               <div className="wsTimelineTrack">
                 <span aria-hidden="true" className="wsTimelineBar" data-progress={detailed || undefined} data-testid="phase-bar" style={{ gridColumn: span(phase.plannedStart, phase.plannedEnd) }}>
-                  {detailed && <span className="wsTimelineFill" data-testid="phase-fill" style={{ width: `${share}%` }} />}
+                  {detailed && counts && <span className="wsTimelineFill" data-testid="phase-fill" style={{ width: `${share}%` }} />}
                 </span>
                 {phase.baselineStart && phase.baselineEnd && (
                   <span aria-hidden="true" className="wsTimelineBaseline" data-testid="phase-baseline" style={{ gridColumn: span(phase.baselineStart, phase.baselineEnd) }} />

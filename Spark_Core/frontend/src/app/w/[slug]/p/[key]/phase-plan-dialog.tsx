@@ -4,7 +4,8 @@ import { useId, useState, type FormEvent } from "react";
 
 import { Modal } from "../../../_components/modal";
 import { ApiError, messageOf } from "../../../_lib/api";
-import { appendedDates, PHASE_NAME_MAX, PHASES_MAX, PHASES_RULE, phasesValid } from "../../../_lib/phases";
+import { PhaseRowsEditor, type PhaseEditorRow } from "../../../_components/phase-rows-editor";
+import { appendedDates, PHASES_MAX, PHASES_RULE, phasesValid, type PhaseDraft } from "../../../_lib/phases";
 import {
   BASELINE_REASON_MAX,
   createMilestone,
@@ -32,13 +33,9 @@ function staleCurrent<T>(error: unknown): T | null {
 
 const inputError = (error: unknown, message: string) => error instanceof ApiError && error.status === 400 && error.message === message;
 
-interface PhaseRow {
-  /** Stable React key for the row; `id` is the saved phase it edits (absent for a new one). */
-  key: number;
+interface PhaseRow extends PhaseEditorRow {
+  /** The saved phase the row edits (absent for a new one). */
   id?: string;
-  name: string;
-  plannedStart: string;
-  plannedEnd: string;
 }
 
 const rowsOf = (plan: ProjectPlan): PhaseRow[] =>
@@ -72,7 +69,7 @@ export function PhasePlanDialog({ projectId, plan, startDate, targetDate, onClos
     setFormError(null);
   };
 
-  const updateRow = (key: number, patch: Partial<PhaseRow>) => {
+  const updateRow = (key: number, patch: Partial<PhaseDraft>) => {
     clearErrors();
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   };
@@ -129,53 +126,18 @@ export function PhasePlanDialog({ projectId, plan, startDate, targetDate, onClos
     <Modal busy={saving} onClose={onClose} title="Edit phases">
       <form className="wsSettingsForm" noValidate onSubmit={onSubmit}>
         {conflict && <p className="wsConflict" role="alert">{TEAMMATE_UPDATE}</p>}
-        <fieldset aria-describedby={phasesError ? "plan-phases-error" : "plan-phases-hint"} className="wsProjectPhases">
-          <legend>Phases</legend>
-          <p className="wsFieldHint" id="plan-phases-hint">
-            Between {formatDay(startDate || null)} and {formatDay(targetDate || null)}, in order and without overlapping — up to {PHASES_MAX} phases. New phases have no baseline until the next re-baseline.
-          </p>
-          <ol className="wsProjectPhaseList">
-            {rows.map((row, index) => {
-              const number = index + 1;
-              return (
-                <li className="wsProjectPhase" key={row.key}>
-                  <span aria-hidden="true" className="wsProjectPhaseNumber">{number}</span>
-                  <input
-                    aria-label={`Phase ${number} name`}
-                    className="wsProjectPhaseName"
-                    data-autofocus={index === 0 || undefined}
-                    maxLength={PHASE_NAME_MAX}
-                    onChange={(event) => updateRow(row.key, { name: event.target.value })}
-                    value={row.name}
-                  />
-                  <input
-                    aria-label={`Phase ${number} start`}
-                    max={targetDate || undefined}
-                    min={startDate || undefined}
-                    onChange={(event) => updateRow(row.key, { plannedStart: event.target.value })}
-                    type="date"
-                    value={row.plannedStart}
-                  />
-                  <input
-                    aria-label={`Phase ${number} end`}
-                    max={targetDate || undefined}
-                    min={startDate || undefined}
-                    onChange={(event) => updateRow(row.key, { plannedEnd: event.target.value })}
-                    type="date"
-                    value={row.plannedEnd}
-                  />
-                  <button aria-label={`Remove phase ${number}`} className="wsGhostButton danger" disabled={rows.length <= 1} onClick={() => removeRow(row.key)} type="button">
-                    Remove
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-          {phasesError && <p className="wsFieldError" id="plan-phases-error" role="alert">{phasesError}</p>}
-          <div className="wsProjectPhaseActions">
-            <button className="sparkSecondary wsProjectAddPhase" disabled={rows.length >= PHASES_MAX} onClick={addRow} type="button">Add phase</button>
-          </div>
-        </fieldset>
+        <PhaseRowsEditor
+          autoFocusFirst
+          error={phasesError}
+          hint={`Between ${formatDay(startDate || null)} and ${formatDay(targetDate || null)}, in order and without overlapping — up to ${PHASES_MAX} phases. New phases have no baseline until the next re-baseline.`}
+          idPrefix="plan-phases"
+          onAdd={addRow}
+          onChange={updateRow}
+          onRemove={removeRow}
+          rows={rows}
+          startDate={startDate}
+          targetDate={targetDate}
+        />
         {formError && <p className="wsAlert" role="alert">{formError}</p>}
         <div className="wsModalActions">
           <button className="sparkSecondary" disabled={saving} onClick={onClose} type="button">Cancel</button>
@@ -187,7 +149,7 @@ export function PhasePlanDialog({ projectId, plan, startDate, targetDate, onClos
 }
 
 /** Adds a milestone (`milestone` null) or edits one: name, due date inside the project dates, optional phase. */
-export function MilestoneDialog({ projectId, milestone, phases, startDate, targetDate, onClose, onSaved }: {
+export function MilestoneDialog({ projectId, milestone, phases, startDate, targetDate, onClose, onSaved, onStale }: {
   projectId: string;
   milestone: PlanMilestone | null;
   phases: ProjectPlan["phases"];
@@ -195,6 +157,8 @@ export function MilestoneDialog({ projectId, milestone, phases, startDate, targe
   targetDate: string;
   onClose(): void;
   onSaved(milestone: PlanMilestone): void;
+  /** A teammate's newer milestone seen on 412; the dialog shows it for review. */
+  onStale(milestone: PlanMilestone): void;
 }) {
   const id = useId();
   const [base, setBase] = useState(milestone);
@@ -206,7 +170,7 @@ export function MilestoneDialog({ projectId, milestone, phases, startDate, targe
   const [formError, setFormError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [saving, setSaving] = useState(false);
-  const rangeRule = `Pick a due date between ${formatDay(startDate || null)} and ${formatDay(targetDate || null)}.`;
+  const rangeRule = startDate && targetDate ? `Pick a due date between ${formatDay(startDate)} and ${formatDay(targetDate)}.` : "Pick a due date inside the project dates.";
   // A milestone kept from another methodology period may sit outside the dates and stays listed with its phase.
   const phaseMissing = values.phaseId !== "" && !phases.some((phase) => phase.id === values.phaseId);
 
@@ -252,6 +216,7 @@ export function MilestoneDialog({ projectId, milestone, phases, startDate, targe
         setNameError(null);
         setDueError(null);
         setConflict(true);
+        onStale(current);
         return;
       }
       setConflict(false);
@@ -293,7 +258,7 @@ export function MilestoneDialog({ projectId, milestone, phases, startDate, targe
           />
           {dueError
             ? <p className="wsFieldError" id={`${id}-due-error`} role="alert">{dueError}</p>
-            : <p className="wsFieldHint" id={`${id}-due-hint`}>Inside the project dates, {formatDay(startDate || null)} – {formatDay(targetDate || null)}.</p>}
+            : <p className="wsFieldHint" id={`${id}-due-hint`}>{startDate && targetDate ? `Inside the project dates, ${formatDay(startDate)} – ${formatDay(targetDate)}.` : "Any day while the project has no start and target dates."}</p>}
         </div>
         <div className="wsField">
           <label htmlFor={`${id}-phase`}>Phase</label>

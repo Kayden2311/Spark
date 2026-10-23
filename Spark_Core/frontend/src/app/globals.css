@@ -4614,6 +4614,9 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 .wsTimelineFill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, var(--method-accent), color-mix(in srgb, var(--method-accent) 80%, #fff)); transition: width .3s ease; }
 .wsTimelineMilestone[data-overdue] { background: #fff; box-shadow: 0 0 0 2px #dc2626, 0 3px 8px rgba(220, 38, 38, .25); }
 .wsTimelineMilestone[data-edge="start"] { justify-self: start; transform: translateX(-50%) rotate(45deg); }
+.wsTimelineMilestone[data-edge="end"] { justify-self: end; transform: translateX(50%) rotate(45deg); }
+.wsTimelineNote { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
+.wsTimelineNote .wsGhostButton { border-color: #fde68a; }
 .wsLegendMilestone[data-overdue] { background: #fff; box-shadow: 0 0 0 2px #dc2626; }
 .wsTimelineRow[data-loose] .wsTimelineLabel strong { color: var(--ink-secondary); }
 .wsTimelineTableWrap { max-width: 100%; margin-top: 1rem; overflow-x: auto; }

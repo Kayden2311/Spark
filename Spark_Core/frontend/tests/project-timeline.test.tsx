@@ -445,6 +445,175 @@ describe("waterfall timeline", () => {
     expect(screen.queryByText("Only owners, admins and the project lead can change the plan.")).not.toBeInTheDocument();
   });
 
+  it("keeps progress unknown while the board loads and offers a retry when it fails", async () => {
+    let boardFails = true;
+    mockApi({ routes: { "GET /api/v1/projects/p-web/board": (init) => (boardFails ? problem(500, "internal", "Boom")(init) : json(BOARD)(init)) } });
+    renderTimeline();
+    const chart = await gantt();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Progress couldn't load.");
+    // No fake 0% fills and no fake counts.
+    expect(within(chart).queryAllByTestId("phase-fill")).toHaveLength(0);
+    expect(within(chart).queryByText(/\d+\/\d+ done|No tasks/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^Unphased/u })).not.toBeInTheDocument();
+    expect(screen.getByText("Unphased").closest(".wsTimelineUnphased")).toHaveTextContent("Unphased —");
+
+    boardFails = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("link", { name: /^Unphased 3/u })).toBeInTheDocument();
+    expect(within(row("ph2")).getByTestId("phase-fill").style.width).toBe("25%");
+    expect(screen.queryByText("Progress couldn't load.")).not.toBeInTheDocument();
+  });
+
+  it("shows an unphased count of 0 as text, not a link", async () => {
+    mockApi({ routes: { "GET /api/v1/projects/p-web/board": json({ ...BOARD, issues: BOARD.issues.filter((issue) => issue.phaseId !== null) }) } });
+    renderTimeline();
+    await within(await gantt()).findAllByText(/2\/2 done/u);
+    expect(screen.getByText("Unphased").closest(".wsTimelineUnphased")).toHaveTextContent("Unphased 0");
+    expect(screen.queryByRole("link", { name: /^Unphased/u })).not.toBeInTheDocument();
+  });
+
+  it("clamps a milestone after the target date to the right edge", async () => {
+    mockApi({ routes: { [PLAN_KEY]: json({ ...PLAN, milestones: [milestone("ms8", "Late handover", null, "2027-01-10")] }) } });
+    renderTimeline();
+    const late = await within(await gantt()).findByRole("img", { name: "Milestone Late handover, due Jan 10, 2027, outside the project dates" });
+    expect(late.style.gridColumn).toBe("40 / span 1");
+    expect(late).toHaveAttribute("data-edge", "end");
+  });
+
+  it("maps the phase plan's input errors to inline messages", async () => {
+    let detail = "Invalid project phases.";
+    mockApi({ routes: { [PUT_PHASES]: (init) => problem(400, "invalid_input", detail)(init) } });
+    renderTimeline();
+    await userEvent.click(await screen.findByRole("button", { name: "Edit phases" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit phases" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save phases" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Each phase needs a name and dates inside the project dates, in order and without overlapping.");
+    expect(within(dialog).getByLabelText("Phase 1 name")).toHaveAttribute("aria-invalid", "true");
+    expect(within(dialog).getByLabelText("Phase 1 start")).toHaveAttribute("aria-invalid", "true");
+
+    detail = "Invalid project dates.";
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save phases" }));
+    await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("Set the project's start and target dates in Settings before planning phases."));
+    expect(requests("PUT")).toHaveLength(2);
+  });
+
+  it("moves focus to a remaining phase after removing one", async () => {
+    mockApi();
+    renderTimeline();
+    await userEvent.click(await screen.findByRole("button", { name: "Edit phases" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit phases" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove phase 5" }));
+    expect(within(dialog).getByLabelText("Phase 4 name")).toHaveFocus();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove phase 1" }));
+    expect(within(dialog).getByLabelText("Phase 1 name")).toHaveValue("Design");
+    expect(within(dialog).getByLabelText("Phase 1 name")).toHaveFocus();
+  });
+
+  it("maps a refused milestone date and a refused baseline reason to inline messages", async () => {
+    mockApi({
+      routes: {
+        [POST_MILESTONE]: problem(400, "invalid_input", "Invalid milestone."),
+        [POST_BASELINE]: problem(400, "invalid_input", "Invalid baseline reason."),
+      },
+    });
+    renderTimeline();
+    await userEvent.click(await screen.findByRole("button", { name: "Add milestone" }));
+    let dialog = screen.getByRole("dialog", { name: "Add milestone" });
+    await userEvent.type(within(dialog).getByLabelText("Milestone name"), "Launch");
+    fireEvent.change(within(dialog).getByLabelText("Due date"), { target: { value: "2026-12-01" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add milestone" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Pick a due date between Nov 2, 2026 and Dec 11, 2026.");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Re-baseline" }));
+    dialog = screen.getByRole("dialog", { name: "Re-baseline the plan?" });
+    await userEvent.type(within(dialog).getByLabelText("Reason"), "Scope change");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Re-baseline" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Give a reason of 1 to 200 characters.");
+  });
+
+  it("refreshes the plan on a re-baseline 412 and confirms with the new version", async () => {
+    const newer = { ...PLAN, version: 6, phases: PLAN.phases.map((item) => (item.id === "ph1" ? { ...item, name: "Discovery" } : item)) };
+    let posts = 0;
+    mockApi({
+      routes: {
+        [POST_BASELINE]: (init) => {
+          posts += 1;
+          return posts === 1 ? problem(412, "version_mismatch", "The resource changed since you loaded it.", { current: newer })(init) : json({ ...newer, version: 7 })(init);
+        },
+      },
+    });
+    renderTimeline();
+    await userEvent.click(await screen.findByRole("button", { name: "Re-baseline" }));
+    const dialog = screen.getByRole("dialog", { name: "Re-baseline the plan?" });
+    await userEvent.type(within(dialog).getByLabelText("Reason"), "Scope change");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Re-baseline" }));
+    expect(await within(dialog).findByText("Updated by a teammate — the plan was refreshed. Review it and confirm again.")).toBeInTheDocument();
+    expect(within(row("ph1")).getByText("Discovery")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Re-baseline" }));
+    await waitFor(() => expect(requests(POST_BASELINE)).toHaveLength(2));
+    expect(requests(POST_BASELINE).map((call) => call.ifMatch)).toEqual(["\"v3\"", "\"v6\""]);
+  });
+
+  it("shows a teammate's newer milestone on the page after an edit 412", async () => {
+    const newer = { ...PLAN.milestones[1], name: "Design review (moved)", version: 5 };
+    mockApi({ routes: { "PATCH /api/v1/milestones/ms2": problem(412, "version_mismatch", "The resource changed since you loaded it.", { current: newer }) } });
+    renderTimeline();
+    await userEvent.click(await screen.findByRole("button", { name: "Edit Design review" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Design review" });
+    fireEvent.change(within(dialog).getByLabelText("Due date"), { target: { value: "2026-11-24" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save milestone" }));
+    await within(dialog).findByText("Updated by a teammate — review the milestone and save again.");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(within(screen.getByRole("table", { name: "Milestones" })).getByRole("row", { name: /^Design review \(moved\)/u })).toBeInTheDocument();
+  });
+
+  it("keeps the Waterfall period's plan as read-only history after a switch, with milestones still editable", async () => {
+    const switched = { ...KANBAN, startDate: null, targetDate: null, phases: WATERFALL.phases, milestones: WATERFALL.milestones };
+    const created = milestone("ms9", "Retro", null, "2026-12-20", { baselineDueDate: null });
+    mockApi({
+      project: switched,
+      routes: {
+        "GET /api/v1/projects/p-ops/plan": json(PLAN),
+        "GET /api/v1/projects/p-ops/board": json({ ...BOARD, project: { id: "p-ops", key: "OPS", name: "Ops desk", methodology: "kanban" } }),
+        "POST /api/v1/projects/p-ops/milestones": json(created, 201),
+      },
+    });
+    renderTimeline("OPS");
+    const chart = await gantt();
+    const tabs = screen.getByRole("navigation", { name: "Project views" });
+    expect(within(tabs).getByRole("link", { name: "Timeline" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("Plan from the Waterfall period. Phases are kept as history and can't change; milestones stay editable.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit phases" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Re-baseline" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Unphased")).not.toBeInTheDocument();
+    expect(within(chart).getByRole("img", { name: /^Milestone Design review/u })).toBeInTheDocument();
+
+    expect(screen.getByRole("button", { name: "Mark Design review complete" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add milestone" }));
+    const dialog = screen.getByRole("dialog", { name: "Add milestone" });
+    await userEvent.type(within(dialog).getByLabelText("Milestone name"), "Retro");
+    fireEvent.change(within(dialog).getByLabelText("Due date"), { target: { value: "2026-12-20" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add milestone" }));
+    await waitFor(() => expect(requests("POST /api/v1/projects/p-ops/milestones")).toHaveLength(1));
+    expect(requests("PUT")).toHaveLength(0);
+  });
+
+  it("lists the Timeline tab for Waterfall projects and for others only while they keep a plan", async () => {
+    mockApi({ project: { ...KANBAN, milestones: [WATERFALL.milestones[0]] } });
+    renderTimeline("OPS");
+    const tabs = await screen.findByRole("navigation", { name: "Project views" });
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Timeline", "Overview", "Settings"]);
+  });
+
+  it("leaves the Timeline tab out for a project without a plan", async () => {
+    mockApi({ project: KANBAN });
+    renderTimeline("OPS");
+    const tabs = await screen.findByRole("navigation", { name: "Project views" });
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Overview", "Settings"]);
+  });
+
   it("points other methodologies to the board", async () => {
     mockApi({ project: KANBAN });
     renderTimeline("OPS");

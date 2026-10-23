@@ -29,11 +29,17 @@ import { useProject } from "../project-context";
 
 export const MILESTONE_REFRESHED = "Updated by a teammate — the milestone was refreshed.";
 
-/** Waterfall planning: the phase Gantt with baselines, progress and milestones, and the same plan as tables. */
+export const HISTORY_NOTE = "Plan from the Waterfall period. Phases are kept as history and can't change; milestones stay editable.";
+
+/**
+ * Waterfall planning: the phase Gantt with baselines, progress and milestones, and the same plan as tables.
+ * A project that left Waterfall keeps its plan here as history: phases read-only, milestones still editable.
+ */
 export default function ProjectTimelinePage() {
   const { project } = useProject();
   const { workspace } = useWorkspace();
-  if (methodologyOf(project.methodology) !== "waterfall") {
+  const waterfall = methodologyOf(project.methodology) === "waterfall";
+  if (!waterfall && project.phases.length === 0 && project.milestones.length === 0) {
     return (
       <section aria-labelledby="timeline-other-title" className="wsCard wsBoardState">
         <h2 id="timeline-other-title">The timeline is for Waterfall projects</h2>
@@ -43,12 +49,13 @@ export default function ProjectTimelinePage() {
     );
   }
   // Keyed by project so a switch between projects never mixes their plans.
-  return <WaterfallTimeline key={project.id} />;
+  return <WaterfallTimeline key={project.id} waterfall={waterfall} />;
 }
 
 type Dialog = { kind: "phases" } | { kind: "milestone"; milestone: PlanMilestone | null } | { kind: "baseline" };
 
-function WaterfallTimeline() {
+/** `waterfall` false: the plan of an earlier Waterfall period (the API only edits phases of Waterfall projects). */
+function WaterfallTimeline({ waterfall }: { waterfall: boolean }) {
   const { project, notify, reloadProject } = useProject();
   const { workspace } = useWorkspace();
   const { user } = useAuth();
@@ -91,6 +98,7 @@ function WaterfallTimeline() {
   const boardUrl = `/w/${workspace.slug}/p/${encodeURIComponent(project.key)}`;
   const board = loadedBoard.data;
   const counts = board ? planProgress(board, plan.phases.map((phase) => phase.id)) : null;
+  const boardFailed = !board && Boolean(loadedBoard.error) && !loadedBoard.loading;
   const phaseName = new Map(plan.phases.map((phase) => [phase.id, phase.name]));
 
   const source = loadedPlan.data;
@@ -134,26 +142,42 @@ function WaterfallTimeline() {
       <div className="wsTimelineToolbar">
         {planner
           ? <div className="wsTimelineActions">
-              <button className="sparkPrimary" data-edit-phases onClick={() => setDialog({ kind: "phases" })} type="button">Edit phases</button>
-              <button className="sparkSecondary" data-add-milestone onClick={() => setDialog({ kind: "milestone", milestone: null })} type="button">Add milestone</button>
-              <button className="sparkSecondary" data-rebaseline onClick={() => setDialog({ kind: "baseline" })} type="button">Re-baseline</button>
+              {waterfall && <button className="sparkPrimary" data-edit-phases onClick={() => setDialog({ kind: "phases" })} type="button">Edit phases</button>}
+              <button className={waterfall ? "sparkSecondary" : "sparkPrimary"} data-add-milestone onClick={() => setDialog({ kind: "milestone", milestone: null })} type="button">Add milestone</button>
+              {waterfall && <button className="sparkSecondary" data-rebaseline onClick={() => setDialog({ kind: "baseline" })} type="button">Re-baseline</button>}
             </div>
           : <p className="wsBacklogReadOnly" role="note">
               <svg aria-hidden="true" viewBox="0 0 24 24"><rect height="9" rx="2" width="14" x="5" y="11" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
               {PLAN_AUTHORITY_MESSAGE}
             </p>}
-        {counts && (
-          counts.unphased > 0
-            ? <Link
-                aria-label={`Unphased ${counts.unphased} ${counts.unphased === 1 ? "task" : "tasks"} — show them on the board`}
-                className="wsTimelineUnphased"
-                href={`${boardUrl}?phase=none`}
-              >
-                Unphased <strong>{counts.unphased}</strong>
-              </Link>
-            : <span className="wsTimelineUnphased" data-empty>Unphased <strong>0</strong></span>
+        {/* Off Waterfall every task is unphased, so the count only means something on a Waterfall project. */}
+        {waterfall && (
+          counts === null
+            ? <span className="wsTimelineUnphased" data-empty>Unphased <strong aria-hidden="true">—</strong><span className="wsSrOnly">count not loaded</span></span>
+            : counts.unphased > 0
+              ? <Link
+                  aria-label={`Unphased ${counts.unphased} ${counts.unphased === 1 ? "task" : "tasks"} — show them on the board`}
+                  className="wsTimelineUnphased"
+                  href={`${boardUrl}?phase=none`}
+                >
+                  Unphased <strong>{counts.unphased}</strong>
+                </Link>
+              : <span className="wsTimelineUnphased" data-empty>Unphased <strong>0</strong></span>
         )}
       </div>
+      {!waterfall && (
+        <p className="wsBacklogReadOnly" role="note">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>
+          {HISTORY_NOTE}
+        </p>
+      )}
+      {boardFailed && (
+        <p className="wsBoardBanner wsTimelineNote" role="alert">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M12 7v6M12 16.5v.5" /></svg>
+          <span>Progress couldn&apos;t load. {loadedBoard.error}</span>
+          <button className="wsGhostButton" onClick={loadedBoard.reload} type="button">Try again</button>
+        </p>
+      )}
       {board?.truncated && (
         <p className="wsBoardBanner" role="note">
           <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5M12 7.5v.5" /></svg>
@@ -166,7 +190,7 @@ function WaterfallTimeline() {
           <div>
             <h2 id="plan-gantt-title">Phases and milestones</h2>
             <p>
-              {formatDay(project.startDate)} – {formatDay(project.targetDate)} ·{" "}
+              {project.startDate && project.targetDate && `${formatDay(project.startDate)} – ${formatDay(project.targetDate)} · `}
               {plan.baselinedAt ? `Baseline from ${formatDay(plan.baselinedAt.slice(0, 10))}` : "No baseline yet"}
             </p>
           </div>
@@ -177,7 +201,7 @@ function WaterfallTimeline() {
             <li><span aria-hidden="true" className="wsLegendMilestone" data-overdue />Overdue</li>
           </ul>
         </header>
-        <PhaseTimeline milestones={plan.milestones} phases={plan.phases} progress={counts?.byPhase ?? new Map()} startDate={project.startDate} targetDate={project.targetDate} today={today} />
+        <PhaseTimeline milestones={plan.milestones} phases={plan.phases} detailed progress={counts?.byPhase ?? null} startDate={project.startDate} targetDate={project.targetDate} today={today} />
       </section>
 
       <section aria-labelledby="plan-table-title" className="wsCard">
@@ -266,7 +290,7 @@ function WaterfallTimeline() {
             </div>}
       </section>
 
-      {dialog?.kind === "phases" && (
+      {waterfall && dialog?.kind === "phases" && (
         <PhasePlanDialog
           onClose={() => setDialog(null)}
           onSaved={(saved) => {
@@ -296,13 +320,14 @@ function WaterfallTimeline() {
             reloadProject();
             notify(added ? `${saved.name} added.` : `${saved.name} saved.`);
           }}
+          onStale={(current) => changePlan((latest) => withMilestone(latest, current))}
           phases={plan.phases}
           projectId={project.id}
           startDate={startDate}
           targetDate={targetDate}
         />
       )}
-      {dialog?.kind === "baseline" && (
+      {waterfall && dialog?.kind === "baseline" && (
         <RebaselineDialog
           onClose={() => setDialog(null)}
           onSaved={(saved) => {

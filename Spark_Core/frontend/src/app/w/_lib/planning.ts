@@ -313,8 +313,10 @@ export interface PhaseProgress {
 }
 
 /**
- * Per phase, the tasks in it and how many are in a done column; plus the tasks without a phase (or with a
- * phase that is no longer in the plan). Counts the loaded board, so a board cut at 500 tasks undercounts.
+ * Per phase, the tasks in it and how many are in a done column; plus the tasks without a phase (phaseId
+ * null, the same cards the board's `?phase=none` filter shows). A task whose phase is not in `phaseIds` is
+ * counted nowhere (the API refuses to delete a phase that tasks still use). Counts the loaded board, so a
+ * board cut at 500 tasks undercounts.
  */
 export function planProgress(board: Pick<BoardState, "statuses" | "issues">, phaseIds: readonly string[]): { byPhase: Map<string, PhaseProgress>; unphased: number } {
   const done = new Set(board.statuses.filter((status) => status.category === "done").map((status) => status.id));

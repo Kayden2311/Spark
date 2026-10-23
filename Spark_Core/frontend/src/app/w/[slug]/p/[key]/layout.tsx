@@ -16,7 +16,7 @@ import { ProjectSettingsDialog } from "./settings-dialog";
 type Toast = { id: number; text: string; tone: ToastTone };
 type Announcement = { id: number; text: string };
 
-/** Shared header (name, methodology, Settings, view tabs: Board · Backlog (Scrum) · Timeline (Waterfall) · Overview · Settings (planners)) and the one live region for every project view. */
+/** Shared header (name, methodology, Settings, view tabs: Board · Backlog (Scrum) · Timeline (Waterfall, or a kept plan) · Overview · Settings (planners)) and the one live region for every project view. */
 export default function ProjectLayout({ children }: { children: ReactNode }) {
   const { key = "" } = useParams<{ key: string }>();
   const pathname = usePathname();
@@ -85,7 +85,8 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
     const tabs = [
       { href: base, label: "Board", show: true },
       { href: `${base}/backlog`, label: "Backlog", show: methodology === "scrum" },
-      { href: `${base}/timeline`, label: "Timeline", show: methodology === "waterfall" },
+      // A project that left Waterfall keeps its phases and milestones there as history (milestones stay editable).
+      { href: `${base}/timeline`, label: "Timeline", show: methodology === "waterfall" || ready.phases.length > 0 || ready.milestones.length > 0 },
       { href: `${base}/overview`, label: "Overview", show: true },
       { href: `${base}/settings`, label: "Settings", show: canEdit },
     ].filter((tab) => tab.show);

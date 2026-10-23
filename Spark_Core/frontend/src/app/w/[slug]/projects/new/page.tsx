@@ -6,9 +6,10 @@ import { Suspense, useState, type CSSProperties, type FormEvent } from "react";
 
 import { useAuth } from "../../../../auth-context";
 import { MethodologyPicker } from "../../../_components/methodology-picker";
+import { PhaseRowsEditor } from "../../../_components/phase-rows-editor";
 import { ApiError, canManage, messageOf, workspaceApi, type Workspace, type WorkspaceMember } from "../../../_lib/api";
 import { METHODOLOGY_ACCENTS, useMethodologies, type MethodologyId, type MethodologyTemplate } from "../../../_lib/methodologies";
-import { appendedDates, PHASE_NAME_MAX, PHASES_MAX, PHASES_RULE, phasesValid, spreadPhases } from "../../../_lib/phases";
+import { appendedDates, PHASES_MAX, PHASES_RULE, phasesValid, spreadPhases } from "../../../_lib/phases";
 import { cleanKeyInput, deriveProjectKey, isValidProjectKey, PROJECT_KEY_MAX } from "../../../_lib/project-key";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useWorkspace } from "../../workspace-context";
@@ -388,61 +389,20 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
                 </div>
               </div>
 
-              <fieldset aria-describedby={phasesError ? "project-phases-error" : "project-phases-hint"} className="wsProjectPhases">
-                <legend>Phases</legend>
-                <p className="wsFieldHint" id="project-phases-hint">
-                  {phaseDatesEdited
-                    ? "You've set phase dates by hand, so they stay as they are when the project dates or phases change."
-                    : `Spread evenly over the project dates. Rename them or adjust the dates — up to ${PHASES_MAX} phases.`}
-                </p>
-                <ol className="wsProjectPhaseList">
-                  {rows.map((row, index) => {
-                    const number = index + 1;
-                    return (
-                      <li className="wsProjectPhase" key={row.id}>
-                        <span aria-hidden="true" className="wsProjectPhaseNumber">{number}</span>
-                        <input
-                          aria-label={`Phase ${number} name`}
-                          className="wsProjectPhaseName"
-                          maxLength={PHASE_NAME_MAX}
-                          onChange={(event) => updatePhase(row.id, { name: event.target.value })}
-                          value={row.name}
-                        />
-                        <input
-                          aria-label={`Phase ${number} start`}
-                          max={targetDate || undefined}
-                          min={startDate || undefined}
-                          onChange={(event) => updatePhase(row.id, { plannedStart: event.target.value })}
-                          type="date"
-                          value={row.plannedStart}
-                        />
-                        <input
-                          aria-label={`Phase ${number} end`}
-                          max={targetDate || undefined}
-                          min={startDate || undefined}
-                          onChange={(event) => updatePhase(row.id, { plannedEnd: event.target.value })}
-                          type="date"
-                          value={row.plannedEnd}
-                        />
-                        <button
-                          aria-label={`Remove phase ${number}`}
-                          className="wsGhostButton danger"
-                          disabled={rows.length <= 1}
-                          onClick={() => removePhase(row.id)}
-                          type="button"
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ol>
-                {phasesError && <p className="wsFieldError" id="project-phases-error" role="alert">{phasesError}</p>}
-                <div className="wsProjectPhaseActions">
-                  <button className="sparkSecondary wsProjectAddPhase" disabled={rows.length >= PHASES_MAX} onClick={addPhase} type="button">Add phase</button>
-                  <button className="wsGhostButton" disabled={!startDate || !targetDate || Boolean(range)} onClick={spreadEvenly} type="button">Re-spread dates evenly</button>
-                </div>
-              </fieldset>
+              <PhaseRowsEditor
+                error={phasesError}
+                extraActions={<button className="wsGhostButton" disabled={!startDate || !targetDate || Boolean(range)} onClick={spreadEvenly} type="button">Re-spread dates evenly</button>}
+                hint={phaseDatesEdited
+                  ? "You've set phase dates by hand, so they stay as they are when the project dates or phases change."
+                  : `Spread evenly over the project dates. Rename them or adjust the dates — up to ${PHASES_MAX} phases.`}
+                idPrefix="project-phases"
+                onAdd={addPhase}
+                onChange={updatePhase}
+                onRemove={removePhase}
+                rows={rows.map((row) => ({ ...row, key: row.id }))}
+                startDate={startDate}
+                targetDate={targetDate}
+              />
             </>
           )}
 
