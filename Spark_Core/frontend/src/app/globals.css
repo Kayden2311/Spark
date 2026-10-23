@@ -4580,11 +4580,12 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
   .wsBacklogLane { padding: .85rem .75rem .75rem; }
   .wsBacklogActions { width: 100%; }
   .wsBacklogActions > * { flex: 1 1 7rem; }
-  /* Phones: key and title on top, tags below, the Move button under the tags. */
+  /* Phones: key and title on top, tags below with the Move button at the end of the tags row. */
   .wsBacklogCard, .wsBacklogItem[data-planner] .wsBacklogCard { grid-template-columns: auto minmax(0, 1fr); padding-right: .75rem; }
   .wsBacklogCardMeta { grid-column: 1 / -1; justify-content: flex-start; }
-  .wsBacklogItem[data-planner] .wsBacklogCard { padding-bottom: 2.75rem; }
-  .wsBacklogMove { top: auto; right: .55rem; bottom: .5rem; transform: none; }
+  .wsBacklogItem[data-planner] .wsBacklogCardMeta { min-height: 2rem; padding-right: 6.6rem; }
+  .wsBacklogMove { top: auto; right: .55rem; bottom: .55rem; transform: none; }
+  .wsBacklogMove .wsBoardMoveButton { min-height: 2rem; padding: .3rem .6rem; font-size: .74rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4649,8 +4650,9 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 .wsSettingsCard .wsCardHeader .sparkSecondary { flex: none; min-height: 2.6rem; padding: .55rem 1rem; font-size: .86rem; }
 .wsSettingsActions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .75rem; }
 .wsSettingsColumns { display: grid; gap: .6rem; min-width: 0; }
-.wsSettingsColumn { display: grid; grid-template-columns: minmax(0, 1.5fr) auto auto minmax(6.5rem, .6fr) auto; align-items: end; gap: .55rem .8rem; padding: .8rem .9rem; border: 1px solid var(--line); border-radius: .8rem; background: #fbfcfe; }
-.wsSettingsColumn[data-readonly] { grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; }
+.wsSettingsColumn { display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem 4.75rem 8.5rem auto; align-items: end; gap: .55rem .8rem; padding: .8rem .9rem; border: 1px solid var(--line); border-radius: .8rem; background: #fbfcfe; }
+.wsSettingsColumn[data-readonly] { grid-template-columns: minmax(0, 1fr) 6.5rem 4.75rem 5rem; align-items: center; }
+.wsSettingsColumn > .wsPickerColumn { justify-self: start; }
 .wsSettingsColumn > .wsPickerColumn, .wsSettingsColumn > .wsSettingsCards { align-self: center; margin-top: 1.4rem; }
 .wsSettingsColumn[data-readonly] > * { margin-top: 0; }
 .wsSettingsColumn .wsField label { font-size: .76rem; }
@@ -4680,8 +4682,16 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 .wsWizardColumns { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 1rem; min-width: 0; }
 .wsWizardPanel { min-width: 0; padding: .9rem; border: 1px solid var(--line); border-radius: .85rem; background: #fbfcfe; }
 .wsWizardList { display: grid; gap: .55rem; margin: 0; padding: 0; list-style: none; }
-.wsWizardColumn { display: grid; grid-template-columns: auto minmax(0, 1.3fr) minmax(0, 1fr) auto 5rem auto auto; align-items: center; gap: .45rem; }
-.wsWizardColumn input { width: 100%; min-width: 0; padding: .55rem .65rem; border: 1.5px solid #dce5f1; border-radius: .6rem; color: var(--ink); background: #fff; font: inherit; font-size: .86rem; outline: none; }
+.wsWizardColumn { display: grid; grid-template-columns: 1.7rem minmax(0, 1.15fr) minmax(0, 1fr) 6.25rem auto; align-items: center; gap: .45rem .5rem; padding-bottom: .6rem; border-bottom: 1px solid #edf2f8; }
+.wsWizardColumn:last-child { padding-bottom: 0; border-bottom: 0; }
+.wsWizardColumn > .wsProjectPhaseNumber { grid-column: 1; grid-row: 1; }
+.wsWizardColumn > .wsWizardName { grid-column: 2; grid-row: 1; }
+.wsWizardColumn > .wsWizardSource { grid-column: 3 / -1; grid-row: 1; }
+.wsWizardColumn > .wsWizardCategory { grid-column: 2; grid-row: 2; justify-self: start; }
+.wsWizardColumn > .wsSettingsCards { grid-column: 3; grid-row: 2; justify-self: end; }
+.wsWizardColumn > .wsWizardWip { grid-column: 4; grid-row: 2; }
+.wsWizardColumn > .wsWizardRemove { grid-column: 5; grid-row: 2; }
+.wsWizardColumn input { width: 100%; min-width: 0; min-height: 2.6rem; padding: .55rem .65rem; border: 1.5px solid #dce5f1; border-radius: .6rem; color: var(--ink); background: #fff; font: inherit; font-size: .86rem; outline: none; }
 .wsWizardColumn input:focus { border-color: var(--blue); box-shadow: 0 0 0 3.5px rgba(37, 99, 235, .14); }
 .wsWizardColumn input[aria-invalid="true"] { border-color: #dc2626; }
 .wsWizardColumn .wsSelect { min-width: 0; font-size: .82rem; }
@@ -4710,12 +4720,13 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
   .wsSettingsColumn > .wsSettingsSave { align-self: end; }
   .wsSettingsCard .wsCardHeader { flex-direction: column; }
   .wsSettingsCard .wsCardHeader .sparkSecondary { width: 100%; }
-  .wsWizardColumn { grid-template-columns: 1.6rem minmax(0, 1fr) minmax(0, 1fr); padding-bottom: .6rem; border-bottom: 1px solid #edf2f8; }
+  .wsWizardColumn { grid-template-columns: 1.6rem minmax(0, 1fr) minmax(0, 1fr); }
+  .wsWizardColumn > .wsWizardName, .wsWizardColumn > .wsWizardSource, .wsWizardColumn > .wsWizardCategory, .wsWizardColumn > .wsWizardWip, .wsWizardColumn > .wsSettingsCards, .wsWizardColumn > .wsWizardRemove { grid-row: auto; }
   .wsWizardColumn > .wsProjectPhaseNumber { grid-column: 1; grid-row: 1; }
   .wsWizardColumn > .wsWizardName, .wsWizardColumn > .wsWizardSource { grid-column: 2 / -1; }
   .wsWizardColumn > .wsWizardCategory { grid-column: 2; justify-self: start; }
   .wsWizardColumn > .wsWizardWip { grid-column: 3; }
-  .wsWizardColumn > .wsSettingsCards { grid-column: 2; }
+  .wsWizardColumn > .wsSettingsCards { grid-column: 2; justify-self: start; }
   .wsWizardColumn > .wsWizardRemove { grid-column: 3; justify-self: end; }
   .wsWizardSteps li { font-size: .72rem; }
   .wsWizardNarrow { max-width: none; }
