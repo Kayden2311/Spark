@@ -319,14 +319,15 @@ async function projectSettings(project: string) {
   return (await owner.query(`SELECT methodology,sprint_length_days,start_date::text AS start_date,target_date::text AS target_date,settings_version,baselined_at
     FROM ${table("projects")} WHERE id=$1`, [project])).rows[0] as { methodology: string; sprint_length_days: number | null; start_date: string | null; target_date: string | null; settings_version: number; baselined_at: Date | null };
 }
-// After a switch every issue sits on a status of the project and keeps its sprint and phase, and the periods
-// form one unbroken history (each closed period ends where the next starts) ending in one open period.
-async function expectSwitchInvariants(project: string, before: IssueState[], methodology: string) {
+// After a switch every issue sits on a status of the project and keeps its sprint and phase (except the open
+// issues of planned sprints cancelled on leaving Scrum, listed in toBacklog, which lose their sprint), and the
+// periods form one unbroken history (each closed period ends where the next starts) ending in one open period.
+async function expectSwitchInvariants(project: string, before: IssueState[], methodology: string, toBacklog: string[] = []) {
   const statusIds = (await boardColumns(project)).map((row) => row.id);
   const after = await issueStates(project);
   for (const row of after) expect(statusIds).toContain(row.status_id);
   const history = (rows: IssueState[]) => rows.map(({ id, sprint_id, phase_id }) => ({ id, sprint_id, phase_id }));
-  expect(history(after)).toEqual(history(before));
+  expect(history(after)).toEqual(history(before).map((row) => (toBacklog.includes(row.id) ? { ...row, sprint_id: null } : row)));
   const periods = await methodologyPeriods(project);
   expect(periods.filter((row) => row.ended_at === null)).toHaveLength(1);
   expect(periods.at(-1)).toMatchObject({ methodology, ended_at: null });
@@ -3464,7 +3465,7 @@ describe("Local PostgreSQL schema", () => {
     await sprintIssue(alice, project, finished, { status: done!.id });
     expect(await startSprint(alice, finished, 1)).toMatchObject({ outcome: "ok" });
     expect(await completeSprint(alice, finished, 2, null)).toMatchObject({ outcome: "ok", moved_issues: 0 });
-    await sprintIssue(alice, project, planned, { status: backlog!.id });
+    const plannedIssue = await sprintIssue(alice, project, planned, { status: backlog!.id });
     for (const title of ["Idea", "Wish"]) await createIssue(alice, project, { title, status: backlog!.id });
     await createIssue(alice, project, { title: "Started", status: progress!.id });
     const sprintsBefore = [await sprintRow(finished), await sprintRow(planned)];
@@ -3483,7 +3484,8 @@ describe("Local PostgreSQL schema", () => {
     expect(await projectSettings(project)).toMatchObject({ methodology: "scrum", settings_version: 1, start_date: null });
     expect(await phasePlan(project)).toEqual([]);
 
-    // The Backlog column is removed and its three cards (one in the planned sprint) move to Not started.
+    // The Backlog column is removed and its three cards move to Not started; the one in the planned sprint also
+    // returns to the backlog, in the same single change set.
     expect(await switchMethodology(alice, project, 1, toWaterfall)).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 3 });
     const settings = await projectSettings(project);
     expect(settings).toMatchObject({ methodology: "waterfall", sprint_length_days: null, start_date: "2026-11-02", target_date: "2026-12-11", settings_version: 2 });
@@ -3493,10 +3495,14 @@ describe("Local PostgreSQL schema", () => {
       .toEqual(waterfallPhases.map((phase, index) => [phase.name, index + 1, phase.plannedStart, phase.plannedEnd, phase.plannedStart, phase.plannedEnd, 1]));
     expect((await boardColumns(project)).map((row) => [row.id, row.name, row.position])).toEqual([
       [todo!.id, "Not started", 1024], [progress!.id, "In progress", 2048], [review!.id, "In review", 3072], [done!.id, "Done", 4096]]);
-    // Sprints are kept as history; every issue is unphased until someone plans it.
-    expect([await sprintRow(finished), await sprintRow(planned)]).toEqual(sprintsBefore);
+    // The completed sprint is kept as history; the planned one is cancelled. Every issue is unphased until someone plans it.
+    expect(await sprintRow(finished)).toEqual(sprintsBefore[0]);
+    expect(await sprintRow(planned)).toEqual({ ...sprintsBefore[1], status: "cancelled", version: 2 });
     expect((await issueStates(project)).every((row) => row.phase_id === null)).toBe(true);
-    await expectSwitchInvariants(project, before, "waterfall");
+    expect(await issueVersion(plannedIssue)).toBe(3);
+    expect((await issueEvents(plannedIssue)).at(-1)).toMatchObject({ from_version: 2, to_version: 3, changes: { fields: ["statusId", "sprintId"],
+      after: { statusId: todo!.id, category: "todo", sprintId: null, archived: false } } });
+    await expectSwitchInvariants(project, before, "waterfall", [plannedIssue]);
     expect((await auditRows(project)).slice(1)).toEqual([{ action: "project.methodology_switched", actor_user_id: alice.id, resource_type: "project", metadata: { from: "scrum", to: "waterfall" } }]);
   });
   it("switches Waterfall to Kanban keeping phases and milestones read-only", async () => {
@@ -3549,19 +3555,21 @@ describe("Local PostgreSQL schema", () => {
     const scrum = await scrumProject(alice);
     const [backlog, todo, progress, review, done] = await boardColumns(scrum.project);
     const sprint = (await createSprint(alice, scrum.project, "Planned", null, "2026-11-02", "2026-11-16")).sprint_id!;
-    await sprintIssue(alice, scrum.project, sprint, { status: todo!.id });
+    const planned = await sprintIssue(alice, scrum.project, sprint, { status: todo!.id });
     const reviewed = (await createIssue(alice, scrum.project, { status: review!.id })).issue_id!;
     const scrumBefore = await issueStates(scrum.project);
     // In review is replaced by a new Review column with the Kanban template limit.
     expect(await switchMethodology(alice, scrum.project, 1, { to: "kanban", mapping: { [review!.id]: 3 },
       columns: [keepColumn(backlog!), keepColumn(todo!, { name: "Ready", wipLimit: 8 }), keepColumn(progress!, { wipLimit: 4 }),
-        { name: "Review", category: "in_progress", wipLimit: 3 }, keepColumn(done!)] })).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 1 });
+        { name: "Review", category: "in_progress", wipLimit: 3 }, keepColumn(done!)] })).toEqual({ outcome: "ok", settings_version: 2, moved_issues: 2 });
     const kanbanColumns = await boardColumns(scrum.project);
     expect(kanbanColumns.map((row) => [row.name, row.wip_limit])).toEqual([["Backlog", null], ["Ready", 8], ["In progress", 4], ["Review", 3], ["Done", null]]);
     expect((await issueStates(scrum.project)).find((row) => row.id === reviewed)).toMatchObject({ status_id: kanbanColumns[3]!.id, version: 2 });
     expect(await projectSettings(scrum.project)).toMatchObject({ methodology: "kanban", sprint_length_days: null });
-    expect(await sprintRow(sprint)).toMatchObject({ status: "planned", version: 1 });
-    await expectSwitchInvariants(scrum.project, scrumBefore, "kanban");
+    // Leaving Scrum cancels the planned sprint and returns its open issue to the backlog.
+    expect(await sprintRow(sprint)).toMatchObject({ status: "cancelled", version: 2 });
+    expect((await issueStates(scrum.project)).find((row) => row.id === planned)).toMatchObject({ status_id: todo!.id, sprint_id: null, version: 3 });
+    await expectSwitchInvariants(scrum.project, scrumBefore, "kanban", [planned]);
 
     const waterfall = await waterfallProject(alice);
     const [notStarted, building, reviewing, finished] = await boardColumns(waterfall.project);
@@ -3577,6 +3585,60 @@ describe("Local PostgreSQL schema", () => {
     expect((await issueStates(waterfall.project)).every((row) => row.sprint_id === null)).toBe(true);
     expect(await phasePlan(waterfall.project)).toEqual(phases);
     await expectSwitchInvariants(waterfall.project, waterfallBefore, "scrum");
+  });
+  it("cancels planned sprints when leaving Scrum, so re-entering Scrum starts from the backlog", async () => {
+    const alice = await account("Scrum Returner");
+    const { project } = await scrumProject(alice);
+    const columns = await boardColumns(project);
+    const [, todo, progress, , done] = columns;
+    // A completed sprint with a finished issue and one reopened afterwards: history, untouched by the switch.
+    const completed = (await createSprint(alice, project, "Shipped", null, "2026-10-01", "2026-10-15")).sprint_id!;
+    const shipped = await sprintIssue(alice, project, completed, { title: "Shipped", status: done!.id });
+    const reopened = await sprintIssue(alice, project, completed, { title: "Reopened", status: done!.id });
+    expect(await startSprint(alice, completed, 1)).toMatchObject({ outcome: "ok" });
+    expect(await completeSprint(alice, completed, 2, null)).toMatchObject({ outcome: "ok", moved_issues: 0 });
+    expect(await updateIssue(alice, reopened, 2, { statusId: todo!.id })).toMatchObject({ outcome: "ok", issue_version: 3 });
+    // Two planned sprints: their open issues return to the backlog; done and archived ones keep their sprint.
+    const next = (await createSprint(alice, project, "Next", null, "2026-11-02", "2026-11-16")).sprint_id!;
+    const later = (await createSprint(alice, project, "Later")).sprint_id!;
+    const nextOpen = [await sprintIssue(alice, project, next, { title: "Plan A", status: todo!.id, points: "5" }),
+      await sprintIssue(alice, project, next, { title: "Plan B", status: progress!.id })];
+    const nextDone = await sprintIssue(alice, project, next, { title: "Plan done", status: done!.id });
+    const nextArchived = await sprintIssue(alice, project, next, { title: "Plan shelved", status: todo!.id });
+    expect(await updateIssue(alice, nextArchived, 2, { archived: true })).toMatchObject({ outcome: "ok", issue_version: 3 });
+    const laterOpen = await sprintIssue(alice, project, later, { title: "Plan C", status: todo!.id });
+    const completedBefore = await sprintRow(completed);
+    const before = await issueStates(project);
+    const moved = [...nextOpen, laterOpen];
+
+    expect(await switchMethodology(alice, project, 1, { to: "kanban", columns: columns.map((row) => keepColumn(row)) }))
+      .toEqual({ outcome: "ok", settings_version: 2, moved_issues: 3 });
+    expect(await sprintRow(completed)).toEqual(completedBefore);
+    expect(await sprintRow(next)).toMatchObject({ status: "cancelled", version: 2, started: false, completed: false });
+    expect(await sprintRow(later)).toMatchObject({ status: "cancelled", version: 2 });
+    const versions = new Map(before.map((row) => [row.id, row.version]));
+    for (const issue of moved) {
+      const from = versions.get(issue)!;
+      const state = (await issueStates(project)).find((row) => row.id === issue)!;
+      expect(state).toMatchObject({ sprint_id: null, version: from + 1 });
+      expect((await issueEvents(issue)).at(-1)).toEqual({ event_type: "issue.updated", actor_user_id: alice.id, from_version: from, to_version: from + 1, changes: {
+        fields: ["sprintId"], after: { statusId: state.status_id, category: state.status_id === todo!.id ? "todo" : "in_progress", assigneeUserId: null,
+          storyPoints: issue === nextOpen[0] ? 5 : null, phaseId: null, sprintId: null, archived: false } } });
+      expect(await countRows(`${table("outbox_events")} WHERE aggregate_type='issue' AND aggregate_id=$1 AND aggregate_version=$2 AND event_type='issue.updated' AND processed_at IS NOT NULL`, [issue, from + 1])).toBe(1);
+    }
+    // Done and archived issues of the cancelled sprint, and every issue of the completed sprint, are untouched.
+    for (const issue of [shipped, reopened, nextDone, nextArchived])
+      expect((await issueStates(project)).find((row) => row.id === issue)).toEqual(before.find((row) => row.id === issue));
+    await expectSwitchInvariants(project, before, "kanban", moved);
+
+    // Back to Scrum: no planned sprint comes back, and the open issues are in the backlog.
+    const kanbanBefore = await issueStates(project);
+    expect(await switchMethodology(alice, project, 2, { to: "scrum", columns: (await boardColumns(project)).map((row) => keepColumn(row)) }))
+      .toEqual({ outcome: "ok", settings_version: 3, moved_issues: 0 });
+    expect(await countRows(`${table("sprints")} WHERE project_id=$1 AND status IN ('planned','active')`, [project])).toBe(0);
+    expect(await issueStates(project)).toEqual(kanbanBefore);
+    await expectSwitchInvariants(project, kanbanBefore, "scrum");
+    expect((await createSprint(alice, project, "Fresh start")).outcome).toBe("ok");
   });
   it("maps removed columns and moves every issue", async () => {
     const alice = await account("Column Mapper");

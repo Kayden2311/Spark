@@ -77,17 +77,22 @@ END $$;
 --     with fields ["statusId"], one processed outbox row); non-archived cards go to the end of the target
 --     column in their old board order. The removed statuses, and any workflow transitions naming them, are
 --     then deleted.
---   Entering Scrum: sprint_length_days = p_sprint_length (default 14, 7 to 28); issues keep their sprint_id.
---   Leaving Scrum needs no active sprint (active_sprint); sprints stay as history. p_sprint_length must be
---   NULL for another target (22023 Invalid sprint length).
+--   Entering Scrum: sprint_length_days = p_sprint_length (default 14, 7 to 28); every open issue is then in
+--   the backlog, because leaving Scrum emptied the planned sprints.
+--   Leaving Scrum needs no active sprint (active_sprint). Completed and cancelled sprints, and their issues,
+--   stay as history. Every planned sprint is cancelled (version + 1), and each of its open issues (not
+--   archived, on a status that is not in the done category before the switch) returns to the backlog
+--   (sprint_id NULL) as one change set with sprintId in the event fields; an issue that is also remapped gets
+--   a single change set with both fields. p_sprint_length must be NULL for another target (22023 Invalid
+--   sprint length).
 --   Entering Waterfall: p_start, p_target and p_phases replace the dates and the phase plan through
 --   apply_phase_plan(..., true) (22023 Invalid project dates, Invalid project phases, Invalid phase); kept
 --   phases keep their baselines, new ones get baseline = plan, baselined_at is set when still NULL. For
 --   another target the three must be NULL (Invalid project dates / Invalid project phases); the project
 --   keeps its dates, and the phases and milestones of a project leaving Waterfall stay as they are.
 --   p_reason: trimmed 1 to 200 (22023 Invalid switch reason).
--- Outcomes: ok (new settings version, moved issue count), not_found, forbidden, version_mismatch (current
--- settings version), same_methodology, active_sprint, wip_below_occupancy (a column's limit is below the
+-- Outcomes: ok (new settings version, count of issues moved to another column, to the backlog or both),
+-- not_found, forbidden, version_mismatch (current settings version), same_methodology, active_sprint, wip_below_occupancy (a column's limit is below the
 -- non-archived cards it would hold after the remap; checked before any write). Order after authority:
 -- Invalid methodology (p_to), version, same_methodology, active_sprint, input (22023), WIP. On ok the open
 -- methodology period is closed and a new one opened at the same instant with the reason, projects.methodology
@@ -102,6 +107,7 @@ DECLARE actor uuid := spark.require_session_actor(); clean_reason text := btrim(
   column_ids uuid[] := ARRAY[]::uuid[]; column_names text[] := ARRAY[]::text[]; column_categories text[] := ARRAY[]::text[];
   column_limits integer[] := ARRAY[]::integer[]; kept uuid[] := ARRAY[]::uuid[]; removed uuid[]; removed_targets integer[];
   mapping_key text; mapping_value jsonb; slot integer; moving record; new_position numeric(20,6); moved integer := 0;
+  cancelled uuid[] := ARRAY[]::uuid[];
 BEGIN
   SELECT p.tenant_id INTO target_tenant FROM spark.projects p WHERE p.id = p_project AND p.archived_at IS NULL;
   IF target_tenant IS NOT NULL THEN actor_role := spark.lock_workspace_member(target_tenant, actor); END IF;
@@ -223,6 +229,13 @@ BEGIN
   IF p_to = 'waterfall' THEN
     PERFORM spark.apply_phase_plan(project.tenant_id, project.id, p_start, p_target, p_phases, true);
   END IF;
+  -- Leaving Scrum: planned sprints are cancelled (already locked above); their open issues move below.
+  IF project.methodology = 'scrum' THEN
+    cancelled := ARRAY(SELECT s.id FROM spark.sprints s WHERE s.tenant_id = project.tenant_id AND s.project_id = project.id
+      AND s.status = 'planned' ORDER BY s.id);
+    UPDATE spark.sprints s SET status = 'cancelled', version = s.version + 1
+      WHERE s.tenant_id = project.tenant_id AND s.project_id = project.id AND s.id = ANY (cancelled);
+  END IF;
   -- Statuses that are removed or renamed first take a placeholder name longer than any column name, so a
   -- column may take a name another one gives up in this switch without tripping the unique name constraint.
   UPDATE spark.issue_statuses s SET name = 'switch:' || s.id::text
@@ -241,26 +254,35 @@ BEGIN
     END IF;
   END LOOP;
 
-  PERFORM 1 FROM spark.issues i WHERE i.tenant_id = project.tenant_id AND i.project_id = project.id AND i.status_id = ANY (removed)
-    ORDER BY i.id FOR UPDATE;
-  FOR moving IN SELECT i.id, i.version, i.archived_at IS NOT NULL AS archived, i.assignee_user_id, i.story_points, i.phase_id, i.sprint_id,
-        column_ids[r.target] AS target_status, column_categories[r.target] AS target_category
-      FROM spark.issues i JOIN unnest(removed, removed_targets) r(id, target) ON r.id = i.status_id
+  -- Issues on a removed status, and open issues of a cancelled sprint. Kept statuses that any issue references
+  -- keep their category, and removed ones still exist here, so s.category is the category before the switch.
+  PERFORM 1 FROM spark.issues i JOIN spark.issue_statuses s ON s.tenant_id = i.tenant_id AND s.id = i.status_id
+    WHERE i.tenant_id = project.tenant_id AND i.project_id = project.id
+      AND (i.status_id = ANY (removed) OR (i.sprint_id = ANY (cancelled) AND i.archived_at IS NULL AND s.category <> 'done'))
+    ORDER BY i.id FOR UPDATE OF i;
+  FOR moving IN SELECT i.id, i.version, i.archived_at IS NOT NULL AS archived, i.assignee_user_id, i.story_points, i.phase_id,
+        r.target IS NOT NULL AS remapped, coalesce(i.sprint_id = ANY (cancelled) AND i.archived_at IS NULL AND s.category <> 'done', false) AS unplanned,
+        i.sprint_id, coalesce(column_ids[r.target], i.status_id) AS target_status, coalesce(column_categories[r.target], s.category) AS target_category
+      FROM spark.issues i LEFT JOIN unnest(removed, removed_targets) r(id, target) ON r.id = i.status_id
       JOIN spark.issue_statuses s ON s.tenant_id = i.tenant_id AND s.id = i.status_id
       WHERE i.tenant_id = project.tenant_id AND i.project_id = project.id
-      ORDER BY r.target, s.position, i.position, i.id LOOP
+        AND (r.id IS NOT NULL OR (i.sprint_id = ANY (cancelled) AND i.archived_at IS NULL AND s.category <> 'done'))
+      ORDER BY r.target NULLS LAST, s.position, i.position, i.id LOOP
     new_position := NULL;
-    IF NOT moving.archived THEN
+    IF moving.remapped AND NOT moving.archived THEN
       SELECT coalesce(max(i.position) + 1024, 1024) INTO new_position FROM spark.issues i
         WHERE i.tenant_id = project.tenant_id AND i.project_id = project.id AND i.status_id = moving.target_status AND i.archived_at IS NULL;
     END IF;
-    UPDATE spark.issues i SET status_id = moving.target_status, position = coalesce(new_position, i.position), version = i.version + 1
+    UPDATE spark.issues i SET status_id = moving.target_status, position = coalesce(new_position, i.position),
+        sprint_id = CASE WHEN moving.unplanned THEN NULL ELSE i.sprint_id END, version = i.version + 1
       WHERE i.id = moving.id;
     INSERT INTO spark.issue_events (tenant_id, project_id, issue_id, actor_user_id, event_type, from_version, to_version, changes)
       VALUES (project.tenant_id, project.id, moving.id, actor, 'issue.updated', moving.version, moving.version + 1, jsonb_build_object(
-        'fields', jsonb_build_array('statusId'),
+        'fields', CASE WHEN moving.remapped AND moving.unplanned THEN jsonb_build_array('statusId', 'sprintId')
+          WHEN moving.remapped THEN jsonb_build_array('statusId') ELSE jsonb_build_array('sprintId') END,
         'after', jsonb_build_object('statusId', moving.target_status, 'category', moving.target_category, 'assigneeUserId', moving.assignee_user_id,
-          'storyPoints', moving.story_points, 'phaseId', moving.phase_id, 'sprintId', moving.sprint_id, 'archived', moving.archived)));
+          'storyPoints', moving.story_points, 'phaseId', moving.phase_id, 'sprintId', CASE WHEN moving.unplanned THEN NULL ELSE moving.sprint_id END,
+          'archived', moving.archived)));
     INSERT INTO spark.outbox_events (tenant_id, event_type, aggregate_type, aggregate_id, aggregate_version, payload, processed_at)
       VALUES (project.tenant_id, 'issue.updated', 'issue', moving.id, moving.version + 1,
         jsonb_build_object('issueId', moving.id, 'projectId', project.id, 'actorUserId', actor, 'assigneeUserId', moving.assignee_user_id), now());
