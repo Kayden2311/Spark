@@ -55,7 +55,7 @@ FE must match the landing-page concept (light calm "signal" look: `globals.css` 
 
 - `POST /api/v1/projects/{pid}/methodology` `{to, statusMapping, phases?}` with `If-Match`; owner/admin/project lead. Guided wizard in FE.
 - `ws_switch_methodology`: one transaction —
-  - leaving **Scrum**: the active sprint must be completed first (wizard offers "complete sprint now"); sprints remain as history.
+  - leaving **Scrum**: the active sprint must be completed first (wizard offers "complete sprint now"); completed sprints remain as history, planned sprints are cancelled and their open issues return to the backlog.
   - leaving **Waterfall**: phases/milestones kept read-only as history; **milestones remain usable in every methodology**.
   - entering **Scrum**: open issues go to backlog (no sprint). Entering **Waterfall**: requires phase plan; unphased issues shown in an "Unphased" bucket. Entering **Kanban**: template WIP limits proposed, editable, and validated against current occupancy.
   - statuses: existing columns are kept and mapped (user can rename/add from the target template); every issue keeps a valid status; each moved issue gets version+1 + event + outbox.
