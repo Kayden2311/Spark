@@ -241,6 +241,47 @@ async function sprintIssue(who: Account, project: string, sprint: string, input:
   if (moved.outcome !== "ok") throw new Error(`Issue not planned: ${moved.outcome}`);
   return issue;
 }
+// A Waterfall project (2026-11-02 to 2026-12-11, the five template phases with their sign-off milestones).
+async function waterfallProject(who: Account, workspace?: string, lead: string | null = null) {
+  const tenant = workspace ?? (await createWorkspace(who)).workspace_id!;
+  const key = `W${randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`;
+  const created = await createProject(who, tenant, { ...waterfallInput(key), lead });
+  if (created.outcome !== "ok") throw new Error(`Project not created: ${created.outcome}`);
+  return { workspace: tenant, project: created.project_id!, key };
+}
+type PlanResult = { outcome: string; settings_version: number | null };
+const savePhasesCall = `SELECT * FROM "${namespace}".ws_save_phases($1,$2,$3)`;
+async function savePhases(who: Account, project: string, version: number, phases: unknown) {
+  return (await asSession(who.token, savePhasesCall, [project, version, JSON.stringify(phases)])).rows[0] as PlanResult;
+}
+async function rebaseline(who: Account, project: string, version: number, reason: unknown) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_rebaseline_project")}($1,$2,$3)`, [project, version, reason])).rows[0] as PlanResult;
+}
+type MilestoneCreated = { outcome: string; milestone_id: string | null; milestone_version: number | null };
+type MilestoneResult = { outcome: string; milestone_version: number | null };
+async function createMilestone(who: Account, project: string, name: unknown, due: string | null, phase: string | null = null) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_create_milestone")}($1,$2,$3,$4)`, [project, name, due, phase])).rows[0] as MilestoneCreated;
+}
+async function updateMilestone(who: Account, milestone: string, version: number, patch: unknown) {
+  return (await asSession(who.token, `SELECT * FROM ${fn("ws_update_milestone")}($1,$2,$3)`, [milestone, version, JSON.stringify(patch)])).rows[0] as MilestoneResult;
+}
+// The phase plan in order, with baselines and versions.
+async function phasePlan(project: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id,name,position,planned_start::text AS planned_start,planned_end::text AS planned_end,baseline_start::text AS baseline_start,
+    baseline_end::text AS baseline_end,version FROM ${table("project_phases")} WHERE project_id=$1 ORDER BY position`, [project])).rows;
+}
+async function milestoneRows(project: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id,name,phase_id,due_date::text AS due_date,baseline_due_date::text AS baseline_due_date,completed_at,version
+    FROM ${table("project_milestones")} WHERE project_id=$1 ORDER BY due_date,name`, [project])).rows;
+}
+async function projectPlanState(project: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT settings_version,baselined_at FROM ${table("projects")} WHERE id=$1`, [project])).rows[0] as { settings_version: number; baselined_at: Date | null };
+}
+// A phase plan entry as ws_save_phases accepts it.
+const phaseEntry = (name: string, plannedStart: string, plannedEnd: string, id?: string) => (id ? { id, name, plannedStart, plannedEnd } : { name, plannedStart, plannedEnd });
 // Opens two runtime connections, each in a transaction bound to one session.
 async function sessionPair(accounts: [Account, Account]) {
   const clients = [0, 1].map(() => new pg.Client({ connectionString: localConnection("DATABASE_URL"), connectionTimeoutMillis: 5000 })) as [pg.Client, pg.Client];
@@ -404,7 +445,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(24);
+    expect(result.rows[0].count).toBe(25);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -997,9 +1038,9 @@ describe("Local PostgreSQL schema", () => {
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
       "staff_report_context", "staff_report_daily", "staff_report_preview", "staff_report_reasons", "staff_report_stats", "staff_report_top_communities", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
-      "staff_user_sessions", "ws_accept_invitation", "ws_complete_sprint", "ws_create_invitation", "ws_create_issue", "ws_create_project", "ws_create_sprint",
-      "ws_create_workspace", "ws_invitation_preview", "ws_list_members", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_set_member_role",
-      "ws_start_sprint", "ws_update_issue", "ws_update_project", "ws_update_sprint", "ws_update_workspace",
+      "staff_user_sessions", "ws_accept_invitation", "ws_complete_sprint", "ws_create_invitation", "ws_create_issue", "ws_create_milestone", "ws_create_project", "ws_create_sprint",
+      "ws_create_workspace", "ws_invitation_preview", "ws_list_members", "ws_rebaseline_project", "ws_remove_member", "ws_resend_invitation", "ws_revoke_invitation", "ws_save_phases", "ws_set_member_role",
+      "ws_start_sprint", "ws_update_issue", "ws_update_milestone", "ws_update_project", "ws_update_sprint", "ws_update_workspace",
     ]);
   });
   it("protects admin-tier accounts, drops revoked roles at once and guards promotions of closed communities", async () => {
@@ -3032,5 +3073,237 @@ describe("Local PostgreSQL schema", () => {
     for (const sprintId of [finished, foreign, randomUUID(), "nope", 5, issue]) await rejects({ sprintId });
     await owner.query("SET ROLE spark_owner");
     expect((await owner.query(`SELECT sprint_id,version FROM ${table("issues")} WHERE id=$1`, [issue])).rows[0]).toEqual({ sprint_id: null, version: 4 });
+  });
+  it("saves a phase plan without touching baselines", async () => {
+    const alice = await account("Plan Owner"), bob = await account("Plan Lead"), carol = await account("Plan Member"), dave = await account("Plan Stranger");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const { project } = await waterfallProject(alice, workspace, bob.id);
+    const [requirements, design, build, test, deploy] = (await phasePlan(project)).map((row) => row.id as string);
+    const baselinedAt = (await projectPlanState(project)).baselined_at;
+    // The Test phase carries its sign-off milestone; once unlinked the phase can be dropped.
+    const testSignOff = (await milestoneRows(project)).find((row) => row.name === "Test sign-off")!;
+    expect(await updateMilestone(bob, testSignOff.id, 1, { phaseId: null })).toEqual({ outcome: "ok", milestone_version: 2 });
+    // The lead (a plain member) renames and shortens one phase, inserts one, moves an end and drops Test.
+    const plan = [phaseEntry("  Discovery  ", "2026-11-02", "2026-11-06", requirements), phaseEntry("Prototype", "2026-11-07", "2026-11-09"),
+      phaseEntry("Design", "2026-11-10", "2026-11-17", design), phaseEntry("Build", "2026-11-18", "2026-12-01", build), phaseEntry("Deploy", "2026-12-05", "2026-12-11", deploy)];
+    expect(await savePhases(bob, project, 1, plan)).toEqual({ outcome: "ok", settings_version: 2 });
+    const saved = await phasePlan(project);
+    expect(saved).toEqual([
+      { id: requirements, name: "Discovery", position: 1, planned_start: "2026-11-02", planned_end: "2026-11-06", baseline_start: "2026-11-02", baseline_end: "2026-11-09", version: 2 },
+      { id: expect.any(String), name: "Prototype", position: 2, planned_start: "2026-11-07", planned_end: "2026-11-09", baseline_start: null, baseline_end: null, version: 1 },
+      { id: design, name: "Design", position: 3, planned_start: "2026-11-10", planned_end: "2026-11-17", baseline_start: "2026-11-10", baseline_end: "2026-11-17", version: 2 },
+      { id: build, name: "Build", position: 4, planned_start: "2026-11-18", planned_end: "2026-12-01", baseline_start: "2026-11-18", baseline_end: "2026-11-27", version: 2 },
+      { id: deploy, name: "Deploy", position: 5, planned_start: "2026-12-05", planned_end: "2026-12-11", baseline_start: "2026-12-05", baseline_end: "2026-12-11", version: 1 },
+    ]);
+    expect(saved.map((row) => row.id)).not.toContain(test);
+    expect(await projectPlanState(project)).toEqual({ settings_version: 2, baselined_at: baselinedAt });
+    // The same plan again changes no phase but still advances the settings version.
+    const same = saved.map((row) => phaseEntry(row.name, row.planned_start, row.planned_end, row.id));
+    expect(await savePhases(bob, project, 2, same)).toEqual({ outcome: "ok", settings_version: 3 });
+    expect(await phasePlan(project)).toEqual(saved);
+    // A phase inserted first shifts every position by one in a single save.
+    const shifted = [phaseEntry("Kickoff", "2026-11-02", "2026-11-02"), { ...same[0]!, plannedStart: "2026-11-03" }, ...same.slice(1)];
+    expect(await savePhases(alice, project, 3, shifted)).toEqual({ outcome: "ok", settings_version: 4 });
+    expect((await phasePlan(project)).map((row) => [row.name, row.position, row.version])).toEqual([
+      ["Kickoff", 1, 1], ["Discovery", 2, 3], ["Prototype", 3, 2], ["Design", 4, 3], ["Build", 5, 3], ["Deploy", 6, 2]]);
+
+    const refused = (outcome: string): PlanResult => ({ outcome, settings_version: null });
+    expect(await savePhases(carol, project, 4, shifted)).toEqual(refused("forbidden"));
+    expect(await savePhases(dave, project, 4, shifted)).toEqual(refused("not_found"));
+    // Strangers learn nothing from an invalid plan or the methodology either.
+    expect(await savePhases(dave, project, 4, "plan")).toEqual(refused("not_found"));
+    expect(await savePhases(alice, randomUUID(), 1, shifted)).toEqual(refused("not_found"));
+    expect(await savePhases(bob, project, 3, shifted)).toEqual({ outcome: "version_mismatch", settings_version: 4 });
+    const kanban = await kanbanProject(alice, workspace);
+    expect(await savePhases(dave, kanban.project, 1, waterfallPhases)).toEqual(refused("not_found"));
+    expect(await savePhases(carol, kanban.project, 1, waterfallPhases)).toEqual(refused("forbidden"));
+    await expect(savePhases(alice, kanban.project, 1, waterfallPhases)).rejects.toMatchObject({ code: "22023", message: "Invalid methodology" });
+    const archived = await waterfallProject(alice, workspace);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [archived.project]);
+    expect(await savePhases(alice, archived.project, 1, waterfallPhases)).toEqual(refused("not_found"));
+    await expect(asSession(newTokenHash(), savePhasesCall, [project, 4, JSON.stringify(shifted)])).rejects.toMatchObject({ code: "28000" });
+    expect((await projectPlanState(project)).settings_version).toBe(4);
+  });
+  it("refuses overlapping, out-of-range and referenced-delete phase plans", async () => {
+    const alice = await account("Plan Checker");
+    const { workspace, project } = await waterfallProject(alice);
+    const other = await waterfallProject(alice, workspace);
+    const before = await phasePlan(project);
+    const ids = before.map((row) => row.id as string);
+    const current = before.map((row) => phaseEntry(row.name, row.planned_start, row.planned_end, row.id));
+    const rejects = (phases: unknown, message: string) => expect(savePhases(alice, project, 1, phases)).rejects.toMatchObject({ code: "22023", message });
+    const thirteen = Array.from({ length: 13 }, (_, index) => { const day = `2026-11-${String(index + 2).padStart(2, "0")}`; return phaseEntry(`Phase ${index + 1}`, day, day); });
+    const shapes: unknown[] = [null, "plan", {}, [], thirteen, ["Build"], [{ ...phaseEntry("Build", "2026-11-02", "2026-11-09"), color: "red" }],
+      [phaseEntry("   ", "2026-11-02", "2026-11-09")], [phaseEntry("x".repeat(61), "2026-11-02", "2026-11-09")], [{ name: 5, plannedStart: "2026-11-02", plannedEnd: "2026-11-09" }],
+      [{ name: "Build", plannedStart: "2026-11-02" }], [{ name: "Build", plannedStart: 20261102, plannedEnd: "2026-11-09" }],
+      [phaseEntry("Build", "2026-02-30", "2026-11-09")], [phaseEntry("Build", "infinity", "2026-11-09")],
+      // Backwards, outside the project dates, overlapping on a shared day, out of order.
+      [phaseEntry("Build", "2026-11-09", "2026-11-02")], [phaseEntry("Build", "2026-11-01", "2026-11-09")], [phaseEntry("Build", "2026-11-02", "2026-12-12")],
+      [phaseEntry("Build", "2026-11-02", "2026-11-09"), phaseEntry("Test", "2026-11-09", "2026-11-16")],
+      [phaseEntry("Test", "2026-11-10", "2026-11-16"), phaseEntry("Build", "2026-11-02", "2026-11-09")],
+      // The rules apply to kept phases too.
+      current.map((entry, index) => (index === 1 ? { ...entry, plannedStart: "2026-11-09" } : entry))];
+    for (const phases of shapes) await rejects(phases, "Invalid project phases");
+    const otherPhase = (await phasePlan(other.project))[0]!.id as string;
+    const withId = (index: number, id: unknown) => current.map((entry, position) => (position === index ? { ...entry, id } : entry));
+    for (const id of ["nope", 5, null, otherPhase, randomUUID()]) await rejects(withId(0, id), "Invalid phase");
+    await rejects(withId(1, ids[0]), "Invalid phase");
+    // Every template phase is referenced by its sign-off milestone, so none can be dropped yet.
+    await rejects(current.slice(0, 4), "Invalid phase");
+    const signOffs = await milestoneRows(project);
+    for (const name of ["Test sign-off", "Deploy sign-off"])
+      expect(await updateMilestone(alice, signOffs.find((row) => row.name === name)!.id, 1, { phaseId: null })).toMatchObject({ outcome: "ok" });
+    // An issue in a phase, even an archived one, keeps the phase too.
+    const issue = (await createIssue(alice, project, { title: "Test plan", phase: ids[3]! })).issue_id!;
+    expect(await updateIssue(alice, issue, 1, { archived: true })).toMatchObject({ outcome: "ok" });
+    await rejects([...current.slice(0, 3), current[4]], "Invalid phase");
+    expect(await phasePlan(project)).toEqual(before);
+    expect((await projectPlanState(project)).settings_version).toBe(1);
+
+    expect(await savePhases(alice, project, 1, current.slice(0, 4))).toEqual({ outcome: "ok", settings_version: 2 });
+    expect((await phasePlan(project)).map((row) => row.name)).toEqual(["Requirements", "Design", "Build", "Test"]);
+    // Twelve phases are the maximum.
+    const twelve = [...current.slice(0, 3), phaseEntry("Test", "2026-11-28", "2026-11-30", ids[3]),
+      ...Array.from({ length: 8 }, (_, index) => phaseEntry(`Release ${index + 1}`, `2026-12-0${index + 1}`, `2026-12-0${index + 1}`))];
+    expect(await savePhases(alice, project, 2, twelve)).toEqual({ outcome: "ok", settings_version: 3 });
+    expect((await phasePlan(project)).map((row) => row.position)).toEqual(Array.from({ length: 12 }, (_, index) => index + 1));
+  });
+  it("creates, moves and completes milestones", async () => {
+    const alice = await account("Milestone Owner"), bob = await account("Milestone Lead"), carol = await account("Milestone Member"), dave = await account("Milestone Stranger");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    // Milestones work in every methodology: a Kanban project without dates.
+    const flow = await createProject(alice, workspace, { key: `M${randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`, methodology: "kanban", lead: bob.id });
+    const kanban = flow.project_id!;
+    const created = await createMilestone(bob, kanban, "  Beta launch  ", "2027-03-01");
+    expect(created).toEqual({ outcome: "ok", milestone_id: expect.any(String), milestone_version: 1 });
+    const milestone = created.milestone_id!;
+    expect(await milestoneRows(kanban)).toEqual([{ id: milestone, name: "Beta launch", phase_id: null, due_date: "2027-03-01", baseline_due_date: null, completed_at: null, version: 1 }]);
+    const refused = (outcome: string): MilestoneCreated => ({ outcome, milestone_id: null, milestone_version: null });
+    expect(await createMilestone(carol, kanban, "Member", "2027-03-01")).toEqual(refused("forbidden"));
+    expect(await createMilestone(dave, kanban, "Stranger", "2027-03-01")).toEqual(refused("not_found"));
+    expect(await createMilestone(dave, kanban, " ", null)).toEqual(refused("not_found"));
+    expect(await createMilestone(alice, randomUUID(), "Missing", "2027-03-01")).toEqual(refused("not_found"));
+    const createRejects = (args: [unknown, string | null, string | null], message: string, target = kanban) =>
+      expect(createMilestone(alice, target, ...args)).rejects.toMatchObject({ code: "22023", message });
+    for (const name of ["   ", "x".repeat(81), null]) await createRejects([name, "2027-03-01", null], "Invalid milestone");
+    for (const due of [null, "infinity"]) await createRejects(["Launch", due, null], "Invalid milestone");
+    expect(await createMilestone(alice, kanban, "x".repeat(80), "2027-03-02")).toMatchObject({ outcome: "ok", milestone_version: 1 });
+    const plan = await waterfallProject(alice, workspace);
+    const [first, second] = (await phasePlan(plan.project)).map((row) => row.id as string);
+    // A phase link must name a phase of the same project; a Waterfall due date stays inside the project dates.
+    for (const phase of [first!, randomUUID()]) await createRejects(["Launch", "2027-03-01", phase], "Invalid phase");
+    for (const due of ["2026-11-01", "2026-12-12"]) await createRejects(["Launch", due, null], "Invalid milestone", plan.project);
+    const linked = await createMilestone(alice, plan.project, "Demo", "2026-11-20", second!);
+    expect(linked).toMatchObject({ outcome: "ok", milestone_version: 1 });
+
+    expect(await updateMilestone(bob, milestone, 1, { name: "  Public beta  ", dueDate: "2027-03-15" })).toEqual({ outcome: "ok", milestone_version: 2 });
+    expect(await updateMilestone(bob, milestone, 1, { name: "Stale" })).toEqual({ outcome: "version_mismatch", milestone_version: 2 });
+    const notFound: MilestoneResult = { outcome: "not_found", milestone_version: null };
+    expect(await updateMilestone(carol, milestone, 2, { completed: true })).toEqual({ outcome: "forbidden", milestone_version: null });
+    expect(await updateMilestone(dave, milestone, 2, { completed: true })).toEqual(notFound);
+    expect(await updateMilestone(dave, milestone, 2, { bogus: 1 })).toEqual(notFound);
+    expect(await updateMilestone(alice, randomUUID(), 1, { completed: true })).toEqual(notFound);
+    expect(await updateMilestone(bob, milestone, 2, { completed: true })).toEqual({ outcome: "ok", milestone_version: 3 });
+    const completedAt = (await milestoneRows(kanban)).find((row) => row.id === milestone)!.completed_at;
+    expect(completedAt).toBeInstanceOf(Date);
+    // Completing again keeps the first completion and writes nothing.
+    expect(await updateMilestone(bob, milestone, 3, { completed: true, name: "Public beta" })).toEqual({ outcome: "ok", milestone_version: 3 });
+    expect((await milestoneRows(kanban)).find((row) => row.id === milestone)!.completed_at).toEqual(completedAt);
+    expect(await updateMilestone(bob, milestone, 3, { completed: false })).toEqual({ outcome: "ok", milestone_version: 4 });
+    expect((await milestoneRows(kanban)).find((row) => row.id === milestone)).toEqual({ id: milestone, name: "Public beta", phase_id: null, due_date: "2027-03-15",
+      baseline_due_date: null, completed_at: null, version: 4 });
+    const updateRejects = (patch: unknown, message: string, target = milestone, version = 4) =>
+      expect(updateMilestone(alice, target, version, patch)).rejects.toMatchObject({ code: "22023", message });
+    for (const patch of [{}, ["name"], "name", { due: "2027-03-01" }, { name: " " }, { name: "x".repeat(81) }, { name: null }, { dueDate: null },
+      { dueDate: "2027-02-30" }, { dueDate: 20270301 }, { dueDate: "infinity" }, { completed: "yes" }, { completed: null }]) await updateRejects(patch, "Invalid milestone");
+    for (const phaseId of [first, randomUUID(), "nope", 5]) await updateRejects({ phaseId }, "Invalid phase");
+
+    const demo = linked.milestone_id!;
+    expect(await updateMilestone(alice, demo, 1, { phaseId: first, dueDate: "2026-11-09" })).toEqual({ outcome: "ok", milestone_version: 2 });
+    for (const dueDate of ["2026-11-01", "2026-12-12"]) await updateRejects({ dueDate }, "Invalid milestone", demo, 2);
+    const otherPlan = await waterfallProject(alice, workspace);
+    await updateRejects({ phaseId: (await phasePlan(otherPlan.project))[0]!.id }, "Invalid phase", demo, 2);
+    expect(await updateMilestone(alice, demo, 2, { phaseId: null })).toEqual({ outcome: "ok", milestone_version: 3 });
+    expect((await milestoneRows(plan.project)).find((row) => row.id === demo)).toMatchObject({ phase_id: null, due_date: "2026-11-09", baseline_due_date: null, version: 3 });
+    await expect(asSession(newTokenHash(), `SELECT * FROM ${fn("ws_create_milestone")}($1,$2,$3,$4)`, [kanban, "No session", "2027-01-01", null])).rejects.toMatchObject({ code: "28000" });
+  });
+  it("keeps baselines immutable", async () => {
+    const alice = await account("Baseline Keeper");
+    const { workspace, project } = await waterfallProject(alice);
+    const dayBefore = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const before = await phasePlan(project), milestonesBefore = await milestoneRows(project);
+    expect(await savePhases(alice, project, 1, before.map((row) => phaseEntry(row.name, row.planned_start, dayBefore(row.planned_end), row.id))))
+      .toEqual({ outcome: "ok", settings_version: 2 });
+    const after = await phasePlan(project);
+    expect(after.map((row) => row.planned_end)).toEqual(before.map((row) => dayBefore(row.planned_end)));
+    expect(after.map((row) => [row.baseline_start, row.baseline_end])).toEqual(before.map((row) => [row.baseline_start, row.baseline_end]));
+    for (const row of milestonesBefore) expect(await updateMilestone(alice, row.id, 1, { dueDate: "2026-11-20", completed: true })).toEqual({ outcome: "ok", milestone_version: 2 });
+    const baselineOf = (rows: { id: string; baseline_due_date: string | null }[]) => Object.fromEntries(rows.map((row) => [row.id, row.baseline_due_date]));
+    const milestonesAfter = await milestoneRows(project);
+    expect(milestonesAfter.map((row) => row.due_date)).toEqual(milestonesBefore.map(() => "2026-11-20"));
+    expect(baselineOf(milestonesAfter)).toEqual(baselineOf(milestonesBefore));
+    // The runtime role cannot write baselines directly, and the internal helpers are not callable.
+    await expect(asSession(alice.token, `UPDATE ${table("project_phases")} SET baseline_end=planned_end,version=version+1 WHERE project_id=$1`, [project])).rejects.toMatchObject({ code: "42501" });
+    await expect(asSession(alice.token, `UPDATE ${table("project_milestones")} SET baseline_due_date=due_date,version=version+1 WHERE project_id=$1`, [project])).rejects.toMatchObject({ code: "42501" });
+    await expect(asSession(alice.token, `SELECT ${fn("apply_phase_plan")}($1,$2,'2026-11-02','2026-12-11',$3,true)`, [workspace, project, JSON.stringify(waterfallPhases)]))
+      .rejects.toMatchObject({ code: "42501" });
+    await expect(asSession(alice.token, `SELECT ${fn("check_milestone_due")}('2026-11-20','2026-11-02','2026-12-11')`)).rejects.toMatchObject({ code: "42501" });
+    expect(await phasePlan(project)).toEqual(after);
+  });
+  it("rebaselines with a reason and an audit row", async () => {
+    const alice = await account("Rebaseline Owner"), bob = await account("Rebaseline Lead"), carol = await account("Rebaseline Member"), dave = await account("Rebaseline Stranger");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const { project } = await waterfallProject(alice, workspace, bob.id);
+    const before = await phasePlan(project);
+    const ids = before.map((row) => row.id as string);
+    // Build ends later, Test and Deploy move, and Hypercare is new (no baseline yet).
+    const plan = [...before.slice(0, 2).map((row) => phaseEntry(row.name, row.planned_start, row.planned_end, row.id)), phaseEntry("Build", "2026-11-18", "2026-11-30", ids[2]),
+      phaseEntry("Test", "2026-12-01", "2026-12-04", ids[3]), phaseEntry("Deploy", "2026-12-05", "2026-12-08", ids[4]), phaseEntry("Hypercare", "2026-12-09", "2026-12-11")];
+    expect(await savePhases(bob, project, 1, plan)).toEqual({ outcome: "ok", settings_version: 2 });
+    expect((await createMilestone(bob, project, "Go live", "2026-12-08")).outcome).toBe("ok");
+    const buildSignOff = (await milestoneRows(project)).find((row) => row.name === "Build sign-off")!;
+    expect(await updateMilestone(bob, buildSignOff.id, 1, { dueDate: "2026-11-30" })).toEqual({ outcome: "ok", milestone_version: 2 });
+    const baselinedAt = (await projectPlanState(project)).baselined_at!;
+
+    const refused = (outcome: string): PlanResult => ({ outcome, settings_version: null });
+    expect(await rebaseline(carol, project, 2, "Member")).toEqual(refused("forbidden"));
+    expect(await rebaseline(dave, project, 2, "Stranger")).toEqual(refused("not_found"));
+    expect(await rebaseline(dave, project, 2, " ")).toEqual(refused("not_found"));
+    expect(await rebaseline(alice, randomUUID(), 1, "Missing")).toEqual(refused("not_found"));
+    for (const reason of ["   ", "x".repeat(201), null])
+      await expect(rebaseline(bob, project, 2, reason)).rejects.toMatchObject({ code: "22023", message: "Invalid baseline reason" });
+    expect(await rebaseline(bob, project, 1, "Stale")).toEqual({ outcome: "version_mismatch", settings_version: 2 });
+    const kanban = await kanbanProject(alice, workspace);
+    expect(await rebaseline(dave, kanban.project, 1, "Kanban")).toEqual(refused("not_found"));
+    await expect(rebaseline(alice, kanban.project, 1, "Kanban")).rejects.toMatchObject({ code: "22023", message: "Invalid methodology" });
+    expect((await auditRows(project)).map((row) => row.action)).toEqual(["project.created"]);
+
+    expect(await rebaseline(bob, project, 2, "  Scope grew after review  ")).toEqual({ outcome: "ok", settings_version: 3 });
+    // Every baseline equals the plan; only rows whose baseline changed advanced their version.
+    expect((await phasePlan(project)).map((row) => [row.name, row.planned_start, row.planned_end, row.baseline_start, row.baseline_end, row.version])).toEqual([
+      ["Requirements", "2026-11-02", "2026-11-09", "2026-11-02", "2026-11-09", 1],
+      ["Design", "2026-11-10", "2026-11-17", "2026-11-10", "2026-11-17", 1],
+      ["Build", "2026-11-18", "2026-11-30", "2026-11-18", "2026-11-30", 3],
+      ["Test", "2026-12-01", "2026-12-04", "2026-12-01", "2026-12-04", 3],
+      ["Deploy", "2026-12-05", "2026-12-08", "2026-12-05", "2026-12-08", 3],
+      ["Hypercare", "2026-12-09", "2026-12-11", "2026-12-09", "2026-12-11", 2],
+    ]);
+    expect((await milestoneRows(project)).map((row) => [row.name, row.due_date, row.baseline_due_date, row.version])).toEqual([
+      ["Requirements sign-off", "2026-11-09", "2026-11-09", 1], ["Design sign-off", "2026-11-17", "2026-11-17", 1], ["Build sign-off", "2026-11-30", "2026-11-30", 3],
+      ["Test sign-off", "2026-12-04", "2026-12-04", 1], ["Go live", "2026-12-08", "2026-12-08", 2], ["Deploy sign-off", "2026-12-11", "2026-12-11", 1],
+    ]);
+    const state = await projectPlanState(project);
+    expect(state.settings_version).toBe(3);
+    expect(state.baselined_at!.getTime()).toBeGreaterThan(baselinedAt.getTime());
+    expect((await auditRows(project)).slice(1)).toEqual([{ action: "project.rebaselined", actor_user_id: bob.id, resource_type: "project", metadata: { reason: "Scope grew after review" } }]);
+    expect(await rebaseline(alice, project, 3, "x".repeat(200))).toEqual({ outcome: "ok", settings_version: 4 });
+    await expect(asSession(newTokenHash(), `SELECT * FROM ${fn("ws_rebaseline_project")}($1,$2,$3)`, [project, 4, "No session"])).rejects.toMatchObject({ code: "28000" });
   });
 });

@@ -169,6 +169,13 @@
       "when": 1792370000000,
       "tag": "0023_sprint_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792380000000,
+      "tag": "0024_phase_milestone_writes",
+      "breakpoints": true
     }
   ]
 }
