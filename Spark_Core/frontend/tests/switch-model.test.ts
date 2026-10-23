@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSwitchRequest, columnOccupancy, proposeColumns, reconcileColumns, type ColumnPlan } from "../src/app/w/_lib/switch";
+import { buildSwitchRequest, columnOccupancy, plannedSprintNote, proposeColumns, reconcileColumns, type ColumnPlan } from "../src/app/w/_lib/switch";
 import { CATALOG } from "./methodology-catalog";
 import { KANBAN, SCRUM } from "./project-fixtures";
 
@@ -73,5 +73,23 @@ describe("buildSwitchRequest", () => {
     const body = buildSwitchRequest("waterfall", plan, planning, "Launch");
     expect(body).not.toHaveProperty("sprintLengthDays");
     expect(body).toMatchObject({ startDate: "2026-11-02", targetDate: "2026-11-11", phases: [{ id: "ph1", name: "Build", plannedStart: "2026-11-02", plannedEnd: "2026-11-11" }] });
+  });
+});
+
+describe("plannedSprintNote", () => {
+  const statuses = SCRUM.statuses;
+  const card = (statusId: string, sprintId: string | null) => ({ statusId, sprintId });
+  const sprints = [{ id: "a", status: "planned" }, { id: "b", status: "planned" }, { id: "c", status: "completed" }];
+
+  it("counts the planned sprints and their open cards", () => {
+    const cards = [card("t2", "a"), card("t5", "a"), card("t3", "b"), card("t2", "c"), card("t1", null)];
+    expect(plannedSprintNote(sprints, cards, statuses)).toBe("2 planned sprints are cancelled and 2 open cards return to the backlog.");
+    expect(plannedSprintNote(sprints.slice(0, 1), [card("t2", "a")], statuses)).toBe("1 planned sprint is cancelled and 1 open card returns to the backlog.");
+  });
+
+  it("stays general while sprints or cards are unknown, and says nothing without planned sprints", () => {
+    expect(plannedSprintNote(null, [], statuses)).toBe("Planned sprints are cancelled and their open cards return to the backlog.");
+    expect(plannedSprintNote(sprints, null, statuses)).toBe("2 planned sprints are cancelled and their open cards return to the backlog.");
+    expect(plannedSprintNote(sprints.slice(2), [card("t2", "c")], statuses)).toBeNull();
   });
 });

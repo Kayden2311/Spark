@@ -8,6 +8,7 @@ import { Modal } from "../../../_components/modal";
 import { PhaseRowsEditor } from "../../../_components/phase-rows-editor";
 import { ApiError, messageOf } from "../../../_lib/api";
 import { METHODOLOGY_ACCENTS, useMethodologies, type MethodologyId, type MethodologyTemplate, type StatusCategory } from "../../../_lib/methodologies";
+import type { IssueCard } from "../../../_lib/issues";
 import { appendedDates, PHASES_MAX, PHASES_RULE, phasesValid, respreadPhases } from "../../../_lib/phases";
 import {
   cardCountLabel,
@@ -28,8 +29,9 @@ import {
   type SwitchResult,
 } from "../../../_lib/planning";
 import { methodologyName, methodologyOf, type ProjectDetail, type ProjectStatus } from "../../../_lib/projects";
-import { buildSwitchRequest, columnOccupancy, keptIds as keptIdsOf, proposeColumns, reconcileColumns, type ColumnPlan, type TargetColumn } from "../../../_lib/switch";
+import { buildSwitchRequest, columnOccupancy, keptIds as keptIdsOf, plannedSprintNote, proposeColumns, reconcileColumns, type ColumnPlan, type TargetColumn } from "../../../_lib/switch";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
+import { PHASE_IN_USE } from "./phase-plan-dialog";
 import { TEAMMATE_UPDATE } from "./settings-form";
 
 const STEPS = ["Choose a methodology", "Map columns", "Plan", "Confirm"] as const;
@@ -38,6 +40,9 @@ const SPRINT_WEEKS = [1, 2, 3, 4] as const;
 const DATES_REVERSED = "The target date can't be before the start date.";
 const REASON_REQUIRED = "Say why the project is switching.";
 const HEADING_ID = "switch-step-title";
+
+/** A 400 from the API for one whitelisted input error. */
+const inputError = (error: unknown, message: string) => error instanceof ApiError && error.status === 400 && error.message === message;
 
 interface WizardPhase {
   key: number;
@@ -71,11 +76,13 @@ function initialPhases(project: ProjectDetail, template: MethodologyTemplate | u
  * loaded board and the proposed WIP limits checked against them), resolve planning (sprint length, an active
  * sprint, Waterfall dates and phases) and confirm with a reason. One POST does the whole switch.
  */
-export function SwitchWizard({ project, etag, counts, backlogHref, onClose, onSwitched, onStale, onWipRefused }: {
+export function SwitchWizard({ project, etag, counts, cards, backlogHref, onClose, onSwitched, onStale, onWipRefused }: {
   project: ProjectDetail;
   etag: string;
   /** Cards per current column, or null while the board loads (the server still checks WIP limits). */
   counts: ReadonlyMap<string, number> | null;
+  /** The loaded board's cards (for the planned sprints a switch away from Scrum empties), or null while it loads. */
+  cards: ReadonlyArray<IssueCard> | null;
   backlogHref: string;
   onClose(): void;
   onSwitched(result: SwitchResult): void;
@@ -124,6 +131,7 @@ export function SwitchWizard({ project, etag, counts, backlogHref, onClose, onSw
   const activeSprint = from === "scrum" ? sprints.data?.items.find((sprint) => sprint.status === "active") ?? null : null;
   const sprintsChecking = from === "scrum" && !sprints.data && !sprints.error;
   const sprintBlocked = from === "scrum" && (Boolean(activeSprint) || sprintBlockedByServer);
+  const sprintNote = from === "scrum" ? plannedSprintNote(sprints.data?.items ?? null, cards, statuses) : null;
   const phaseRows = phases?.rows ?? [];
   const targetName = target ? methodologyName(target) : "";
 
@@ -230,6 +238,10 @@ export function SwitchWizard({ project, etag, counts, backlogHref, onClose, onSw
         onWipRefused();
         setBoardError(messageOf(error));
         goTo(1);
+      } else if (target === "waterfall" && (inputError(error, "Invalid phase.") || inputError(error, "Invalid project phases."))) {
+        // A removed phase still has tasks or milestones, or the plan breaks the phase rules: fix it on the Plan step.
+        setPhasesError(inputError(error, "Invalid phase.") ? PHASE_IN_USE : PHASES_RULE);
+        goTo(2);
       } else {
         setSubmitError(messageOf(error));
       }
@@ -301,6 +313,7 @@ export function SwitchWizard({ project, etag, counts, backlogHref, onClose, onSw
         plan={plan}
         reason={reason}
         reasonError={reasonError}
+        sprintNote={sprintNote}
         statuses={statuses}
         targetName={targetName}
       />
@@ -345,7 +358,10 @@ function PickStep({ heading, projectName, from, target, catalog, error, onPick }
   return (
     <>
       <h3 data-autofocus id={HEADING_ID} ref={heading} tabIndex={-1}>Which way of working should {projectName} use?</h3>
-      <p className="wsWizardLead">You&apos;re on {methodologyName(from)}. Work, sprints and phases stay as history; only the board and planning change.</p>
+      <p className="wsWizardLead">
+        You&apos;re on {methodologyName(from)}. Work, completed sprints and phases stay as history; only the board and planning change.
+        {from === "scrum" && " Planned sprints are cancelled and their open cards return to the backlog."}
+      </p>
       {catalog.error && !catalog.data && (
         <p className="wsAlert wsInlineAlert" role="alert">{catalog.error} <button className="textButton" onClick={catalog.reload} type="button">Try again</button></p>
       )}
@@ -565,7 +581,7 @@ function PlanningStep({ heading, target, blocked, checking, activeSprint, backlo
       <div className="wsAlert wsWizardBlocked" role="alert">
         <p>
           <strong>{activeSprint ? `${activeSprint.name} is still active.` : "A sprint is still active."}</strong>{" "}
-          Complete it before switching, so its unfinished work lands in the backlog or the next sprint. Sprints stay as history.
+          Complete it before switching, so its unfinished work lands in the backlog. Completed sprints stay as history.
         </p>
         <Link className="sparkPrimary" href={backlogHref}>Complete sprint now</Link>
       </div>
@@ -631,7 +647,7 @@ function PlanningStep({ heading, target, blocked, checking, activeSprint, backlo
   );
 }
 
-function ConfirmStep({ heading, statuses, plan, kept, counts, from, targetName, reason, reasonError, error, onReason }: {
+function ConfirmStep({ heading, statuses, plan, kept, counts, from, targetName, sprintNote, reason, reasonError, error, onReason }: {
   heading: Heading;
   statuses: ProjectStatus[];
   plan: ColumnPlan;
@@ -639,6 +655,8 @@ function ConfirmStep({ heading, statuses, plan, kept, counts, from, targetName, 
   counts: ReadonlyMap<string, number> | null;
   from: MethodologyId;
   targetName: string;
+  /** Leaving Scrum: the planned sprints that are cancelled and the open cards that return to the backlog. */
+  sprintNote: string | null;
   reason: string;
   reasonError: string | null;
   error: string | null;
@@ -656,6 +674,7 @@ function ConfirmStep({ heading, statuses, plan, kept, counts, from, targetName, 
     <>
       <h3 id={HEADING_ID} ref={heading} tabIndex={-1}>Confirm the switch</h3>
       <p className="wsWizardSummary">{summary}</p>
+      {sprintNote && <p className="wsWizardSummary">{sprintNote}</p>}
       <p className="wsProjectMuted">New board: {plan.columns.map((column) => column.name.trim()).join(" · ")}</p>
       <div className="wsField">
         <label htmlFor="switch-reason">Reason for the switch</label>

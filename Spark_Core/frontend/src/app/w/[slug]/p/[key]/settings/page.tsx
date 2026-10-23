@@ -46,7 +46,8 @@ export default function ProjectSettingsPage() {
   const [switching, setSwitching] = useState(false);
 
   // Occupancy per column from the loaded board (non-archived cards, the API's WIP definition).
-  const counts = board.data && board.dataPath === boardPath(project.id) ? new Map(board.data.statuses.map((status) => [status.id, status.count])) : null;
+  const boardData = board.data && board.dataPath === boardPath(project.id) ? board.data : null;
+  const counts = boardData ? new Map(boardData.statuses.map((status) => [status.id, status.count])) : null;
   const statuses = [...project.statuses].sort((a, b) => a.position - b.position);
   const boardUrl = `/w/${workspace.slug}/p/${encodeURIComponent(project.key)}`;
   const periods = plan.data ? [...(plan.data.periods ?? [])].reverse() : null;
@@ -132,6 +133,7 @@ export default function ProjectSettingsPage() {
       {planner && switching && (
         <SwitchWizard
           backlogHref={`${boardUrl}/backlog`}
+          cards={boardData && !boardData.truncated ? boardData.issues : null}
           counts={counts}
           etag={etag}
           onClose={() => setSwitching(false)}

@@ -317,6 +317,39 @@ describe("methodology switch wizard", () => {
     expect(within(dialog).getByRole("button", { name: "Next" })).toBeDisabled();
   });
 
+  it("says that leaving Scrum cancels planned sprints and returns their open cards to the backlog", async () => {
+    const card = (id: string, statusId: string, sprintId: string) => ({ id, number: 1, key: "ATLAS-1", title: id, type: "task", priority: "medium", statusId, assignee: null,
+      storyPoints: null, dueDate: null, phaseId: null, sprintId, version: 1, completedAt: null, createdAt: "2026-10-19T09:00:00.000Z" });
+    mockApi(SCRUM, {
+      "GET /api/v1/projects/p-atlas/board": json({ ...SCRUM_BOARD, statuses: SCRUM_BOARD.statuses.map((status) => ({ ...status, count: 1 })),
+        // Two open cards and a done one in the planned sprint; an open card still pointing at a completed sprint is history.
+        issues: [card("a", "t2", "s-planned"), card("b", "t3", "s-planned"), card("c", "t5", "s-planned"), card("d", "t2", "s-completed")] }),
+      "GET /api/v1/projects/p-atlas/sprints": json({ items: [sprint("planned"), sprint("completed")] }),
+    });
+    const dialog = await openWizard("ATLAS");
+    await pick(dialog, "Kanban");
+    await next(dialog);
+    await next(dialog);
+    expect(currentStep(dialog)).toMatch(/Confirm/u);
+    expect(within(dialog).getByText("1 planned sprint is cancelled and 2 open cards return to the backlog.")).toBeInTheDocument();
+  });
+
+  it("goes back to the plan step with the phase error when a removed phase is still in use", async () => {
+    mockApi(KANBAN, { "POST /api/v1/projects/p-ops/methodology": problem(400, "invalid_input", "Invalid phase.") });
+    const dialog = await openWizard("OPS");
+    await pick(dialog, "Waterfall");
+    await userEvent.selectOptions(within(currentColumn(dialog, "Backlog")).getByLabelText("Move cards from Backlog"), "Not started");
+    await next(dialog);
+    fireEvent.change(within(dialog).getByLabelText("Start date"), { target: { value: "2026-11-02" } });
+    fireEvent.change(within(dialog).getByLabelText("Target date"), { target: { value: "2026-11-11" } });
+    await next(dialog);
+    await userEvent.type(within(dialog).getByLabelText("Reason for the switch"), "Fixed-scope client launch");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch to Waterfall" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("A phase you removed still has tasks or milestones. Move them to another phase first, or keep the phase.");
+    expect(currentStep(dialog)).toMatch(/Plan/u);
+    expect(within(dialog).queryByText("Invalid phase.")).not.toBeInTheDocument();
+  });
+
   it("returns to the column mapping and reloads the counts when the server refuses a WIP limit", async () => {
     mockApi(KANBAN, { "POST /api/v1/projects/p-ops/methodology": problem(409, "wip_below_occupancy", "A column's WIP limit is below the cards it would hold.") });
     const dialog = await openWizard("OPS");

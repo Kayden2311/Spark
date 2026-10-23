@@ -1,7 +1,8 @@
 /** The methodology switch wizard's model: the proposed columns, their occupancy and the POST body. Pure, so it is unit-tested. */
 
 import type { MethodologyId, StatusCategory, StatusTemplate } from "./methodologies";
-import { parseWipLimit, type PhasePlanEntry, type SwitchColumn, type SwitchRequest } from "./planning";
+import type { IssueCard } from "./issues";
+import { parseWipLimit, type PhasePlanEntry, type Sprint, type SwitchColumn, type SwitchRequest } from "./planning";
 import type { ProjectStatus } from "./projects";
 
 /** A column of the board after the switch; `sourceId` keeps that current column (and its cards). */
@@ -117,4 +118,24 @@ export function buildSwitchRequest(to: MethodologyId, plan: ColumnPlan, planning
     body.phases = planning.phases.map((row): PhasePlanEntry => ({ ...(row.id ? { id: row.id } : {}), name: row.name.trim(), plannedStart: row.plannedStart, plannedEnd: row.plannedEnd }));
   }
   return body;
+}
+
+/**
+ * What leaving Scrum does to the plan: every planned sprint is cancelled and its open (not done, not archived)
+ * cards return to the backlog. Sprints null while they load; cards null while the board loads (the board holds
+ * non-archived cards only). Returns null when nothing is planned.
+ */
+export function plannedSprintNote(
+  sprints: ReadonlyArray<Pick<Sprint, "id" | "status">> | null,
+  cards: ReadonlyArray<Pick<IssueCard, "sprintId" | "statusId">> | null,
+  statuses: ReadonlyArray<Pick<ProjectStatus, "id" | "category">>,
+): string | null {
+  if (!sprints) return "Planned sprints are cancelled and their open cards return to the backlog.";
+  const planned = new Set(sprints.filter((sprint) => sprint.status === "planned").map((sprint) => sprint.id));
+  if (planned.size === 0) return null;
+  const sprintsPart = `${planned.size} planned ${planned.size === 1 ? "sprint is" : "sprints are"} cancelled`;
+  if (!cards) return `${sprintsPart} and their open cards return to the backlog.`;
+  const done = new Set(statuses.filter((status) => status.category === "done").map((status) => status.id));
+  const open = cards.filter((card) => card.sprintId !== null && planned.has(card.sprintId) && !done.has(card.statusId)).length;
+  return `${sprintsPart} and ${open} open ${open === 1 ? "card returns" : "cards return"} to the backlog.`;
 }
