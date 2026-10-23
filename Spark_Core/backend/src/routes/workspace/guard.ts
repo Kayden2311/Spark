@@ -37,6 +37,17 @@ const KNOWN_INPUT_ERRORS: ReadonlySet<string> = new Set([
   "Invalid issue position",
   "Invalid issue patch",
   "Invalid idempotency key",
+  "Invalid sprint name",
+  "Invalid sprint goal",
+  "Invalid sprint dates",
+  "Invalid sprint",
+  "Invalid phase",
+  "Invalid milestone",
+  "Invalid baseline reason",
+  "Invalid status name",
+  "Invalid WIP limit",
+  "Invalid status mapping",
+  "Invalid switch reason",
 ]);
 
 // Raised by the issue trigger when a concurrent writer filled the column first: the race fallback for
