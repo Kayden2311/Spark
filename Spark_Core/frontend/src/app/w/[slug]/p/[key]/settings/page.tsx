@@ -122,7 +122,7 @@ export default function ProjectSettingsPage() {
         </header>
         {periods
           ? <ol aria-label="Methodology history" className="wsSettingsPeriods">
-              {periods.map((period) => <li data-current={period.endedAt === null || undefined} key={period.startedAt}>{periodLabel(period)}</li>)}
+              {periods.map((period) => <li data-current={period.endedAt === null || undefined} key={`${period.startedAt}-${period.methodology}`}>{periodLabel(period)}</li>)}
             </ol>
           : plan.error && !plan.loading
             ? <p className="wsAlert wsInlineAlert" role="alert">The history couldn&apos;t load. {plan.error} <button className="textButton" onClick={plan.reload} type="button">Try again</button></p>

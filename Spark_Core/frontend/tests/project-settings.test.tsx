@@ -275,6 +275,55 @@ describe("project settings tab", () => {
     });
   });
 
+  describe("General after a change from outside the form", () => {
+    const renamed = { ...KANBAN, name: "Ops desk (renamed)", version: 4, statuses: KANBAN.statuses.map((status) => (status.id === "s4" ? { ...status, wipLimit: 6 } : status)) };
+    /** A column save answered with 412: the page now holds the teammate's renamed project. */
+    async function columnConflict() {
+      const row = await screen.findByRole("group", { name: "Column Review" });
+      await userEvent.clear(within(row).getByLabelText("WIP limit"));
+      await userEvent.type(within(row).getByLabelText("WIP limit"), "7");
+      await userEvent.click(within(row).getByRole("button", { name: "Save Review" }));
+      await within(row).findByText("Updated by a teammate — review the latest values and save again.");
+    }
+    const staleColumn = { "PATCH /api/v1/projects/p-ops/statuses/s4": problem(412, "version_mismatch", "The resource changed since you loaded it.", { current: renamed }) };
+
+    it("shows the teammate's values in untouched fields, so saving doesn't overwrite them", async () => {
+      mockApi(KANBAN, { extra: { ...staleColumn, "PATCH /api/v1/projects/p-ops": json({ ...renamed, version: 5 }, 200, "\"v5\"") } });
+      renderSettings();
+      const general = await screen.findByRole("region", { name: "General" });
+      await columnConflict();
+      expect(within(general).getByLabelText("Project name")).toHaveValue("Ops desk (renamed)");
+      await userEvent.click(within(general).getByRole("button", { name: "Save changes" }));
+      expect(await within(general).findByText("Nothing to save — no field changed.")).toBeInTheDocument();
+      expect(writes().filter((call) => call.key === "PATCH /api/v1/projects/p-ops")).toEqual([]);
+    });
+
+    it("keeps the user's own edits and sends only them with the fresh version", async () => {
+      mockApi(KANBAN, { extra: { ...staleColumn, "PATCH /api/v1/projects/p-ops": json({ ...renamed, description: "Support and IT.", version: 5 }, 200, "\"v5\"") } });
+      renderSettings();
+      const general = await screen.findByRole("region", { name: "General" });
+      await userEvent.clear(within(general).getByLabelText("Description"));
+      await userEvent.type(within(general).getByLabelText("Description"), "Support and IT.");
+      await columnConflict();
+      expect(within(general).getByLabelText("Description")).toHaveValue("Support and IT.");
+      expect(within(general).queryByText("Updated by a teammate — review the latest values and save again.")).not.toBeInTheDocument();
+      await userEvent.click(within(general).getByRole("button", { name: "Save changes" }));
+      await waitFor(() => expect(writes().filter((call) => call.key === "PATCH /api/v1/projects/p-ops")).toHaveLength(1));
+      expect(writes().find((call) => call.key === "PATCH /api/v1/projects/p-ops")).toEqual({ key: "PATCH /api/v1/projects/p-ops", body: { description: "Support and IT." }, ifMatch: "\"v4\"" });
+    });
+
+    it("warns when the user's edit collides with the teammate's change", async () => {
+      mockApi(KANBAN, { extra: staleColumn });
+      renderSettings();
+      const general = await screen.findByRole("region", { name: "General" });
+      await userEvent.clear(within(general).getByLabelText("Project name"));
+      await userEvent.type(within(general).getByLabelText("Project name"), "Ops helpdesk");
+      await columnConflict();
+      expect(within(general).getByText("Updated by a teammate — review the latest values and save again.")).toBeInTheDocument();
+      expect(within(general).getByLabelText("Project name")).toHaveValue("Ops helpdesk");
+    });
+  });
+
   describe("authority", () => {
     it("hides the Settings tab from a member who does not lead the project", async () => {
       auth.user = MEMBER;

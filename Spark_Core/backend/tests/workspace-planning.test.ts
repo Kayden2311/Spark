@@ -454,6 +454,7 @@ describe("planning routes", () => {
       const { response, calls } = await call({ method: "GET", url: planUrl }, planHandlers);
       expect(response.statusCode).toBe(200);
       expect(response.headers.etag).toBe('"v4"');
+      expect(response.headers["cache-control"]).toBe("private, no-store");
       expect(response.json()).toEqual({
         phases: [{
           id: phaseId,

@@ -52,9 +52,27 @@ function changes(values: FormValues, base: ProjectDetail): Record<string, unknow
 }
 
 /**
+ * The fields after the project changed from outside the form (another Settings write, or a teammate's copy from
+ * a 412): untouched fields take the new values; `clash` when a field the user edited also changed.
+ */
+function reconcileValues(values: FormValues, seed: ProjectDetail, next: ProjectDetail): { values: FormValues; clash: boolean } {
+  const before = valuesOf(seed);
+  const after = valuesOf(next);
+  const merged = { ...values };
+  let clash = false;
+  for (const field of Object.keys(before) as Array<keyof FormValues>) {
+    if (values[field] === before[field]) (merged as Record<keyof FormValues, unknown>)[field] = after[field];
+    else if (after[field] !== before[field]) clash = true;
+  }
+  return { values: merged, clash };
+}
+
+/**
  * The Settings tab's General section (the M2 project settings): edits with optimistic concurrency. The save
  * carries If-Match with the project's current ETag; a 412 hands the teammate's newer project to `onStale` and
- * shows its values so the next save is deliberate. `project` is always the latest copy the page holds.
+ * shows its values so the next save is deliberate. `project` is always the latest copy the page holds; when it
+ * changes from outside the form, untouched fields follow it, so a save never sends stale values with a fresh
+ * If-Match, and an edit that collides with the change shows the teammate message.
  */
 export function ProjectSettingsForm({ project: base, etag, workspace, onSaved, onStale }: {
   project: ProjectDetail;
@@ -65,6 +83,8 @@ export function ProjectSettingsForm({ project: base, etag, workspace, onSaved, o
 }) {
   const members = useWorkspaceData<{ items: WorkspaceMember[] }>(`/workspaces/${workspace.id}/members`);
   const [values, setValues] = useState<FormValues>(() => valuesOf(base));
+  // The project `values` were last brought in line with.
+  const [seed, setSeed] = useState(base);
   const [unchanged, setUnchanged] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const [leadError, setLeadError] = useState<string | null>(null);
@@ -72,6 +92,13 @@ export function ProjectSettingsForm({ project: base, etag, workspace, onSaved, o
   const [formError, setFormError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  if (seed !== base) {
+    const reconciled = reconcileValues(values, seed, base);
+    setSeed(base);
+    setValues(reconciled.values);
+    if (reconciled.clash) setConflict(true);
+  }
 
   const waterfall = base.methodology === "waterfall";
   const scrum = base.methodology === "scrum";
@@ -112,12 +139,14 @@ export function ProjectSettingsForm({ project: base, etag, workspace, onSaved, o
       setSaving(false);
       setConflict(false);
       setValues(valuesOf(data));
+      setSeed(data);
       onSaved(data, next ?? projectEtag(data.version));
     } catch (error) {
       setSaving(false);
       const current = error instanceof ApiError && error.status === 412 ? (error.body as { current?: ProjectDetail } | null)?.current : undefined;
       if (current) {
         setValues(valuesOf(current));
+        setSeed(current);
         setNameError(null);
         setLeadError(null);
         setDatesError(null);

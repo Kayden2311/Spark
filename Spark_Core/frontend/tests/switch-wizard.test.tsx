@@ -187,7 +187,7 @@ describe("methodology switch wizard", () => {
     await userEvent.selectOptions(within(dialog).getByLabelText("Sprint length"), "3 weeks");
     await next(dialog);
 
-    expect(within(dialog).getByText("5 cards move, 2 columns removed, periods: Kanban → Scrum")).toBeInTheDocument();
+    expect(within(dialog).getByText("5 open cards move, 2 columns removed, periods: Kanban → Scrum")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "Switch to Scrum" }));
     expect(within(dialog).getByRole("alert")).toHaveTextContent("Say why the project is switching.");
     expect(posts()).toEqual([]);
@@ -261,6 +261,8 @@ describe("methodology switch wizard", () => {
     });
     const dialog = await openWizard("OPS");
     await pick(dialog, "Scrum");
+    await userEvent.clear(within(newColumn(dialog, 1)).getByLabelText("New column 2 name"));
+    await userEvent.type(within(newColumn(dialog, 1)).getByLabelText("New column 2 name"), "Next up");
     await next(dialog);
     await next(dialog);
     await userEvent.type(within(dialog).getByLabelText("Reason for the switch"), "Regular releases");
@@ -269,12 +271,78 @@ describe("methodology switch wizard", () => {
     expect(await within(dialog).findByText("Updated by a teammate — review the latest values and save again.")).toBeInTheDocument();
     expect(currentStep(dialog)).toMatch(/Map columns/u);
     expect(router.push).not.toHaveBeenCalled();
+    // The column plan survives the conflict, re-applied to the teammate's columns.
+    expect(within(newColumn(dialog, 1)).getByLabelText("New column 2 name")).toHaveValue("Next up");
     await next(dialog);
+    // Moving on means the changes were reviewed: the banner goes.
+    expect(within(dialog).queryByText("Updated by a teammate — review the latest values and save again.")).not.toBeInTheDocument();
     await next(dialog);
     expect(within(dialog).getByLabelText("Reason for the switch")).toHaveValue("Regular releases");
     await userEvent.click(within(dialog).getByRole("button", { name: "Switch to Scrum" }));
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/w/northstar-labs/p/OPS"));
     expect(posts().map((call) => call.ifMatch)).toEqual(["\"v3\"", "\"v4\""]);
+  });
+
+  it("leaves every planning key out of a Kanban switch", async () => {
+    mockApi(SCRUM, {
+      "GET /api/v1/projects/p-atlas/board": json({ ...SCRUM_BOARD, statuses: SCRUM_BOARD.statuses.map((status) => ({ ...status, count: 1 })) }),
+      "POST /api/v1/projects/p-atlas/methodology": json({ project: { ...SCRUM, methodology: "kanban", version: 4 }, movedIssues: 2 }, 200, "\"v4\""),
+    });
+    const dialog = await openWizard("ATLAS");
+    await pick(dialog, "Kanban");
+    await next(dialog);
+    await next(dialog);
+    await userEvent.type(within(dialog).getByLabelText("Reason for the switch"), "Steady flow");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch to Kanban" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(Object.keys(posts()[0].body as object).sort()).toEqual(["columns", "mapping", "reason", "to"]);
+    expect(posts()[0].body).toMatchObject({ to: "kanban", mapping: { t2: 1, t4: 3 }, reason: "Steady flow" });
+  });
+
+  it("goes back to the planning step when the server reports an active sprint", async () => {
+    mockApi(SCRUM, {
+      "GET /api/v1/projects/p-atlas/board": json({ ...SCRUM_BOARD, statuses: SCRUM_BOARD.statuses.map((status) => ({ ...status, count: 1 })) }),
+      "POST /api/v1/projects/p-atlas/methodology": problem(409, "active_sprint", "Complete the active sprint before switching methodology."),
+    });
+    const dialog = await openWizard("ATLAS");
+    await pick(dialog, "Kanban");
+    await next(dialog);
+    await next(dialog);
+    await userEvent.type(within(dialog).getByLabelText("Reason for the switch"), "Steady flow");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch to Kanban" }));
+    const blocked = await within(dialog).findByRole("alert");
+    expect(blocked).toHaveTextContent("A sprint is still active.");
+    expect(within(blocked).getByRole("link", { name: "Complete sprint now" })).toHaveAttribute("href", "/w/northstar-labs/p/ATLAS/backlog");
+    expect(currentStep(dialog)).toMatch(/Plan/u);
+    expect(within(dialog).getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
+  it("returns to the column mapping and reloads the counts when the server refuses a WIP limit", async () => {
+    mockApi(KANBAN, { "POST /api/v1/projects/p-ops/methodology": problem(409, "wip_below_occupancy", "A column's WIP limit is below the cards it would hold.") });
+    const dialog = await openWizard("OPS");
+    await pick(dialog, "Scrum");
+    await next(dialog);
+    await next(dialog);
+    await userEvent.type(within(dialog).getByLabelText("Reason for the switch"), "Releases");
+    const boardLoads = calls.filter((call) => call.key === "GET /api/v1/projects/p-ops/board").length;
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch to Scrum" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("A column's WIP limit is below the cards it would hold.");
+    expect(currentStep(dialog)).toMatch(/Map columns/u);
+    await waitFor(() => expect(calls.filter((call) => call.key === "GET /api/v1/projects/p-ops/board").length).toBe(boardLoads + 1));
+  });
+
+  it("moves focus to each step's heading", async () => {
+    mockApi(KANBAN);
+    const dialog = await openWizard("OPS");
+    expect(within(dialog).getByRole("heading", { name: "Which way of working should Ops desk use?" })).toHaveFocus();
+    await pick(dialog, "Scrum");
+    expect(within(dialog).getByRole("heading", { name: "Map your columns" })).toHaveFocus();
+    await next(dialog);
+    expect(within(dialog).getByRole("heading", { name: "Plan for Scrum" })).toHaveFocus();
+    await next(dialog);
+    expect(within(dialog).getByRole("heading", { name: "Confirm the switch" })).toHaveFocus();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Back" }));
+    expect(within(dialog).getByRole("heading", { name: "Plan for Scrum" })).toHaveFocus();
   });
 
   it("does not let the current methodology be picked again", async () => {
