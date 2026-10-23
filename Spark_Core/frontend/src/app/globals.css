@@ -4594,3 +4594,51 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
   .wsBacklogLane, .wsBacklogCard, .wsBacklogChoice, .wsBacklogBar > span { transition: none; }
   .wsBacklogCard[data-picked] { transform: none; }
 }
+
+/* Waterfall Timeline tab (M4): the plan Gantt with progress, variance and milestones, and its table. */
+.wsPlan { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; min-width: 0; }
+.wsTimelineToolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
+.wsTimelineActions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.wsTimelineActions .sparkPrimary, .wsTimelineActions .sparkSecondary { min-height: 2.6rem; padding: .55rem 1rem; font-size: .86rem; }
+.wsTimelineUnphased { display: inline-flex; align-items: center; gap: .45rem; min-height: 2.6rem; padding: .45rem .9rem; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-secondary); background: #fff; font-size: .84rem; font-weight: 650; text-decoration: none; }
+.wsTimelineUnphased strong { min-width: 1.6rem; padding: .05rem .45rem; border-radius: 999px; color: #925d00; background: #fff0c6; font-size: .78rem; text-align: center; }
+a.wsTimelineUnphased:hover { border-color: color-mix(in srgb, var(--method-accent) 45%, var(--line)); color: var(--ink); }
+a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); outline-offset: 2px; }
+.wsTimelineUnphased[data-empty] strong { color: #475569; background: #eef2f7; }
+.wsTimelineName { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: .3rem .45rem; }
+.wsTimelineVariance { display: inline-block; padding: .08rem .45rem; border-radius: 999px; color: #475569; background: #eef2f7; font-size: .68rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wsTimelineVariance[data-tone="on"], .wsTimelineVariance[data-tone="ahead"] { color: #126b4b; background: #d8f5e7; }
+.wsTimelineVariance[data-tone="late"] { color: #92400e; background: #fef3c7; }
+.wsTimelineVariance[data-tone="very-late"] { color: #b91c1c; background: #fee2e2; }
+.wsTimelineBar[data-progress] { position: relative; overflow: hidden; background: color-mix(in srgb, var(--method-accent) 28%, #fff); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--method-accent) 45%, transparent); }
+.wsTimelineFill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, var(--method-accent), color-mix(in srgb, var(--method-accent) 80%, #fff)); transition: width .3s ease; }
+.wsTimelineMilestone[data-overdue] { background: #fff; box-shadow: 0 0 0 2px #dc2626, 0 3px 8px rgba(220, 38, 38, .25); }
+.wsTimelineMilestone[data-edge="start"] { justify-self: start; transform: translateX(-50%) rotate(45deg); }
+.wsLegendMilestone[data-overdue] { background: #fff; box-shadow: 0 0 0 2px #dc2626; }
+.wsTimelineRow[data-loose] .wsTimelineLabel strong { color: var(--ink-secondary); }
+.wsTimelineTableWrap { max-width: 100%; margin-top: 1rem; overflow-x: auto; }
+.wsTimelineTable { width: 100%; min-width: 34rem; border-collapse: collapse; font-size: .86rem; }
+.wsTimelineTable th, .wsTimelineTable td { padding: .65rem .7rem; border-bottom: 1px solid #edf2f8; text-align: left; vertical-align: middle; font-variant-numeric: tabular-nums; }
+.wsTimelineTable thead th { color: var(--muted); font-size: .68rem; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+.wsTimelineTable tbody th { min-width: 9rem; color: var(--ink); font-weight: 650; overflow-wrap: break-word; }
+.wsTimelineTable td { white-space: nowrap; }
+.wsTimelineTable tbody tr:last-child > * { border-bottom: 0; }
+.wsTimelineTable td small { display: block; color: #b45309; font-size: .72rem; font-weight: 650; }
+.wsTimelineState { padding: .12rem .5rem; border-radius: .35rem; color: #475569; background: #eef2f7; font-size: .72rem; font-weight: 750; white-space: nowrap; }
+.wsTimelineState[data-state="done"] { color: #126b4b; background: #d8f5e7; }
+.wsTimelineState[data-state="overdue"] { color: #b91c1c; background: #fee2e2; }
+.wsTimelineRowActions { white-space: nowrap; text-align: right; }
+.wsBoardFilter { display: inline-flex; flex-wrap: wrap; align-items: center; justify-self: start; gap: .45rem; padding: .45rem .85rem; border: 1px solid color-mix(in srgb, var(--method-accent) 35%, var(--line)); border-radius: 999px; color: var(--ink-secondary); background: color-mix(in srgb, var(--method-accent) 7%, #fff); font-size: .84rem; font-weight: 650; }
+.wsBoardFilter a { color: var(--method-accent); font-weight: 750; }
+.wsBoardFilter a:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .wsTimelineToolbar { align-items: stretch; }
+  .wsTimelineActions { width: 100%; }
+  .wsTimelineActions > * { flex: 1 1 8rem; }
+  .wsTimelineUnphased { justify-content: center; width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wsTimelineFill { transition: none; }
+}

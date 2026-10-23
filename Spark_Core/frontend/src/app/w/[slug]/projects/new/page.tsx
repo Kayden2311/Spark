@@ -8,15 +8,13 @@ import { useAuth } from "../../../../auth-context";
 import { MethodologyPicker } from "../../../_components/methodology-picker";
 import { ApiError, canManage, messageOf, workspaceApi, type Workspace, type WorkspaceMember } from "../../../_lib/api";
 import { METHODOLOGY_ACCENTS, useMethodologies, type MethodologyId, type MethodologyTemplate } from "../../../_lib/methodologies";
-import { spreadPhases } from "../../../_lib/phases";
+import { appendedDates, PHASE_NAME_MAX, PHASES_MAX, PHASES_RULE, phasesValid, spreadPhases } from "../../../_lib/phases";
 import { cleanKeyInput, deriveProjectKey, isValidProjectKey, PROJECT_KEY_MAX } from "../../../_lib/project-key";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useWorkspace } from "../../workspace-context";
 
 const NAME_MAX = 80;
 const DESCRIPTION_MAX = 2000;
-const PHASE_NAME_MAX = 60;
-const PHASES_MAX = 12;
 const SPRINT_WEEKS = [1, 2, 3, 4] as const;
 
 const KEY_RULE = "Use 2–10 capital letters or digits, starting with a letter.";
@@ -24,7 +22,6 @@ const KEY_TAKEN = "That key is already used in this workspace.";
 const INVALID_LEAD = "The project lead must be an active member of the workspace.";
 const RANGE_TOO_SHORT = "Give each phase at least one day — move the target date or remove a phase.";
 const RANGE_REVERSED = "The target date can't be before the start date.";
-const PHASES_RULE = "Each phase needs a name and dates inside the project dates, in order and without overlapping.";
 const TOO_MANY_PROJECTS = "This workspace already has the maximum of 50 projects. Archive one before creating another.";
 
 interface PhaseRow {
@@ -87,32 +84,6 @@ function respread(rows: PhaseRow[], startDate: string, targetDate: string): Phas
   } catch {
     return rows.map((row) => ({ ...row, plannedStart: "", plannedEnd: "" }));
   }
-}
-
-/** The ISO day after `day`, computed in UTC. */
-function nextDay(day: string): string {
-  const ms = Date.parse(`${day}T00:00:00Z`);
-  return Number.isNaN(ms) ? "" : new Date(ms + 86_400_000).toISOString().slice(0, 10);
-}
-
-/** A row added after hand-edited dates runs from the day after the previous phase to the target date, when that fits. */
-function appendedDates(rows: PhaseRow[], startDate: string, targetDate: string): Pick<PhaseRow, "plannedStart" | "plannedEnd"> {
-  const previousEnd = rows.at(-1)?.plannedEnd ?? "";
-  const plannedStart = previousEnd ? nextDay(previousEnd) : startDate;
-  if (!plannedStart || !targetDate || plannedStart > targetDate) return { plannedStart: "", plannedEnd: "" };
-  return { plannedStart, plannedEnd: targetDate };
-}
-
-function phasesValid(rows: PhaseRow[], startDate: string, targetDate: string): boolean {
-  let previousEnd = "";
-  for (const row of rows) {
-    const name = row.name.trim();
-    if (!name || name.length > PHASE_NAME_MAX || !row.plannedStart || !row.plannedEnd) return false;
-    if (row.plannedStart > row.plannedEnd || row.plannedStart < startDate || row.plannedEnd > targetDate) return false;
-    if (previousEnd && row.plannedStart <= previousEnd) return false;
-    previousEnd = row.plannedEnd;
-  }
-  return rows.length > 0;
 }
 
 function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace; first: boolean; onCreated(): void }) {

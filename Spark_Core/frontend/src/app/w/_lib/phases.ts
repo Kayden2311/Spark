@@ -29,3 +29,44 @@ export function spreadPhases(startDate: string, targetDate: string, names: strin
     plannedEnd: formatDay(start + (Math.floor(((index + 1) * days) / count) - 1) * DAY_MS),
   }));
 }
+
+// ---------- The M2 phase editor rules (project creation and the Timeline's phase plan dialog) ----------
+
+export const PHASE_NAME_MAX = 60;
+export const PHASES_MAX = 12;
+export const PHASES_RULE = "Each phase needs a name and dates inside the project dates, in order and without overlapping.";
+
+/** A phase row being edited: dates are ISO days, or "" while unset. */
+export interface PhaseDraft {
+  name: string;
+  plannedStart: string;
+  plannedEnd: string;
+}
+
+/** The ISO day after `day`, computed in UTC ("" for a malformed day). */
+function nextDay(day: string): string {
+  const ms = ISO_DATE.test(day) ? Date.parse(`${day}T00:00:00Z`) : Number.NaN;
+  return Number.isNaN(ms) ? "" : formatDay(ms + DAY_MS);
+}
+
+/** A row added after hand-edited dates runs from the day after the previous phase to the target date, when that fits. */
+export function appendedDates(rows: readonly PhaseDraft[], startDate: string, targetDate: string): Pick<PhaseDraft, "plannedStart" | "plannedEnd"> {
+  const previousEnd = rows.at(-1)?.plannedEnd ?? "";
+  const plannedStart = previousEnd ? nextDay(previousEnd) : startDate;
+  if (!plannedStart || !targetDate || plannedStart > targetDate) return { plannedStart: "", plannedEnd: "" };
+  return { plannedStart, plannedEnd: targetDate };
+}
+
+/** The API's phase rules: 1–12 named phases (≤ 60 characters), inside the project dates, in order and not overlapping. */
+export function phasesValid(rows: readonly PhaseDraft[], startDate: string, targetDate: string): boolean {
+  if (rows.length < 1 || rows.length > PHASES_MAX) return false;
+  let previousEnd = "";
+  for (const row of rows) {
+    const name = row.name.trim();
+    if (!name || name.length > PHASE_NAME_MAX || !row.plannedStart || !row.plannedEnd) return false;
+    if (row.plannedStart > row.plannedEnd || row.plannedStart < startDate || row.plannedEnd > targetDate) return false;
+    if (previousEnd && row.plannedStart <= previousEnd) return false;
+    previousEnd = row.plannedEnd;
+  }
+  return true;
+}

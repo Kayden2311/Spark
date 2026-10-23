@@ -1,8 +1,8 @@
-/** Planning representations (M4: sprints) and their API calls, plus the pure helpers the planning screens share. */
+/** Planning representations (M4: sprints, the Waterfall plan) and their API calls, plus the pure helpers the planning screens share. */
 
 import { canManage, workspaceApi } from "./api";
 import { issueEtag, type BoardState, type IssueCard, type IssueDetail } from "./issues";
-import { dayValue } from "./projects";
+import { dayValue, daysBetween, projectEtag, type ProjectMilestone, type ProjectPhase } from "./projects";
 
 /** Shown wherever a plan is visible but the viewer may not change it (the API's 403 says the same). */
 export const PLAN_AUTHORITY_MESSAGE = "Only owners, admins and the project lead can change the plan.";
@@ -205,4 +205,135 @@ export function planLanes(sprints: readonly Sprint[], board: BoardState): PlanLa
 /** A copy of the board with one issue in another sprint (board order is unchanged). */
 export function withSprint(board: BoardState, issueId: string, sprintId: string | null): BoardState {
   return { ...board, issues: board.issues.map((issue) => (issue.id === issueId ? { ...issue, sprintId } : issue)) };
+}
+
+// ---------- Waterfall plan: phases, milestones and the baseline ----------
+
+/** A milestone as the plan routes return it: the M2 shape plus its version (for If-Match). */
+export interface PlanMilestone extends ProjectMilestone {
+  version: number;
+}
+
+/** GET /projects/{id}/plan, and the body of the phase-plan and re-baseline commands. `version` is the project's. */
+export interface ProjectPlan {
+  phases: ProjectPhase[];
+  milestones: PlanMilestone[];
+  baselinedAt: string | null;
+  version: number;
+}
+
+/** One entry of PUT /projects/{id}/phases: with `id` it keeps that phase (and its baseline), without it adds one. */
+export interface PhasePlanEntry {
+  id?: string;
+  name: string;
+  plannedStart: string;
+  plannedEnd: string;
+}
+
+export interface MilestoneFields {
+  name: string;
+  dueDate: string;
+  phaseId: string | null;
+}
+
+export type MilestonePatch = Partial<MilestoneFields> & { completed?: boolean };
+
+export const MILESTONE_NAME_MAX = 80;
+export const BASELINE_REASON_MAX = 200;
+
+export function milestoneEtag(version: number): string {
+  return `"v${version}"`;
+}
+
+export function planPath(projectId: string): string {
+  return `/projects/${encodeURIComponent(projectId)}/plan`;
+}
+
+const projectPath = (projectId: string) => `/projects/${encodeURIComponent(projectId)}`;
+
+/** Replaces the phase plan; `version` is the plan's (the project's settings version). */
+export async function savePhasePlan(projectId: string, version: number, phases: PhasePlanEntry[]): Promise<ProjectPlan> {
+  const { data } = await workspaceApi<ProjectPlan>(`${projectPath(projectId)}/phases`, { method: "PUT", body: { phases }, ifMatch: projectEtag(version) });
+  return data;
+}
+
+/** Copies today's planned dates of every phase and milestone into the baseline. */
+export async function rebaselinePlan(projectId: string, version: number, reason: string): Promise<ProjectPlan> {
+  const { data } = await workspaceApi<ProjectPlan>(`${projectPath(projectId)}/baseline`, { method: "POST", body: { reason }, ifMatch: projectEtag(version) });
+  return data;
+}
+
+export async function createMilestone(projectId: string, fields: MilestoneFields): Promise<PlanMilestone> {
+  const { data } = await workspaceApi<PlanMilestone>(`${projectPath(projectId)}/milestones`, { method: "POST", body: fields });
+  return data;
+}
+
+export async function updateMilestone(milestone: Pick<PlanMilestone, "id" | "version">, patch: MilestonePatch): Promise<PlanMilestone> {
+  const { data } = await workspaceApi<PlanMilestone>(`/milestones/${encodeURIComponent(milestone.id)}`, { method: "PATCH", body: patch, ifMatch: milestoneEtag(milestone.version) });
+  return data;
+}
+
+/** Days the planned end moved past the baseline end (negative when ahead), or null for a phase without a baseline. */
+export function phaseVariance(phase: Pick<ProjectPhase, "plannedEnd" | "baselineEnd">): number | null {
+  if (!phase.baselineEnd) return null;
+  const days = daysBetween(phase.baselineEnd, phase.plannedEnd);
+  return Number.isNaN(days) ? null : days;
+}
+
+export type VarianceTone = "none" | "on" | "ahead" | "late" | "very-late";
+
+/** More than a week behind the baseline reads red; up to a week amber. */
+export const VARIANCE_RED_DAYS = 7;
+
+export function varianceTone(days: number | null): VarianceTone {
+  if (days === null) return "none";
+  if (days === 0) return "on";
+  if (days < 0) return "ahead";
+  return days > VARIANCE_RED_DAYS ? "very-late" : "late";
+}
+
+/** "+6 d", "−2 d", "on baseline" or "no baseline". */
+export function varianceLabel(days: number | null): string {
+  if (days === null) return "no baseline";
+  if (days === 0) return "on baseline";
+  return days > 0 ? `+${days} d` : `−${-days} d`;
+}
+
+/** The variance in words, for screen readers and the plan table. */
+export function varianceDescription(days: number | null): string {
+  if (days === null) return "No baseline yet";
+  if (days === 0) return "On baseline";
+  const count = Math.abs(days);
+  return `${count} ${count === 1 ? "day" : "days"} ${days > 0 ? "behind" : "ahead of"} baseline`;
+}
+
+export interface PhaseProgress {
+  done: number;
+  total: number;
+}
+
+/**
+ * Per phase, the tasks in it and how many are in a done column; plus the tasks without a phase (or with a
+ * phase that is no longer in the plan). Counts the loaded board, so a board cut at 500 tasks undercounts.
+ */
+export function planProgress(board: Pick<BoardState, "statuses" | "issues">, phaseIds: readonly string[]): { byPhase: Map<string, PhaseProgress>; unphased: number } {
+  const done = new Set(board.statuses.filter((status) => status.category === "done").map((status) => status.id));
+  const byPhase = new Map(phaseIds.map((id) => [id, { done: 0, total: 0 }]));
+  let unphased = 0;
+  for (const issue of board.issues) {
+    const progress = issue.phaseId ? byPhase.get(issue.phaseId) : undefined;
+    if (!progress) {
+      if (!issue.phaseId) unphased += 1;
+      continue;
+    }
+    progress.total += 1;
+    if (done.has(issue.statusId)) progress.done += 1;
+  }
+  return { byPhase, unphased };
+}
+
+/** A copy of the plan with one milestone added or replaced. */
+export function withMilestone(plan: ProjectPlan, milestone: PlanMilestone): ProjectPlan {
+  const exists = plan.milestones.some((item) => item.id === milestone.id);
+  return { ...plan, milestones: exists ? plan.milestones.map((item) => (item.id === milestone.id ? milestone : item)) : [...plan.milestones, milestone] };
 }

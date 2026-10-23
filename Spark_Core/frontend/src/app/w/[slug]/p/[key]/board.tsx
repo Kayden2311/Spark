@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import { initials } from "../../../../components";
@@ -18,6 +19,8 @@ export const TEAMMATE_MOVED = "Updated by a teammate — the board was refreshed
 export const TEAMMATE_MOVED_STALE = "Updated by a teammate. Reload the page to see the latest board.";
 const ARROWS: readonly string[] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
 const ISSUE_PARAM = "issue";
+/** `?phase=none` (the Timeline's Unphased link) shows only the cards without a phase. */
+const PHASE_PARAM = "phase";
 export const TASK_NOT_LOADED = "That task isn't on the loaded board. Open it from the task list.";
 
 /** Sets or removes ?issue= without a navigation; Next.js syncs useSearchParams with history.replaceState. */
@@ -53,7 +56,9 @@ type MoveSource = "keyboard" | "pointer" | "menu";
 export function ProjectBoard() {
   const { project, notify, announce, reloadProject } = useProject();
   const { workspace } = useWorkspace();
-  const issueParam = useSearchParams().get(ISSUE_PARAM);
+  const searchParams = useSearchParams();
+  const issueParam = searchParams.get(ISSUE_PARAM);
+  const unphasedOnly = searchParams.get(PHASE_PARAM) === "none";
   const path = boardPath(project.id);
   const { loaded, base, committed, pendingRef, update, refresh } = useOptimisticBoard(path);
   const [pickup, setPickup] = useState<Pickup | null>(null);
@@ -370,9 +375,17 @@ export function ProjectBoard() {
           Showing the first 500 tasks.
         </p>
       )}
+      {unphasedOnly && (
+        <p className="wsBoardFilter">
+          <span>Showing unphased tasks</span>
+          <span aria-hidden="true">·</span>
+          <Link aria-label="Clear the unphased filter" href={`/w/${workspace.slug}/p/${encodeURIComponent(project.key)}`}>Clear</Link>
+        </p>
+      )}
       <div className="wsBoardScroller">
         {board.statuses.map((status) => {
-          const cards = columnIssues(board, status.id);
+          // The filter only hides cards: moves still place them among all of the column's cards.
+          const cards = unphasedOnly ? columnIssues(board, status.id).filter((issue) => issue.phaseId === null) : columnIssues(board, status.id);
           const full = wipBlocked(committed, null, status.id);
           const notice = notices[status.id] ?? (full && status.category !== "done" ? wipMessage(status) : null);
           const noticeId = `${helpId}-notice-${status.id}`;
