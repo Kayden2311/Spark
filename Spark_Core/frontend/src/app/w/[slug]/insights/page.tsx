@@ -112,7 +112,7 @@ export default function WorkspaceInsightsPage() {
           <section aria-label="Projects" className="wsInsightsGroup">
             {insights.loading && (
               <div aria-busy="true" className="wsInsightsProjects" role="status">
-                <span className="wsSrOnly">Loading projects…</span>
+                <span className="wsSrOnly">Loading projectsâ€¦</span>
                 {Array.from({ length: 3 }, (_, index) => <span className="vizSkeleton wsInsightsKpiSkeleton" key={index} />)}
               </div>
             )}
