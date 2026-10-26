@@ -63,7 +63,7 @@ const nullableString = { type: ["string", "null"] } as const;
 const nullableNumber = { type: ["number", "null"] } as const;
 const nullableInteger = { type: ["integer", "null"] } as const;
 
-const sprintResponse = {
+export const sprintResponse = {
   type: "object",
   properties: {
     id: { type: "string" },
@@ -109,8 +109,10 @@ async function readProjectRef(client: PoolClient, projectId: string): Promise<Pr
   return found.rows[0] ?? null;
 }
 
-interface SprintRow {
+export interface SprintRow {
   id: string;
+  tenant_id: string;
+  project_id: string;
   name: string;
   goal: string | null;
   status: string;
@@ -126,7 +128,7 @@ interface SprintRow {
 }
 
 // Sprint dates are calendar days stored as midnight UTC; they leave the database as YYYY-MM-DD text.
-const SELECT_SPRINT = `SELECT s.id, s.name, s.goal, s.status,
+export const SELECT_SPRINT = `SELECT s.id, s.tenant_id, s.project_id, s.name, s.goal, s.status,
   to_char((s.starts_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS starts_on,
   to_char((s.ends_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS ends_on,
   s.started_at, s.completed_at, s.committed_points, s.committed_count, s.completed_points, s.completed_count, s.version
@@ -136,7 +138,7 @@ const iso = (value: Date | null) => (value ? value.toISOString() : null);
 // numeric arrives from pg as text.
 const points = (value: string | null) => (value === null ? null : Number(value));
 
-function toSprint(row: SprintRow): Sprint {
+export function toSprint(row: SprintRow): Sprint {
   return {
     id: row.id,
     name: row.name,
