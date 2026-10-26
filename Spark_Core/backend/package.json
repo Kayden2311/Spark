@@ -19,6 +19,7 @@
     "db:migrate": "node --env-file-if-exists=../.env --import tsx scripts/migrate.ts",
     "db:seed": "node --env-file-if-exists=../.env --import tsx scripts/seed-users.ts",
     "db:seed:demo": "node --env-file-if-exists=../.env --import tsx scripts/seed-demo.ts",
+    "db:seed:workspace": "node --env-file-if-exists=../.env --import tsx scripts/seed-workspace-demo.ts",
     "db:reset:local": "node --env-file-if-exists=../.env --import tsx scripts/reset-local.ts",
     "db:inspect": "node --env-file-if-exists=../.env --import tsx scripts/inspect-database.ts",
     "test:database": "node --env-file-if-exists=../.env ../node_modules/vitest/vitest.mjs run --config vitest.database.config.ts"

@@ -29,6 +29,7 @@ pnpm dev
 - Auth process health (private, loopback only): `http://127.0.0.1:4100/health`. `pnpm dev` starts all three backend processes (API, auth, worker); the API forwards sign-up and sign-in to the auth process.
 - Mailpit inbox (local email): `http://localhost:8025`. The background worker (`pnpm --filter @spark/backend dev:worker`, or `exec node --env-file=../.env --import tsx src/worker.ts --once` for a single pass) delivers outbox email such as workspace invitations to Mailpit on `127.0.0.1:1025`.
 - Existing local databases created before the worker existed: re-run `pnpm db:bootstrap:local` once to create `spark_worker`, then `pnpm infra:up` and `pnpm --filter @spark/backend db:migrate`.
+- Workspace insights demo: `pnpm --filter @spark/backend db:seed:workspace` creates the "Northstar Labs" workspace (Scrum, Kanban, Waterfall and switched projects with months of history; eight `*@northstar.test` accounts, see `Documents/admin-test-accounts.md`). Local database only, runs once.
 - OpenAPI: generated in-process by `@fastify/swagger` (`app.swagger()`); no documentation page is served yet.
 
 ### Running the auth process in production

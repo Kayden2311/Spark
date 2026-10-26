@@ -95,6 +95,28 @@ Notes:
 - **`user1@spark.app`** — confirm `/admin` redirects or shows "This area is for Spark staff", and the
   ordinary app (workspace, posts, communities) works normally.
 
+## Workspace demo (Northstar Labs)
+
+Created by `pnpm --filter @spark/backend db:seed:workspace` (local database only; it runs once and does nothing when
+the workspace slug `northstar-labs` exists). It builds the workspace behind the M5 insights: **Atlas** (Scrum, six
+completed sprints and an active one), **Relay** (Kanban, 120 days of flow with a full Review column and aging work),
+**Harbor** (Waterfall, five baselined phases with Build six days late, milestones hit, missed, at risk and upcoming) and
+**Beacon** (Kanban for 60 days, then Scrum). If an account with one of these emails already exists, it is reused and its
+password is reset to the one below. All eight share one published password.
+
+| # | Workspace role | Email | Password | Display name | Time zone |
+|---|---|---|---|---|---|
+| 1 | Owner | `maya.chen@northstar.test` | `NorthstarPassword123!` | Maya Chen | America/Los_Angeles |
+| 2 | Admin | `daniel.okafor@northstar.test` | `NorthstarPassword123!` | Daniel Okafor | Europe/London |
+| 3 | Member (Atlas lead) | `priya.raman@northstar.test` | `NorthstarPassword123!` | Priya Raman | Asia/Kolkata |
+| 4 | Member (Relay lead) | `lucas.silva@northstar.test` | `NorthstarPassword123!` | Lucas Silva | America/Sao_Paulo |
+| 5 | Member | `linh.tran@northstar.test` | `NorthstarPassword123!` | Linh Tran | Asia/Ho_Chi_Minh |
+| 6 | Member | `sofia.rossi@northstar.test` | `NorthstarPassword123!` | Sofia Rossi | Europe/Rome |
+| 7 | Member (Beacon lead) | `kenji.watanabe@northstar.test` | `NorthstarPassword123!` | Kenji Watanabe | Asia/Tokyo |
+| 8 | Member | `nora.lindqvist@northstar.test` | `NorthstarPassword123!` | Nora Lindqvist | Europe/Stockholm |
+
+Daniel Okafor (#2) also leads Harbor. None of these accounts holds a platform role, so `/admin` turns them all away.
+
 ## Resetting
 
 ```powershell
@@ -102,6 +124,7 @@ pnpm --filter @spark/backend db:reset:local --yes   # drops the local schema
 pnpm --filter @spark/backend db:migrate
 pnpm --filter @spark/backend db:seed                # recreates all eight accounts above
 pnpm --filter @spark/backend db:seed:demo           # optional: communities, posts, reports, billing history
+pnpm --filter @spark/backend db:seed:workspace      # optional: the Northstar Labs workspace insights demo
 ```
 
 `db:seed` alone is also safe to re-run at any time without a reset; it only inserts what is missing and
