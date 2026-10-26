@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState, type CSSProperties } from "react";
 
 import { initials } from "../../../components";
@@ -41,7 +42,7 @@ function ProjectCard({ project, slug }: { project: Project; slug: string }) {
           <StatusPill status={project.status} />
           <span className="wsInsightsMuted">{percentText(project.donePercent)} of {unitLabel(project.unit)} done{plan !== null ? ` · plan ${percentText(plan)}` : ""}</span>
         </span>
-        <span aria-label="Done" aria-valuemax={100} aria-valuemin={0} aria-valuenow={Math.round(done)} aria-valuetext={`${percentText(project.donePercent)} done`} className="wsInsightsPlanTrack" role="meter">
+        <span aria-label={`${project.name} done`} aria-valuemax={100} aria-valuemin={0} aria-valuenow={Math.round(done)} aria-valuetext={`${percentText(project.donePercent)} done`} className="wsInsightsPlanTrack" role="meter">
           <span className="wsInsightsPlanFill" style={{ "--insights-w": `${done}%`, background: "var(--method-accent)" } as CSSProperties} />
           {plan !== null && <span aria-hidden="true" className="wsInsightsPlanTick" style={{ "--insights-x": `${plan}%`, background: VIZ.orange } as CSSProperties} />}
         </span>
@@ -57,7 +58,8 @@ function ProjectCard({ project, slug }: { project: Project; slug: string }) {
 /** Progress, member throughput, activity and overdue work across the workspace projects. Read-only; every member sees it all. */
 export default function WorkspaceInsightsPage() {
   const { workspace } = useWorkspace();
-  const [days, setDays] = useState(() => parseRange(new URLSearchParams(window.location.search).get("days")));
+  const searchParams = useSearchParams();
+  const [days, setDays] = useState(() => parseRange(searchParams.get("days")));
   const insights = useInsight<WorkspaceInsights>(insightPaths.workspace(workspace.id, days));
   const data = insights.data;
   const base = `/w/${workspace.slug}`;
@@ -91,19 +93,6 @@ export default function WorkspaceInsightsPage() {
         </div>
       </section>
 
-      {insights.error && (
-        <div className="vizError" role="alert">
-          <span>{insights.error}</span>
-          <button className="vizBtn vizBtnSecondary vizBtnSm" onClick={insights.reload} type="button">Retry</button>
-        </div>
-      )}
-      {insights.loading && (
-        <div aria-busy="true" className="wsInsightsProjects" role="status">
-          <span className="wsSrOnly">Loading insights…</span>
-          {Array.from({ length: 3 }, (_, index) => <span className="vizSkeleton wsInsightsKpiSkeleton" key={index} />)}
-        </div>
-      )}
-
       {noProjects && (
         <section aria-labelledby="insights-empty" className="wsEmpty">
           <h2 id="insights-empty">No projects yet</h2>
@@ -118,24 +107,38 @@ export default function WorkspaceInsightsPage() {
         </section>
       )}
 
-      {data && !noProjects && (
+      {!noProjects && (
         <>
           <section aria-label="Projects" className="wsInsightsGroup">
-            <ul className="wsInsightsProjects">
-              {data.projects.map((project) => <ProjectCard key={project.id} project={project} slug={workspace.slug} />)}
-            </ul>
+            {insights.loading && (
+              <div aria-busy="true" className="wsInsightsProjects" role="status">
+                <span className="wsSrOnly">Loading projects�</span>
+                {Array.from({ length: 3 }, (_, index) => <span className="vizSkeleton wsInsightsKpiSkeleton" key={index} />)}
+              </div>
+            )}
+            {insights.error && (
+              <div className="vizError" role="alert">
+                <span>{insights.error}</span>
+                <button className="vizBtn vizBtnSecondary vizBtnSm" onClick={insights.reload} type="button">Retry</button>
+              </div>
+            )}
+            {data && (
+              <ul className="wsInsightsProjects">
+                {data.projects.map((project) => <ProjectCard key={project.id} project={project} slug={workspace.slug} />)}
+              </ul>
+            )}
           </section>
 
           <div className="wsInsightsGrid">
             <MembersCard members={members} />
-            <ChartCard className="wsInsightsWide" height={140} subtitle={`Issue events per day, last ${days} days`} title="Activity">
-              <ContributionCalendar data={data.calendar} unit="events" />
+            <ChartCard className="wsInsightsWide" error={insights.error} height={140} loading={insights.loading} onRetry={insights.reload} subtitle={`Issue events per day, last ${days} days`} title="Activity">
+              {data && <ContributionCalendar data={data.calendar} unit="events" />}
             </ChartCard>
           </div>
 
           <section aria-labelledby="insights-overdue" className="wsInsightsGroup">
             <GroupHeading id="insights-overdue" title="Overdue across projects" />
-            <ChartCard empty={overdue.length === 0} emptyText="Nothing is overdue." height={120} subtitle="Open work past its due date, oldest first" title="Overdue work">
+            <ChartCard empty={data !== null && overdue.length === 0} error={insights.error} loading={insights.loading} onRetry={insights.reload} emptyText="Nothing is overdue." height={120} subtitle="Open work past its due date, oldest first" title="Overdue work">
               <ul aria-label="Overdue work" className="wsInsightsList">
                 {overdue.map((item) => (
                   <li key={item.issueId}>

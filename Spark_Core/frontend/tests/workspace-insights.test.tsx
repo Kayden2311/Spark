@@ -90,7 +90,9 @@ describe("workspace insights", () => {
     expect(within(atlas).getByText("ATLAS")).toBeInTheDocument();
     expect(within(atlas).getByText("Scrum")).toHaveAttribute("data-methodology", "scrum");
     expect(within(atlas).getByText("At risk")).toBeInTheDocument();
-    expect(within(atlas).getByRole("meter")).toHaveAttribute("aria-valuenow", "40");
+    expect(within(atlas).getByRole("meter", { name: "Atlas app done" })).toHaveAttribute("aria-valuenow", "40");
+    expect(atlas.querySelector(".wsInsightsPlanTick")).toHaveStyle({ "--insights-x": "55%" });
+    expect(within(section).getByRole("link", { name: /Ops board/ }).querySelector(".wsInsightsPlanTick")).toBeNull();
     expect(within(atlas).getByText("18 open")).toBeInTheDocument();
     expect(within(atlas).getByText("2 overdue")).toBeInTheDocument();
     const ops = within(section).getByRole("link", { name: /Ops board/ });
@@ -108,12 +110,17 @@ describe("workspace insights", () => {
     expect(names[1]).toContain("Casey Member");
     expect(names[2]).toContain("Unassigned");
     expect(within(table).getByText("80%")).toBeInTheDocument();
+    const averyRow = within(table).getByText("Avery Founder").closest("tr")!;
+    expect(averyRow.querySelector(".vizInlineBarTrack")).not.toBeNull();
+    expect(within(table).getByText("Casey Member").closest("tr")!.querySelector(".vizInlineBarTrack")).toBeNull();
   });
 
   it("draws the activity calendar and the overdue list across projects", async () => {
     mockApi("member");
     renderPage();
     expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+    expect(await screen.findByText("43 events over 30 days")).toBeInTheDocument();
+    expect(document.querySelector('[title="Monday, Sep 28: 1 events"]')).not.toBeNull();
     const overdue = screen.getByRole("list", { name: "Overdue work" });
     expect(within(overdue).getByRole("link", { name: /Fix login redirect/ })).toHaveAttribute("href", "/w/northstar-labs/p/ATLAS?issue=ATLAS-4");
     expect(within(overdue).getByRole("link", { name: /Rotate keys/ })).toHaveAttribute("href", "/w/northstar-labs/p/OPS?issue=OPS-2");
