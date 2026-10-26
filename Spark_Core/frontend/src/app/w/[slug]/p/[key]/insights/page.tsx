@@ -8,10 +8,11 @@ import { periodLabel, planPath, type ProjectPlan } from "../../../../_lib/planni
 import { methodologyAccent, methodologyOf } from "../../../../_lib/projects";
 import { useWorkspace } from "../../../workspace-context";
 import { useProject } from "../project-context";
-import { FlowCards, MembersCard } from "./flow-cards";
+import { MembersCard } from "../../../../_components/insights/members-card";
+import { FlowCards } from "./flow-cards";
 import { KanbanSection } from "./kanban-section";
 import { ScrumSection } from "./scrum-section";
-import { GroupHeading, useInsight } from "./shared";
+import { GroupHeading, useInsight } from "../../../../_components/insights/shared";
 import { KpiStrip, OverdueCard, PlanVsDone } from "./summary-cards";
 import { WaterfallSection } from "./waterfall-section";
 

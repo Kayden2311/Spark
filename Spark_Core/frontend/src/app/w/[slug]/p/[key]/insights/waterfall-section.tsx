@@ -4,7 +4,7 @@ import { ChartCard, ChartLegend, GroupedBars, VIZ, type ChartSeries } from "../.
 import { insightPaths, milestoneStateLabel, percentText, planStatusLabel, type ScheduleInsights } from "../../../../_lib/insights";
 import { varianceDescription, varianceLabel, varianceTone } from "../../../../_lib/planning";
 import { formatShortDay } from "../../../../_lib/projects";
-import { GroupHeading, StatusPill, useInsight, type InsightQuery } from "./shared";
+import { GroupHeading, StatusPill, useInsight, type InsightQuery } from "../../../../_components/insights/shared";
 
 const PHASE_SERIES: ChartSeries[] = [
   { key: "done", label: "Done", color: VIZ.blue },

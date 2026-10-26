@@ -1,9 +1,8 @@
 "use client";
 
-import { initials } from "../../../../../components";
 import { ChartCard, ChartLegend, TrendChart, VIZ, formatCount, shortDate, type ChartSeries } from "../../../../../_ui/viz";
-import { daysText, markerLabel, percentText, type FlowInsights, type MemberInsights } from "../../../../_lib/insights";
-import type { InsightQuery } from "./shared";
+import { markerLabel, type FlowInsights } from "../../../../_lib/insights";
+import type { InsightQuery } from "../../../../_components/insights/shared";
 
 /** Work items by status category, done at the bottom as a cumulative flow diagram reads. */
 const CFD_SERIES: ChartSeries[] = [
@@ -58,61 +57,5 @@ export function FlowCards({ flow, days }: { flow: InsightQuery<FlowInsights>; da
         <TrendChart data={rows as unknown as Array<Record<string, unknown>>} height={220} kind="bar" markers={markers} series={THROUGHPUT_SERIES} />
       </ChartCard>
     </>
-  );
-}
-
-/** Per current assignee: finished in range, points, on-time rate, open, overdue and median cycle time. Unassigned last. */
-export function MembersCard({ members }: { members: InsightQuery<MemberInsights> }) {
-  const items = [...(members.data?.items ?? [])].sort((a, b) => Number(a.user === null) - Number(b.user === null));
-  return (
-    <ChartCard
-      className="wsInsightsWide"
-      empty={Boolean(members.data) && items.length === 0}
-      emptyText="No assigned or unassigned work yet."
-      error={members.error}
-      height={120}
-      loading={members.loading}
-      onRetry={members.reload}
-      subtitle="Grouped by current assignee; completed counts the selected range"
-      title="Members"
-    >
-      <div className="vizChartTableWrap wsInsightsTableWrap">
-        <table className="vizChartTable wsInsightsTable">
-          <caption className="vizSrOnly">Members</caption>
-          <thead>
-            <tr>
-              <th scope="col">Member</th>
-              <th className="vizNum" scope="col">Completed</th>
-              <th className="vizNum" scope="col">Points</th>
-              <th className="vizNum" scope="col">On time</th>
-              <th className="vizNum" scope="col">Open</th>
-              <th className="vizNum" scope="col">Overdue</th>
-              <th className="vizNum" scope="col">Median cycle</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => {
-              const name = item.user?.displayName ?? "Unassigned";
-              return (
-                <tr key={item.user?.id ?? "unassigned"}>
-                  <th scope="row">
-                    <span className="wsInsightsPerson">
-                      <span aria-hidden="true" className="avatar tiny" data-unassigned={item.user === null || undefined}>{item.user ? initials(name, "?") : "–"}</span>
-                      <span>{name}</span>
-                    </span>
-                  </th>
-                  <td className="vizNum">{formatCount(item.completed)}</td>
-                  <td className="vizNum">{formatCount(item.completedPoints)}</td>
-                  <td className="vizNum">{percentText(item.onTimeRate)}</td>
-                  <td className="vizNum">{formatCount(item.open)}</td>
-                  <td className="vizNum" data-alert={item.overdue > 0 || undefined}>{formatCount(item.overdue)}</td>
-                  <td className="vizNum">{daysText(item.medianCycleDays)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </ChartCard>
   );
 }

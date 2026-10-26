@@ -7,7 +7,7 @@ import { initials } from "../../../../../components";
 import { ChartCard, ChartLegend, VIZ, formatCount } from "../../../../../_ui/viz";
 import { percentText, unitLabel, type InsightSummary } from "../../../../_lib/insights";
 import { formatDay, formatShortDay } from "../../../../_lib/projects";
-import { StatusPill, type InsightQuery as Query } from "./shared";
+import { StatusPill, type InsightQuery as Query } from "../../../../_components/insights/shared";
 
 const PLAN_COLOR = VIZ.orange;
 const DONE_COLOR = VIZ.blue;

@@ -41,6 +41,7 @@ function Icon({ children }: { children: ReactNode }) {
 const ICONS: Record<string, ReactNode> = {
   Home: <Icon><path d="M4 11.5 12 5l8 6.5" /><path d="M6.5 10v9h11v-9" /></Icon>,
   Members: <Icon><circle cx="9" cy="9" r="3.2" /><path d="M3.5 19c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6" /><path d="M16 6.3a3 3 0 0 1 0 5.6M17.5 14.6c1.6.5 2.7 1.9 3 4.4" /></Icon>,
+  Insights: <Icon><path d="M5 19V11M12 19V5M19 19v-5" /></Icon>,
   Communities: <Icon><circle cx="12" cy="12" r="8" /><path d="m15.5 8.5-2.1 4.9-4.9 2.1 2.1-4.9z" /></Icon>,
   Schedule: <Icon><rect height="14" rx="2.5" width="16" x="4" y="6" /><path d="M8 4v4M16 4v4M4 11h16" /></Icon>,
   Notifications: <Icon><path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5z" /><path d="M10 20.5a2.2 2.2 0 0 0 4 0" /></Icon>,
@@ -196,7 +197,7 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
 
   const navigation: Array<[string, string]> = [
     ["Home", active ? `/w/${active.slug}` : "/workspace"],
-    ...(active ? [["Members", `/w/${active.slug}/members`] as [string, string]] : []),
+    ...(active ? [["Members", `/w/${active.slug}/members`] as [string, string], ["Insights", `/w/${active.slug}/insights`] as [string, string]] : []),
     ["Communities", "/communities"],
     ["Schedule", "/schedule"],
     ["Notifications", "/notifications"],

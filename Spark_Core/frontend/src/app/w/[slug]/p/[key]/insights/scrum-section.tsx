@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ChartCard, ChartLegend, GroupedBars, TrendChart, VIZ, formatCount, groupedBarsTable, shortDate, type ChartSeries } from "../../../../../_ui/viz";
 import { burndownSprints, insightPaths, percentText, unitLabel, type Burndown, type SprintOutcome, type VelocityInsights } from "../../../../_lib/insights";
 import { sprintsPath, type Sprint } from "../../../../_lib/planning";
-import { GroupHeading, useInsight, type InsightQuery } from "./shared";
+import { GroupHeading, useInsight, type InsightQuery } from "../../../../_components/insights/shared";
 
 const BURNDOWN_SERIES: ChartSeries[] = [
   { key: "ideal", label: "Ideal", color: VIZ.violet, dashed: true },

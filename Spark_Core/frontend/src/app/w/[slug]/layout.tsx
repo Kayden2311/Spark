@@ -16,6 +16,7 @@ import { WorkspaceProvider } from "./workspace-context";
 function sectionFor(pathname: string, slug: string): string {
   const base = `/w/${slug}`;
   if (pathname === `${base}/members` || pathname.startsWith(`${base}/members/`)) return "Members";
+  if (pathname === `${base}/insights` || pathname.startsWith(`${base}/insights/`)) return "Insights";
   // Project pages are marked in the shell's project list instead.
   if (pathname.startsWith(`${base}/p/`) || pathname.startsWith(`${base}/projects/`)) return "";
   return "Home";

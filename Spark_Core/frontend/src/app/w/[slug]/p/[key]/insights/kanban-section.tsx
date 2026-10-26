@@ -6,7 +6,7 @@ import { initials } from "../../../../../components";
 import { ChartCard, ChartLegend, InlineBar, ScatterPlot, TargetGauge, VIZ, formatCount, scatterTable, type ScatterSeries } from "../../../../../_ui/viz";
 import { ageBand, ageBandLabel, daysText, insightPaths, type AgeBand, type AgingInsights, type CycleTimeInsights } from "../../../../_lib/insights";
 import { categoryLabel } from "../../../../_lib/planning";
-import { GroupHeading, useInsight, type InsightQuery } from "./shared";
+import { GroupHeading, useInsight, type InsightQuery } from "../../../../_components/insights/shared";
 
 const BAND_COLORS: Record<AgeBand, string> = { under: "#047857", between: "#b45309", over: "#dc2626", none: "#64748b" };
 const CYCLE_COLOR = VIZ.blue;

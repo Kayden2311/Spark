@@ -1,7 +1,7 @@
 "use client";
 
-import { planStatusLabel } from "../../../../_lib/insights";
-import { useWorkspaceData } from "../../../../_lib/use-workspace-data";
+import { planStatusLabel } from "../../_lib/insights";
+import { useWorkspaceData } from "../../_lib/use-workspace-data";
 
 /**
  * One insights card's request. Data loaded for another path (an earlier range or period) is never shown
