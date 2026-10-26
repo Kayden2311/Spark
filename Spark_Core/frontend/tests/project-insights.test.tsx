@@ -27,6 +27,7 @@ vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 import WorkspaceLayout from "../src/app/w/[slug]/layout";
 import ProjectLayout from "../src/app/w/[slug]/p/[key]/layout";
 import ProjectInsightsPage from "../src/app/w/[slug]/p/[key]/insights/page";
+import { burndownSubtitle } from "../src/app/w/[slug]/p/[key]/insights/scrum-section";
 
 const workspace = { id: "w1", slug: "northstar-labs", name: "Northstar Labs", role: "member", memberCount: 3, version: 2, createdAt: "2026-10-18T10:00:00.000Z" };
 const members = [
@@ -396,7 +397,8 @@ describe("project insights", () => {
     const overdue = await screen.findByRole("region", { name: "Overdue work" });
     expect(await within(overdue).findByRole("link", { name: /Fix login redirect/u })).toHaveAttribute("href", "/w/northstar-labs/p/ATLAS?issue=ATLAS-4");
     const flow = screen.getByRole("region", { name: "Cumulative flow" });
-    expect(await within(flow).findAllByText("Switched Kanban → Scrum on Oct 18")).not.toHaveLength(0);
+    await waitFor(() => expect(flow.querySelector(".vizMarkerLabel")?.textContent).toBe("Switched Kanban → Scrumon Oct 18"));
+    expect(within(flow).getByText(/· Switched Kanban → Scrum on Oct 18/)).toBeInTheDocument();
   });
 
   it("shows phases, milestone states and the schedule variance for Waterfall", async () => {
@@ -412,5 +414,21 @@ describe("project insights", () => {
     const variance = screen.getByRole("region", { name: "Schedule variance" });
     expect(await within(variance).findByText("6 days behind baseline")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Period" })).not.toBeInTheDocument();
+  });
+});
+
+describe("burndown subtitle", () => {
+  const sprint = SPRINT("sp4", "Sprint 4", "active", { committedPoints: 20, committedCount: 8 });
+  const days = [{ day: "2026-10-19", ideal: 20, scope: 20, remaining: 20 }, { day: "2026-10-21", ideal: 0, scope: null, remaining: null }];
+
+  it("names committed work already done at the start in the burndown's unit", () => {
+    expect(burndownSubtitle({ sprint: { ...sprint, committedPoints: 23 }, unit: "points", base: 20, days })).toBe("Sprint 4: 20 points at the start, 3 already done · Oct 19 – Oct 21");
+    expect(burndownSubtitle({ sprint, unit: "count", base: 6, days })).toBe("Sprint 4: 6 tasks at the start, 2 already done · Oct 19 – Oct 21");
+  });
+
+  it("says nothing about already-done work when there is none, the base exceeds the commitment or nothing was frozen", () => {
+    expect(burndownSubtitle({ sprint, unit: "points", base: 20, days })).toBe("Sprint 4: 20 points at the start · Oct 19 – Oct 21");
+    expect(burndownSubtitle({ sprint, unit: "points", base: 22, days })).toBe("Sprint 4: 22 points at the start · Oct 19 – Oct 21");
+    expect(burndownSubtitle({ sprint: { ...sprint, committedPoints: null }, unit: "points", base: 20, days })).toBe("Sprint 4: 20 points at the start · Oct 19 – Oct 21");
   });
 });

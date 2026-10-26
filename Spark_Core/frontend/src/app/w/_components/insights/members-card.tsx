@@ -5,9 +5,11 @@ import { ChartCard, InlineBar, VIZ, formatCount } from "../../../_ui/viz";
 import { daysText, percentText, type MemberStat } from "../../_lib/insights";
 import type { InsightQuery } from "./shared";
 
-/** Per current assignee: finished in range, points, on-time rate, open, overdue and median cycle time. Unassigned last. */
+/** Per current assignee: finished in range, points ("—" when none carried points), on-time rate, open, overdue and median cycle time. Unassigned last. */
 export function MembersCard({ members }: { members: InsightQuery<{ items: MemberStat[] }> }) {
   const items = [...(members.data?.items ?? [])].sort((a, b) => Number(a.user === null) - Number(b.user === null));
+  // Nothing finished in the range carried points (an unestimated project): "—" rather than a column of zeros.
+  const noPoints = items.every((item) => item.completedPoints === 0);
   return (
     <ChartCard
       className="wsInsightsWide"
@@ -46,7 +48,7 @@ export function MembersCard({ members }: { members: InsightQuery<{ items: Member
                     </span>
                   </th>
                   <td className="vizNum">{formatCount(item.completed)}</td>
-                  <td className="vizNum">{formatCount(item.completedPoints)}</td>
+                  <td className="vizNum">{noPoints ? "—" : formatCount(item.completedPoints)}</td>
                   <td className="vizNum">
                     <span className="wsInsightsOnTime">
                       {item.onTimeRate !== null && <InlineBar color={VIZ.aqua} ratio={item.onTimeRate / 100} />}

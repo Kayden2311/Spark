@@ -115,6 +115,25 @@ describe("workspace insights", () => {
     expect(within(table).getByText("Casey Member").closest("tr")!.querySelector(".vizInlineBarTrack")).toBeNull();
   });
 
+  it("shows a dash for points when nothing finished in the range carried points", async () => {
+    const unestimated = { ...INSIGHTS, members: INSIGHTS.members.map((item) => ({ ...item, completedPoints: 0 })) };
+    mockApi("member", unestimated);
+    renderPage();
+    const table = await screen.findByRole("table", { name: "Members" });
+    const pointsColumn = within(table).getAllByRole("columnheader").findIndex((cell) => cell.textContent === "Points");
+    const points = within(table).getAllByRole("row").slice(1).map((row) => row.children[pointsColumn]!.textContent);
+    expect(points).toEqual(["—", "—", "—"]);
+  });
+
+  it("keeps points, zeros included, when some finished work carried points", async () => {
+    mockApi("member");
+    renderPage();
+    const table = await screen.findByRole("table", { name: "Members" });
+    const pointsColumn = within(table).getAllByRole("columnheader").findIndex((cell) => cell.textContent === "Points");
+    const points = within(table).getAllByRole("row").slice(1).map((row) => row.children[pointsColumn]!.textContent);
+    expect(points).toEqual(["13", "4", "0"]);
+  });
+
   it("draws the activity calendar and the overdue list across projects", async () => {
     mockApi("member");
     renderPage();

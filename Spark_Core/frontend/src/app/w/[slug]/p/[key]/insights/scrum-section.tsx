@@ -44,7 +44,7 @@ function averageVelocity(data: VelocityInsights | null, rows: ReadonlyArray<{ co
  * was already done when the sprint started; the difference to the frozen commitment is named so the gap
  * between the scope and remaining lines is explained.
  */
-function burndownSubtitle(data: Burndown): string {
+export function burndownSubtitle(data: Burndown): string {
   const committed = data.unit === "points" ? data.sprint.committedPoints : data.sprint.committedCount;
   const alreadyDone = committed === null ? 0 : Math.round((committed - data.base) * 10) / 10;
   const done = alreadyDone > 0 ? `, ${formatCount(alreadyDone)} already done` : "";

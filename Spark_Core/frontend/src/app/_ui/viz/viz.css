@@ -175,6 +175,11 @@
 @media (max-width: 720px) {
   .vizContributionMonths span, .vizContributionCell, .vizContributionWeek { width: 10px; }
   .vizContributionCell { height: 10px; }
+  .vizContributionDayLabels span { height: 10px; line-height: 10px; }
+}
+/* On phones the scatter's reference-line labels crowd the points; the legend carries the same values. */
+@media (max-width: 520px) {
+  .vizScatter .recharts-label { display: none; }
 }
 
 /* Retention cohorts */

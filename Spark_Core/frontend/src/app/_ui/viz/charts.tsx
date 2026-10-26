@@ -208,7 +208,37 @@ interface TrendChartProps {
   markers?: ChartMarker[];
 }
 
-/** Change over time. One y-axis only: measures of different scale go in separate charts. */
+/** Words of a marker label broken into lines of at most `width` characters. */
+export function wrapLabel(label: string, width = 24): string[] {
+  const lines: string[] = [];
+  for (const word of label.split(" ")) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && `${last} ${word}`.length <= width) lines[lines.length - 1] = `${last} ${word}`;
+    else lines.push(word);
+  }
+  return lines;
+}
+
+function markerOnRightHalf(data: Array<Record<string, unknown>>, xKey: string, day: string): boolean {
+  const index = data.findIndex((row) => String(row[xKey]) === day);
+  return data.length > 1 && index / (data.length - 1) > 0.5;
+}
+
+/**
+ * A marker's label, wrapped and kept inside the plot: on the left half of the chart it reads to the right of
+ * the line, on the right half it ends at the line.
+ */
+function MarkerLabel({ label, end, viewBox }: { label: string; end: boolean; viewBox?: { x?: number; y?: number } }) {
+  const x = (viewBox?.x ?? 0) + (end ? -5 : 5);
+  const y = (viewBox?.y ?? 0) + 12;
+  return (
+    <text className="vizMarkerLabel" fill={CHART_INK.axis} fontSize={11} textAnchor={end ? "end" : "start"} x={x} y={y}>
+      {wrapLabel(label).map((line, index) => <tspan dy={index === 0 ? 0 : 13} key={index} x={x}>{line}</tspan>)}
+    </text>
+  );
+}
+
+/** Change over time./** Change over time. One y-axis only: measures of different scale go in separate charts. */
 export function TrendChart({ data, series, xKey = "day", kind = "area", stacked = false, height = 260, valueFormat = formatCount, xFormat = shortDate, markers = [] }: TrendChartProps) {
   const reduced = useReducedMotion();
   const gradientBase = useId().replace(/:/gu, "");
@@ -226,7 +256,7 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
       {markers.map((marker) => (
         <ReferenceLine
           key={`${marker.day}-${marker.label}`}
-          label={{ value: marker.label, position: "insideTopLeft", fill: CHART_INK.axis, fontSize: 11 }}
+          label={(props: { viewBox?: { x?: number; y?: number } }) => <MarkerLabel end={markerOnRightHalf(data, xKey, marker.day)} label={marker.label} viewBox={props.viewBox} />}
           stroke={CHART_INK.axis}
           strokeDasharray={DASH}
           x={marker.day}
@@ -585,7 +615,8 @@ export function Heatmap({ cells }: { cells: Array<{ dow: number; hour: number; e
   );
 }
 
-const DOW_SHORT = ["", "Mon", "", "Wed", "", "Fri", ""];
+/** Row labels of the contribution calendar, whose weeks run Monday to Sunday. */
+const DOW_SHORT = ["Mon", "", "Wed", "", "Fri", "", ""];
 
 /**
  * A GitHub-style daily activity calendar: one square per day, grouped into Monday-start week columns,
@@ -640,7 +671,6 @@ export function ContributionCalendar({ data, unit = "events" }: { data: Array<{ 
       <div className="vizContributionScroll">
         <div aria-hidden="true" className="vizContributionBody" onMouseLeave={() => setHover(null)}>
           <div className="vizContributionDayLabels">
-            <span />
             {DOW_SHORT.map((label, index) => <span key={index}>{label}</span>)}
           </div>
           <div className="vizContributionMain">

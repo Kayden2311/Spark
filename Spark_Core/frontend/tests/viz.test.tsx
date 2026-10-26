@@ -5,7 +5,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BarList, ChartCard, ChartLegend, Gauge, GroupedBars, Heatmap, ScatterPlot, Sparkline, TargetGauge, TrendChart, groupedBarsTable, scatterTable } from "../src/app/_ui/viz";
+import { BarList, ChartCard, ChartLegend, ContributionCalendar, Gauge, GroupedBars, Heatmap, ScatterPlot, Sparkline, TargetGauge, TrendChart, groupedBarsTable, scatterTable } from "../src/app/_ui/viz";
 
 function mockReducedMotion(reduce: boolean) {
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -289,9 +289,44 @@ describe("shared viz module", () => {
         series={[{ key: "a", label: "A", color: "#2563eb" }, { key: "b", label: "B", color: "#94a3b8", dashed: true }]}
       />,
     );
-    expect(screen.getByText("Switched Kanban → Scrum on Oct 2")).toBeInTheDocument();
+    const label = container.querySelector(".vizMarkerLabel")!;
+    expect([...label.querySelectorAll("tspan")].map((line) => line.textContent)).toEqual(["Switched Kanban → Scrum", "on Oct 2"]);
+    expect(label).toHaveAttribute("text-anchor", "start");
     expect(container.querySelectorAll(".recharts-reference-line")).toHaveLength(1);
     expect(container.querySelector('path[name="B"]')).toHaveAttribute("stroke-dasharray", "6 4");
+  });
+
+  it("TrendChart ends a marker label at its line on the right half of the chart, so it stays inside the plot", () => {
+    mockReducedMotion(true);
+    const { container } = render(
+      <TrendChart
+        data={[{ day: "2026-10-01", a: 1 }, { day: "2026-10-02", a: 3 }, { day: "2026-10-03", a: 2 }, { day: "2026-10-04", a: 2 }]}
+        kind="line"
+        markers={[{ day: "2026-10-04", label: "Switched Kanban → Scrum on Oct 4" }]}
+        series={[{ key: "a", label: "A", color: "#2563eb" }]}
+      />,
+    );
+    expect(container.querySelector(".vizMarkerLabel")).toHaveAttribute("text-anchor", "end");
+  });
+
+  it("ContributionCalendar labels each row with the weekday of its cells (weeks run Monday to Sunday)", () => {
+    // Wednesday Oct 7 to Monday Oct 26, 2026: partial first and last weeks.
+    const data = Array.from({ length: 20 }, (_, index) => ({ day: new Date(Date.UTC(2026, 9, 7 + index)).toISOString().slice(0, 10), value: index % 3 }));
+    const { container } = render(<ContributionCalendar data={data} />);
+    const labels = [...container.querySelectorAll(".vizContributionDayLabels span")].map((span) => span.textContent);
+    expect(labels).toEqual(["Mon", "", "Wed", "", "Fri", "", ""]);
+    const weeks = [...container.querySelectorAll(".vizContributionWeek")];
+    expect(weeks.length).toBeGreaterThan(1);
+    for (const week of weeks) {
+      const cells = [...week.querySelectorAll(".vizContributionCell")];
+      expect(cells).toHaveLength(labels.length);
+      cells.forEach((cell, row) => {
+        const title = cell.getAttribute("title");
+        if (title && labels[row]) expect(title.startsWith(labels[row]!)).toBe(true);
+      });
+    }
+    expect(weeks[0]!.querySelectorAll(".vizContributionCell")[2]).toHaveAttribute("title", "Wednesday, Oct 7: 0 events");
+    expect(weeks[weeks.length - 1]!.querySelectorAll(".vizContributionCell")[0]).toHaveAttribute("title", "Monday, Oct 26: 1 events");
   });
 
   it("shared modules never import admin", () => {
