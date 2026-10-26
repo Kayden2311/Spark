@@ -211,19 +211,27 @@ async function main() {
     let reused = 0;
     for (const [index, account] of ACCOUNTS.entries()) {
       const email = account.email.toLowerCase();
-      const existing = (await client.query<{ user_id: string }>("SELECT user_id FROM spark.user_emails WHERE normalized_email = $1", [email])).rows[0];
+      // Drawn for every account, reused or not, so the PRNG sequence (and the whole dataset) never depends on database state.
+      const created = iso(workspaceCreated - int(2, 30) * DAY - int(0, 600) * MINUTE);
+      const existing = (await client.query<{ user_id: string; status: string; deleted_at: Date | null }>(
+        `SELECT e.user_id, u.status, u.deleted_at FROM spark.user_emails e JOIN spark.users u ON u.id = e.user_id WHERE e.normalized_email = $1`,
+        [email],
+      )).rows[0];
       let id: string;
       if (existing) {
+        if (existing.status !== "active" || existing.deleted_at !== null) {
+          throw new Error(`Refusing to reuse ${email}: the account is ${existing.deleted_at !== null ? "deleted" : existing.status}. Reactivate or remove it first.`);
+        }
         id = existing.user_id;
         reused += 1;
-        await client.query("UPDATE spark.users SET status = 'active', timezone = $2 WHERE id = $1", [id, account.timezone]);
+        await client.query("UPDATE spark.users SET display_name = $2, timezone = $3 WHERE id = $1", [id, account.name, account.timezone]);
+        await client.query("UPDATE spark.user_emails SET verified_at = coalesce(verified_at, now()) WHERE user_id = $1 AND normalized_email = $2", [id, email]);
         await client.query(
           `INSERT INTO spark.password_credentials (user_id, password_hash, password_changed_at) VALUES ($1, $2, now())
            ON CONFLICT (user_id) DO UPDATE SET password_hash = EXCLUDED.password_hash, password_changed_at = now()`,
           [id, passwordHashes[index]],
         );
       } else {
-        const created = iso(workspaceCreated - int(2, 30) * DAY - int(0, 600) * MINUTE);
         id = (await client.query<{ id: string }>(
           "INSERT INTO spark.users (display_name, status, locale, timezone, created_at, updated_at) VALUES ($1, 'active', 'en', $2, $3, $3) RETURNING id",
           [account.name, account.timezone, created],
@@ -604,6 +612,18 @@ async function main() {
       for (const st of project.statuses) {
         if (st.wip !== null && current.filter((issue) => issue.last.status.id === st.id).length > st.wip) throw new Error(`${project.key}: WIP limit exceeded in ${st.name}`);
       }
+    }
+
+    // Unit rule inputs (story points on >= 80% of the items): Atlas and Beacon report in points, Relay in counts and
+    // Harbor has no estimates at all. A generator change that crosses a threshold fails here instead of flipping a unit.
+    const coverage = (project: Project) => {
+      const own = issues.filter((issue) => issue.project === project);
+      return (100 * own.filter((issue) => issue.last.points !== null).length) / own.length;
+    };
+    for (const [project, ok, rule] of [[atlas, (c: number) => c >= 80, ">= 80%"], [beacon, (c: number) => c >= 80, ">= 80%"],
+      [relay, (c: number) => c < 80, "< 80%"], [harbor, (c: number) => c === 0, "0%"]] as const) {
+      const value = coverage(project);
+      if (!ok(value)) throw new Error(`${project.key}: story points on ${value.toFixed(1)}% of issues, expected ${rule}`);
     }
 
     // ---------- projects, boards, statuses, periods ----------
