@@ -77,7 +77,8 @@ export function ScatterPlot({ series, references = [], height = 260, xFormat = e
           {references.map((reference) => (
             <ReferenceLine
               key={reference.label}
-              label={{ value: reference.label, position: "insideTopRight", fill: reference.color ?? CHART_INK.axis, fontSize: 11 }}
+              // The lowest line labels below itself and the others above, so close lines (p50/p85) never overprint.
+              label={{ value: reference.label, position: reference.y === Math.min(...references.map((item) => item.y)) && references.length > 1 ? "insideBottomRight" : "insideTopRight", fill: reference.color ?? CHART_INK.axis, fontSize: 11 }}
               stroke={reference.color ?? CHART_INK.axis}
               strokeDasharray={DASH}
               y={reference.y}

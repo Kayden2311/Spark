@@ -74,9 +74,9 @@ export function GroupedBars({ data, series, xKey = "label", height = 240, valueF
 }
 
 /** The same numbers as a table: one row per category, one column per series ("—" for a missing value). */
-export function groupedBarsTable(data: Row[], series: ChartSeries[], { xKey = "label", valueFormat = formatCount }: { xKey?: string; valueFormat?: Formatter } = {}): TableSpec {
+export function groupedBarsTable(data: Row[], series: ChartSeries[], { xKey = "label", xLabel = "", valueFormat = formatCount }: { xKey?: string; xLabel?: string; valueFormat?: Formatter } = {}): TableSpec {
   return {
-    columns: ["", ...series.map((item) => item.label)],
+    columns: [xLabel, ...series.map((item) => item.label)],
     rows: data.map((row) => [
       String(row[xKey] ?? "") as ReactNode,
       ...series.map((item) => (row[item.key] === null || row[item.key] === undefined ? "—" : valueFormat(Number(row[item.key])))),

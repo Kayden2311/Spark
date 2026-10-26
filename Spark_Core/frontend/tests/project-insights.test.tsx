@@ -97,7 +97,7 @@ const SPRINT = (id: string, name: string, status: string, extra: Record<string, 
 const SPRINTS = {
   items: [
     SPRINT("sp3", "Sprint 3", "completed", { completedAt: "2026-10-18T17:00:00.000Z", completedPoints: 16, completedCount: 6 }),
-    SPRINT("sp4", "Sprint 4", "active", { startsOn: "2026-10-19", endsOn: "2026-11-01", startedAt: "2026-10-19T09:00:00.000Z" }),
+    SPRINT("sp4", "Sprint 4", "active", { startsOn: "2026-10-19", endsOn: "2026-11-01", startedAt: "2026-10-19T09:00:00.000Z", committedPoints: 23 }),
     SPRINT("sp5", "Sprint 5", "planned", { startsOn: null, endsOn: null, startedAt: null, committedPoints: null, committedCount: null }),
   ],
 };
@@ -260,6 +260,7 @@ describe("project insights", () => {
     expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual(["Sprint 4 (active)", "Sprint 3"]);
     await waitFor(() => expect(calls).toContain("/api/v1/sprints/sp4/burndown"));
     expect(await within(burndown).findByText("Ideal")).toBeInTheDocument();
+    expect(within(burndown).getByText("Sprint 4: 20 points at the start, 3 already done · Oct 19 – Oct 21")).toBeInTheDocument();
 
     const velocity = await screen.findByRole("region", { name: "Velocity" });
     expect(await within(velocity).findByText("Committed")).toBeInTheDocument();

@@ -4794,7 +4794,10 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 .wsInsightsListMeta { display: inline-flex; align-items: center; gap: .6rem; }
 .wsInsightsDue { color: #b91c1c; font-size: .78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 
-.wsInsightsTableWrap { max-height: 420px; }
+/* Taller than the generic chart table (viz.css caps it at 360px) so a team of ten and Unassigned, or seven milestones, fit unscrolled. */
+.vizChartTableWrap.wsInsightsTableWrap { max-height: 520px; }
+/* Task keys stay on one line next to long titles, also at 390 px. */
+.wsInsights .wsKeyTag { flex: none; white-space: nowrap; }
 .wsInsightsTable td[data-alert] { color: #b91c1c; font-weight: 700; }
 .wsInsightsPerson { display: inline-flex; align-items: center; gap: .5rem; }
 .wsInsightsPerson .avatar[data-unassigned] { color: #64748b; background: #eef2f7; }
@@ -4854,6 +4857,7 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
   .wsInsightsKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
   .wsInsightsKpis li { padding: .85rem .9rem; }
   .wsInsightsKpis strong { font-size: 1.3rem; }
+  .wsInsightsKpis li:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .wsInsightsControls { width: 100%; }
   .wsInsightsSegment { flex: 1; }
   .wsInsightsSegment button { flex: 1; min-height: 2.5rem; }

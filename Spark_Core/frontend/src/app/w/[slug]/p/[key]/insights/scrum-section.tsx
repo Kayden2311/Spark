@@ -39,6 +39,20 @@ function averageVelocity(data: VelocityInsights | null, rows: ReadonlyArray<{ co
   return Math.round((rows.reduce((sum, row) => sum + (row.completed ?? 0), 0) / rows.length) * 10) / 10;
 }
 
+/**
+ * "Sprint 7: 34 points at the start, 3 already done · Oct 22 – Nov 5". The base leaves out committed work that
+ * was already done when the sprint started; the difference to the frozen commitment is named so the gap
+ * between the scope and remaining lines is explained.
+ */
+function burndownSubtitle(data: Burndown): string {
+  const committed = data.unit === "points" ? data.sprint.committedPoints : data.sprint.committedCount;
+  const alreadyDone = committed === null ? 0 : Math.round((committed - data.base) * 10) / 10;
+  const done = alreadyDone > 0 ? `, ${formatCount(alreadyDone)} already done` : "";
+  const first = data.days[0]?.day ?? "";
+  const last = data.days[data.days.length - 1]?.day ?? "";
+  return `${data.sprint.name}: ${formatCount(data.base)} ${unitLabel(data.unit)} at the start${done} · ${shortDate(first)} – ${shortDate(last)}`;
+}
+
 /** Scrum: the burndown of one sprint (active by default) and the velocity of the period's completed sprints. */
 export function ScrumSection({ projectId, periodId }: { projectId: string; periodId: string | null }) {
   const sprints = useInsight<{ items: Sprint[] }>(sprintsPath(projectId));
@@ -78,7 +92,7 @@ function BurndownCard({ sprints }: { sprints: InsightQuery<{ items: Sprint[] }> 
       legend={<ChartLegend series={BURNDOWN_SERIES} />}
       loading={sprints.loading || (Boolean(selected) && !data && !burndown.error)}
       onRetry={sprints.error ? sprints.reload : burndown.reload}
-      subtitle={data ? `${data.sprint.name}: ${formatCount(data.base)} ${unitLabel(data.unit)} at the start · ${shortDate(rows[0]?.day ?? "")} – ${shortDate(rows[rows.length - 1]?.day ?? "")}` : "Work left in the sprint each day"}
+      subtitle={data ? burndownSubtitle(data) : "Work left in the sprint each day"}
       table={{
         columns: ["Day", "Ideal", "Remaining", "Scope"],
         rows: rows.map((row) => [shortDate(row.day), amount(Number(row.ideal.toFixed(1))), amount(row.remaining), amount(row.scope)]),
@@ -105,7 +119,7 @@ function VelocityCard({ velocity }: { velocity: InsightQuery<VelocityInsights> }
       loading={velocity.loading}
       onRetry={velocity.reload}
       subtitle={average !== null ? `Average ${formatCount(average)} ${unitLabel(unit)} a sprint · last ${rows.length} completed` : `Committed vs completed ${unitLabel(unit)}, last 6 sprints`}
-      table={groupedBarsTable(rows, VELOCITY_SERIES)}
+      table={groupedBarsTable(rows, VELOCITY_SERIES, { xLabel: "Sprint" })}
       title="Velocity"
     >
       <GroupedBars data={rows} series={VELOCITY_SERIES} />
