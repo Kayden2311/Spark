@@ -6,17 +6,16 @@ import { Suspense, useState, type CSSProperties, type FormEvent } from "react";
 
 import { useAuth } from "../../../../auth-context";
 import { MethodologyPicker } from "../../../_components/methodology-picker";
+import { PhaseRowsEditor } from "../../../_components/phase-rows-editor";
 import { ApiError, canManage, messageOf, workspaceApi, type Workspace, type WorkspaceMember } from "../../../_lib/api";
 import { METHODOLOGY_ACCENTS, useMethodologies, type MethodologyId, type MethodologyTemplate } from "../../../_lib/methodologies";
-import { spreadPhases } from "../../../_lib/phases";
+import { appendedDates, PHASES_MAX, PHASES_RULE, phasesValid, respreadPhases, spreadPhases } from "../../../_lib/phases";
 import { cleanKeyInput, deriveProjectKey, isValidProjectKey, PROJECT_KEY_MAX } from "../../../_lib/project-key";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useWorkspace } from "../../workspace-context";
 
 const NAME_MAX = 80;
 const DESCRIPTION_MAX = 2000;
-const PHASE_NAME_MAX = 60;
-const PHASES_MAX = 12;
 const SPRINT_WEEKS = [1, 2, 3, 4] as const;
 
 const KEY_RULE = "Use 2–10 capital letters or digits, starting with a letter.";
@@ -24,7 +23,6 @@ const KEY_TAKEN = "That key is already used in this workspace.";
 const INVALID_LEAD = "The project lead must be an active member of the workspace.";
 const RANGE_TOO_SHORT = "Give each phase at least one day — move the target date or remove a phase.";
 const RANGE_REVERSED = "The target date can't be before the start date.";
-const PHASES_RULE = "Each phase needs a name and dates inside the project dates, in order and without overlapping.";
 const TOO_MANY_PROJECTS = "This workspace already has the maximum of 50 projects. Archive one before creating another.";
 
 interface PhaseRow {
@@ -78,43 +76,6 @@ function rangeProblem(startDate: string, targetDate: string, phaseCount: number)
   }
 }
 
-/** Re-spreads the phase dates over the project range; rows keep their names. Dates are cleared when they don't fit. */
-function respread(rows: PhaseRow[], startDate: string, targetDate: string): PhaseRow[] {
-  if (!startDate || !targetDate || rows.length === 0) return rows.map((row) => ({ ...row, plannedStart: "", plannedEnd: "" }));
-  try {
-    const spread = spreadPhases(startDate, targetDate, rows.map((row) => row.name));
-    return rows.map((row, index) => ({ ...row, plannedStart: spread[index].plannedStart, plannedEnd: spread[index].plannedEnd }));
-  } catch {
-    return rows.map((row) => ({ ...row, plannedStart: "", plannedEnd: "" }));
-  }
-}
-
-/** The ISO day after `day`, computed in UTC. */
-function nextDay(day: string): string {
-  const ms = Date.parse(`${day}T00:00:00Z`);
-  return Number.isNaN(ms) ? "" : new Date(ms + 86_400_000).toISOString().slice(0, 10);
-}
-
-/** A row added after hand-edited dates runs from the day after the previous phase to the target date, when that fits. */
-function appendedDates(rows: PhaseRow[], startDate: string, targetDate: string): Pick<PhaseRow, "plannedStart" | "plannedEnd"> {
-  const previousEnd = rows.at(-1)?.plannedEnd ?? "";
-  const plannedStart = previousEnd ? nextDay(previousEnd) : startDate;
-  if (!plannedStart || !targetDate || plannedStart > targetDate) return { plannedStart: "", plannedEnd: "" };
-  return { plannedStart, plannedEnd: targetDate };
-}
-
-function phasesValid(rows: PhaseRow[], startDate: string, targetDate: string): boolean {
-  let previousEnd = "";
-  for (const row of rows) {
-    const name = row.name.trim();
-    if (!name || name.length > PHASE_NAME_MAX || !row.plannedStart || !row.plannedEnd) return false;
-    if (row.plannedStart > row.plannedEnd || row.plannedStart < startDate || row.plannedEnd > targetDate) return false;
-    if (previousEnd && row.plannedStart <= previousEnd) return false;
-    previousEnd = row.plannedEnd;
-  }
-  return rows.length > 0;
-}
-
 function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace; first: boolean; onCreated(): void }) {
   const router = useRouter();
   const { user } = useAuth();
@@ -162,7 +123,7 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
     if (id === "waterfall" && phases === null) {
       const names = templates.find((item) => item.id === id)?.defaults.phaseNames ?? [];
       const initial = names.map((phaseName, index) => ({ id: index, name: phaseName, plannedStart: "", plannedEnd: "" }));
-      setPhases(respread(initial, startDate, targetDate));
+      setPhases(respreadPhases(initial, startDate, targetDate));
       setNextPhaseId(names.length);
     }
   };
@@ -190,7 +151,7 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
     setStartError(null);
     setTargetError(null);
     setPhasesError(null);
-    if (!phaseDatesEdited) setPhases((current) => (current ? respread(current, nextStart, nextTarget) : current));
+    if (!phaseDatesEdited) setPhases((current) => (current ? respreadPhases(current, nextStart, nextTarget) : current));
   };
 
   const updatePhase = (id: number, patch: Partial<PhaseRow>) => {
@@ -203,7 +164,7 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
     if (rows.length >= PHASES_MAX) return;
     setPhasesError(null);
     const added = { id: nextPhaseId, name: `Phase ${rows.length + 1}`, plannedStart: "", plannedEnd: "" };
-    setPhases(phaseDatesEdited ? [...rows, { ...added, ...appendedDates(rows, startDate, targetDate) }] : respread([...rows, added], startDate, targetDate));
+    setPhases(phaseDatesEdited ? [...rows, { ...added, ...appendedDates(rows, startDate, targetDate) }] : respreadPhases([...rows, added], startDate, targetDate));
     setNextPhaseId((value) => value + 1);
   };
 
@@ -211,13 +172,13 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
     if (rows.length <= 1) return;
     setPhasesError(null);
     const kept = rows.filter((row) => row.id !== id);
-    setPhases(phaseDatesEdited ? kept : respread(kept, startDate, targetDate));
+    setPhases(phaseDatesEdited ? kept : respreadPhases(kept, startDate, targetDate));
   };
 
   const spreadEvenly = () => {
     setPhasesError(null);
     setPhaseDatesEdited(false);
-    setPhases(respread(rows, startDate, targetDate));
+    setPhases(respreadPhases(rows, startDate, targetDate));
   };
 
   const onSubmit = async (event: FormEvent) => {
@@ -417,61 +378,20 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
                 </div>
               </div>
 
-              <fieldset aria-describedby={phasesError ? "project-phases-error" : "project-phases-hint"} className="wsProjectPhases">
-                <legend>Phases</legend>
-                <p className="wsFieldHint" id="project-phases-hint">
-                  {phaseDatesEdited
-                    ? "You've set phase dates by hand, so they stay as they are when the project dates or phases change."
-                    : `Spread evenly over the project dates. Rename them or adjust the dates — up to ${PHASES_MAX} phases.`}
-                </p>
-                <ol className="wsProjectPhaseList">
-                  {rows.map((row, index) => {
-                    const number = index + 1;
-                    return (
-                      <li className="wsProjectPhase" key={row.id}>
-                        <span aria-hidden="true" className="wsProjectPhaseNumber">{number}</span>
-                        <input
-                          aria-label={`Phase ${number} name`}
-                          className="wsProjectPhaseName"
-                          maxLength={PHASE_NAME_MAX}
-                          onChange={(event) => updatePhase(row.id, { name: event.target.value })}
-                          value={row.name}
-                        />
-                        <input
-                          aria-label={`Phase ${number} start`}
-                          max={targetDate || undefined}
-                          min={startDate || undefined}
-                          onChange={(event) => updatePhase(row.id, { plannedStart: event.target.value })}
-                          type="date"
-                          value={row.plannedStart}
-                        />
-                        <input
-                          aria-label={`Phase ${number} end`}
-                          max={targetDate || undefined}
-                          min={startDate || undefined}
-                          onChange={(event) => updatePhase(row.id, { plannedEnd: event.target.value })}
-                          type="date"
-                          value={row.plannedEnd}
-                        />
-                        <button
-                          aria-label={`Remove phase ${number}`}
-                          className="wsGhostButton danger"
-                          disabled={rows.length <= 1}
-                          onClick={() => removePhase(row.id)}
-                          type="button"
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ol>
-                {phasesError && <p className="wsFieldError" id="project-phases-error" role="alert">{phasesError}</p>}
-                <div className="wsProjectPhaseActions">
-                  <button className="sparkSecondary wsProjectAddPhase" disabled={rows.length >= PHASES_MAX} onClick={addPhase} type="button">Add phase</button>
-                  <button className="wsGhostButton" disabled={!startDate || !targetDate || Boolean(range)} onClick={spreadEvenly} type="button">Re-spread dates evenly</button>
-                </div>
-              </fieldset>
+              <PhaseRowsEditor
+                error={phasesError}
+                extraActions={<button className="wsGhostButton" disabled={!startDate || !targetDate || Boolean(range)} onClick={spreadEvenly} type="button">Re-spread dates evenly</button>}
+                hint={phaseDatesEdited
+                  ? "You've set phase dates by hand, so they stay as they are when the project dates or phases change."
+                  : `Spread evenly over the project dates. Rename them or adjust the dates — up to ${PHASES_MAX} phases.`}
+                idPrefix="project-phases"
+                onAdd={addPhase}
+                onChange={updatePhase}
+                onRemove={removePhase}
+                rows={rows.map((row) => ({ ...row, key: row.id }))}
+                startDate={startDate}
+                targetDate={targetDate}
+              />
             </>
           )}
 

@@ -21,6 +21,7 @@ export interface IssueCard {
   storyPoints: number | null;
   dueDate: string | null;
   phaseId: string | null;
+  sprintId: string | null;
   version: number;
   completedAt: string | null;
   createdAt: string;
@@ -66,8 +67,8 @@ export function issueEtag(version: number): string {
 
 /** The card fields of an issue representation (drops detail-only fields). */
 export function toCard(issue: IssueCard): IssueCard {
-  const { id, number, key, title, type, priority, statusId, assignee, storyPoints, dueDate, phaseId, version, completedAt, createdAt } = issue;
-  return { id, number, key, title, type, priority, statusId, assignee, storyPoints, dueDate, phaseId, version, completedAt, createdAt };
+  const { id, number, key, title, type, priority, statusId, assignee, storyPoints, dueDate, phaseId, sprintId, version, completedAt, createdAt } = issue;
+  return { id, number, key, title, type, priority, statusId, assignee, storyPoints, dueDate, phaseId, sprintId, version, completedAt, createdAt };
 }
 
 export function boardPath(projectId: string): string {

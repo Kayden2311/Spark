@@ -31,6 +31,7 @@ const issueRow = {
   story_points: "2.50",
   due_date: "2026-11-02",
   phase_id: null,
+  sprint_id: null,
   version: 3,
   completed_at: null,
   created_at: new Date("2026-10-19T08:00:00Z"),
@@ -114,6 +115,7 @@ describe("issue routes", () => {
         storyPoints: 2.5,
         dueDate: "2026-11-02",
         phaseId: null,
+        sprintId: null,
         version: 3,
         completedAt: null,
         createdAt: "2026-10-19T08:00:00.000Z",
@@ -369,10 +371,11 @@ describe("issue routes", () => {
     });
 
     it.each([
-      ["an unknown key", { sprintId: issueId }],
+      ["an unknown key", { labelId: issueId }],
       ["an empty patch", {}],
       ["a non-boolean archived", { archived: "yes" }],
       ["a non-uuid anchor", { afterIssueId: "top" }],
+      ["a non-uuid sprint", { sprintId: "next" }],
     ])("rejects %s in the schema", async (_label, payload) => {
       const { response, calls } = await call(patch(payload));
       expect(response.statusCode).toBe(400);
@@ -388,6 +391,26 @@ describe("issue routes", () => {
       const params = calls.find((c) => c.sql.includes("ws_update_issue"))?.params ?? [];
       expect(params.slice(0, 2)).toEqual([issueId, 3]);
       expect(JSON.parse(String(params[2]))).toEqual(body);
+    });
+
+    it("assigns the issue to a sprint and exposes sprintId", async () => {
+      const sprintId = "7d4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
+      const { response, calls } = await call(patch({ sprintId }), [updated("ok"), detailHandler({ ...issueRow, sprint_id: sprintId, version: 4 })]);
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ sprintId, version: 4 });
+      expect(JSON.parse(String(calls.find((c) => c.sql.includes("ws_update_issue"))?.params[2]))).toEqual({ sprintId });
+    });
+
+    it("moves the issue back to the backlog with sprintId null", async () => {
+      const { calls } = await call(patch({ sprintId: null }), [updated("ok"), detailHandler()]);
+      expect(JSON.parse(String(calls.find((c) => c.sql.includes("ws_update_issue"))?.params[2]))).toEqual({ sprintId: null });
+    });
+
+    it("reports Invalid sprint from the database", async () => {
+      const error = Object.assign(dbError("22023"), { message: "Invalid sprint" });
+      const { response } = await call(patch({ sprintId: null }), [["ws_update_issue", () => error]]);
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({ code: "invalid_input", detail: "Invalid sprint." });
     });
 
     it("answers 412 with the current issue on a stale version", async () => {

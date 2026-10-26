@@ -11,7 +11,7 @@ import { preconditionFailed, preconditionRequired, type MemberGuard } from "./gu
 const ISSUE_TYPES = ["task", "bug", "story"] as const;
 const PRIORITIES = ["lowest", "low", "medium", "high", "highest"] as const;
 const CREATE_KEYS = ["title", "description", "type", "priority", "statusId", "assigneeUserId", "storyPoints", "dueDate", "phaseId"] as const;
-const PATCH_KEYS = ["title", "description", "type", "priority", "statusId", "afterIssueId", "assigneeUserId", "storyPoints", "dueDate", "phaseId", "archived"] as const;
+const PATCH_KEYS = ["title", "description", "type", "priority", "statusId", "afterIssueId", "assigneeUserId", "storyPoints", "dueDate", "phaseId", "sprintId", "archived"] as const;
 const BOARD_LIMIT = 500;
 const UPDATE_RATE_LIMIT = { rateLimit: { max: 120, timeWindow: 60 * 1000 } } as const;
 // A user the actor can no longer see (left the workspace) still owns history; they are shown without a profile.
@@ -31,6 +31,7 @@ export interface IssueCard {
   storyPoints: number | null;
   dueDate: string | null;
   phaseId: string | null;
+  sprintId: string | null;
   version: number;
   completedAt: string | null;
   createdAt: string;
@@ -62,6 +63,7 @@ const cardProperties = {
   storyPoints: { type: ["number", "null"] },
   dueDate: nullableString,
   phaseId: nullableString,
+  sprintId: nullableString,
   version: { type: "integer" },
   completedAt: nullableString,
   createdAt: { type: "string" },
@@ -143,6 +145,7 @@ interface CardRow {
   story_points: string | null;
   due_date: string | null;
   phase_id: string | null;
+  sprint_id: string | null;
   version: number;
   completed_at: Date | null;
   created_at: Date;
@@ -163,7 +166,7 @@ interface DetailRow extends CardRow {
 // joined through the coworker-scoped users policy.
 const CARD_COLUMNS = `i.id, i.number, p.key AS project_key, i.title, i.type, i.priority, i.status_id,
   i.assignee_user_id, a.display_name AS assignee_display_name, a.avatar_url AS assignee_avatar_url,
-  i.story_points, to_char(i.due_date, 'YYYY-MM-DD') AS due_date, i.phase_id, i.version, i.completed_at,
+  i.story_points, to_char(i.due_date, 'YYYY-MM-DD') AS due_date, i.phase_id, i.sprint_id, i.version, i.completed_at,
   i.created_at, i.created_at::text AS cursor_ts`;
 
 const CARD_FROM = `FROM spark.issues i
@@ -194,6 +197,7 @@ function toCard(row: CardRow): IssueCard & { cursorTs: string } {
     storyPoints: row.story_points === null ? null : Number(row.story_points),
     dueDate: row.due_date,
     phaseId: row.phase_id,
+    sprintId: row.sprint_id,
     version: row.version,
     completedAt: iso(row.completed_at),
     createdAt: row.created_at.toISOString(),
@@ -292,7 +296,7 @@ const patchBody = {
   type: "object",
   minProperties: 1,
   propertyNames: { enum: PATCH_KEYS },
-  properties: { ...fieldSchemas, afterIssueId: nullableUuid, archived: { type: "boolean" } },
+  properties: { ...fieldSchemas, afterIssueId: nullableUuid, sprintId: nullableUuid, archived: { type: "boolean" } },
   additionalProperties: false,
 } as const;
 
@@ -328,7 +332,7 @@ interface CreateBody {
   phaseId?: string | null;
 }
 
-type PatchBody = Partial<CreateBody & { afterIssueId: string | null; archived: boolean }>;
+type PatchBody = Partial<CreateBody & { afterIssueId: string | null; sprintId: string | null; archived: boolean }>;
 
 interface ListQuery { status?: string; assignee?: string; q?: string; archived: boolean; cursor?: string; limit?: number }
 

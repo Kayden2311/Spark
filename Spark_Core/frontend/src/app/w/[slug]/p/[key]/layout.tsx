@@ -5,18 +5,17 @@ import { useParams, usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import { useAuth } from "../../../../auth-context";
-import { canManage } from "../../../_lib/api";
+import { canPlan } from "../../../_lib/planning";
 import { isValidProjectKey } from "../../../_lib/project-key";
 import { methodologyAccent, methodologyName, methodologyOf, projectEtag, type ProjectDetail } from "../../../_lib/projects";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useWorkspace } from "../../workspace-context";
 import { ProjectProvider, type ToastTone } from "./project-context";
-import { ProjectSettingsDialog } from "./settings-dialog";
 
 type Toast = { id: number; text: string; tone: ToastTone };
 type Announcement = { id: number; text: string };
 
-/** Shared header (name, methodology, Settings, view tabs) and the one live region for every project view. */
+/** Shared header (name, methodology, view tabs: Board · Backlog (Scrum) · Timeline (Waterfall, or a kept plan) · Overview · Settings (planners)) and the one live region for every project view. */
 export default function ProjectLayout({ children }: { children: ReactNode }) {
   const { key = "" } = useParams<{ key: string }>();
   const pathname = usePathname();
@@ -28,7 +27,6 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
   const [override, setOverride] = useState<{ source: unknown; project: ProjectDetail; etag: string } | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
-  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     if (!toast) return;
@@ -44,7 +42,17 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
   const etag = replaced?.etag ?? loaded.etag ?? (project ? projectEtag(project.version) : "");
   const ready = project && project.key === key ? project : null;
   const reloadProject = loaded.reload;
-  const value = useMemo(() => (ready ? { project: ready, etag, notify, announce, reloadProject } : null), [ready, etag, notify, announce, reloadProject]);
+  const source = loaded.data;
+  const reloadProjects = projects.reload;
+  // The shell and home list the project too (name, lead, methodology).
+  const replaceProject = useCallback((next: ProjectDetail, nextEtag?: string) => {
+    setOverride({ source, project: next, etag: nextEtag ?? projectEtag(next.version) });
+    reloadProjects();
+  }, [source, reloadProjects]);
+  const value = useMemo(
+    () => (ready ? { project: ready, etag, notify, announce, reloadProject, replaceProject } : null),
+    [ready, etag, notify, announce, reloadProject, replaceProject],
+  );
 
   let content: ReactNode;
   if (!valid || loaded.errorStatus === 404) {
@@ -79,12 +87,17 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
   } else {
     const base = `/w/${workspace.slug}/p/${encodeURIComponent(ready.key)}`;
     const methodology = methodologyOf(ready.methodology);
-    const canEdit = canManage(workspace.role) || (Boolean(user?.id) && ready.lead?.id === user?.id);
+    const canEdit = canPlan(workspace.role, ready, user?.id);
     const accent = { "--method-accent": methodologyAccent(ready.methodology) } as CSSProperties;
+    // Backlog belongs to Scrum and Timeline to Waterfall; Settings is for the people who can change the plan.
     const tabs = [
-      { href: base, label: "Board" },
-      { href: `${base}/overview`, label: "Overview" },
-    ];
+      { href: base, label: "Board", show: true },
+      { href: `${base}/backlog`, label: "Backlog", show: methodology === "scrum" },
+      // A project that left Waterfall keeps its phases and milestones there as history (milestones stay editable).
+      { href: `${base}/timeline`, label: "Timeline", show: methodology === "waterfall" || ready.phases.length > 0 || ready.milestones.length > 0 },
+      { href: `${base}/overview`, label: "Overview", show: true },
+      { href: `${base}/settings`, label: "Settings", show: canEdit },
+    ].filter((tab) => tab.show);
     content = (
       <div className="wsProject" style={accent}>
         <div aria-hidden="true" className="wsGlow" />
@@ -96,12 +109,6 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
             </p>
             <h1>{ready.name}</h1>
           </div>
-          {canEdit && (
-            <button className="sparkSecondary wsProjectSettingsButton" onClick={() => setEditing(true)} type="button">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
-              Settings
-            </button>
-          )}
           <nav aria-label="Project views" className="wsProjectTabs">
             {tabs.map((tab) => (
               <Link aria-current={pathname === tab.href ? "page" : undefined} href={tab.href} key={tab.href}>{tab.label}</Link>
@@ -109,24 +116,6 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
           </nav>
         </section>
         <ProjectProvider value={value}>{children}</ProjectProvider>
-        {editing && (
-          <ProjectSettingsDialog
-            etag={etag}
-            onClose={() => setEditing(false)}
-            onSaved={(saved, nextEtag) => {
-              setEditing(false);
-              setOverride({ source: loaded.data, project: saved, etag: nextEtag });
-              notify("Project settings saved.");
-              projects.reload();
-            }}
-            onStale={(current) => {
-              setOverride({ source: loaded.data, project: current, etag: projectEtag(current.version) });
-              projects.reload();
-            }}
-            project={ready}
-            workspace={workspace}
-          />
-        )}
       </div>
     );
   }

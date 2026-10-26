@@ -162,6 +162,27 @@
       "when": 1792360000000,
       "tag": "0022_admin_dashboard_insights",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792370000000,
+      "tag": "0023_sprint_writes",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792380000000,
+      "tag": "0024_phase_milestone_writes",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792390000000,
+      "tag": "0025_methodology_switch",
+      "breakpoints": true
     }
   ]
 }

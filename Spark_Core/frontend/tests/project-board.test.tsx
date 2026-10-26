@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CATALOG } from "./methodology-catalog";
 import { KANBAN, KANBAN_BOARD, LIST, SCRUM, WATERFALL, issueDetail } from "./project-fixtures";
 
-const navigation = { params: { slug: "northstar-labs", key: "OPS" } as Record<string, string>, pathname: "/w/northstar-labs/p/OPS" };
+const navigation = { params: { slug: "northstar-labs", key: "OPS" } as Record<string, string>, pathname: "/w/northstar-labs/p/OPS", search: "" };
 const auth = {
   isAuthenticated: true,
   isLoading: false,
@@ -19,7 +19,7 @@ const auth = {
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   usePathname: () => navigation.pathname,
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(navigation.search),
   useParams: () => navigation.params,
 }));
 vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
@@ -103,7 +103,10 @@ async function pickUpFirst() {
   await userEvent.keyboard(" ");
 }
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  navigation.search = "";
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("project board", () => {
@@ -135,7 +138,7 @@ describe("project board", () => {
     expect(within(tabs).getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
     expect(within(tabs).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/w/northstar-labs/p/OPS/overview");
     expect(screen.getByRole("heading", { level: 1, name: "Ops desk" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(within(tabs).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/w/northstar-labs/p/OPS/settings");
     expect(screen.queryByText("Showing the first 500 tasks.")).not.toBeInTheDocument();
   });
 
@@ -159,6 +162,53 @@ describe("project board", () => {
     mockApi({ "GET /api/v1/projects/p-web/board": json(waterfallBoard) }, WATERFALL);
     await renderBoard("WEB");
     expect(await screen.findByText("Design")).toHaveClass("wsBoardPhase");
+  });
+
+  it("shows only unphased cards with ?phase=none and a chip to clear the filter", async () => {
+    const waterfallBoard = {
+      ...KANBAN_BOARD,
+      project: { id: "p-web", key: "WEB", name: "Website relaunch", methodology: "waterfall" },
+      issues: KANBAN_BOARD.issues.map((issue) => (issue.id === "i1" || issue.id === "i4" ? { ...issue, phaseId: "ph2" } : issue)),
+    };
+    navigation.search = "phase=none";
+    mockApi({ "GET /api/v1/projects/p-web/board": json(waterfallBoard) }, WATERFALL);
+    const board = await renderBoard("WEB");
+    expect(await within(board).findByText("Order new laptops")).toBeInTheDocument();
+    expect(cardsIn("Ready")).toEqual(["OPS-2"]);
+    expect(cardsIn("Review")).toEqual(["OPS-5", "OPS-6"]);
+    expect(screen.queryByText("Reset VPN tokens")).not.toBeInTheDocument();
+    expect(within(board).getByText("Showing unphased tasks")).toBeInTheDocument();
+    expect(within(board).getByRole("link", { name: "Clear the unphased filter" })).toHaveAttribute("href", "/w/northstar-labs/p/WEB");
+  });
+
+  it("moves a card with the keyboard among the visible cards while filtered", async () => {
+    // Review holds OPS-4 (phased, hidden), OPS-5 and OPS-6.
+    const waterfallBoard = {
+      ...KANBAN_BOARD,
+      project: { id: "p-web", key: "WEB", name: "Website relaunch", methodology: "waterfall" },
+      issues: KANBAN_BOARD.issues.map((issue) => (issue.id === "i4" ? { ...issue, phaseId: "ph2" } : issue)),
+    };
+    navigation.search = "phase=none";
+    mockApi({ "GET /api/v1/projects/p-web/board": json(waterfallBoard) }, WATERFALL);
+    await renderBoard("WEB");
+    (await screen.findByRole("button", { name: /^OPS-6:/ })).focus();
+    await userEvent.keyboard(" {ArrowUp}");
+    expect(liveRegion()).toHaveTextContent("OPS-6 in Review, position 1 of 2");
+    expect(cardsIn("Review")).toEqual(["OPS-6", "OPS-5"]);
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(requests("PATCH")).toHaveLength(1));
+    // Above the first visible card: the top of the column.
+    expect(requests("PATCH")[0]).toMatchObject({ key: "PATCH /api/v1/issues/i6", body: { afterIssueId: null } });
+    expect(liveRegion()).toHaveTextContent("Dropped OPS-6 in Review, position 1 of 2.");
+  });
+
+  it("shows every card without the phase filter", async () => {
+    const waterfallBoard = { ...KANBAN_BOARD, project: { id: "p-web", key: "WEB", name: "Website relaunch", methodology: "waterfall" }, issues: KANBAN_BOARD.issues.map((issue) => (issue.id === "i1" ? { ...issue, phaseId: "ph2" } : issue)) };
+    mockApi({ "GET /api/v1/projects/p-web/board": json(waterfallBoard) }, WATERFALL);
+    const board = await renderBoard("WEB");
+    expect(await within(board).findByText("Reset VPN tokens")).toBeInTheDocument();
+    expect(cardsIn("Ready")).toEqual(["OPS-1", "OPS-2"]);
+    expect(within(board).queryByText("Showing unphased tasks")).not.toBeInTheDocument();
   });
 
   it("moves a card with the keyboard and announces each step", async () => {

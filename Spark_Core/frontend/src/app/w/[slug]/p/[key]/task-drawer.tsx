@@ -11,7 +11,7 @@ import { issueEtag, priorityLabel, typeLabel, type BoardState, type IssueDetail 
 import { methodologyOf, type ProjectDetail } from "../../../_lib/projects";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useProject } from "./project-context";
-import { TEAMMATE_UPDATE } from "./settings-dialog";
+import { TEAMMATE_UPDATE } from "./settings-form";
 
 const TITLE_MAX = 200;
 const DESCRIPTION_MAX = 10000;

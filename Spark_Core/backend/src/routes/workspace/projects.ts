@@ -32,19 +32,31 @@ export interface Project {
   progress: { total: number; done: number; open: number };
 }
 
+export interface Phase {
+  id: string;
+  name: string;
+  position: number;
+  plannedStart: string;
+  plannedEnd: string;
+  baselineStart: string | null;
+  baselineEnd: string | null;
+  status: string;
+}
+
+export interface Milestone {
+  id: string;
+  name: string;
+  phaseId: string | null;
+  dueDate: string;
+  baselineDueDate: string | null;
+  completedAt: string | null;
+  version: number;
+}
+
 export interface ProjectDetail extends Project {
   statuses: Array<{ id: string; name: string; category: string; position: number; wipLimit: number | null }>;
-  phases: Array<{
-    id: string;
-    name: string;
-    position: number;
-    plannedStart: string;
-    plannedEnd: string;
-    baselineStart: string | null;
-    baselineEnd: string | null;
-    status: string;
-  }>;
-  milestones: Array<{ id: string; name: string; phaseId: string | null; dueDate: string; baselineDueDate: string | null; completedAt: string | null }>;
+  phases: Phase[];
+  milestones: Milestone[];
 }
 
 const nullableString = { type: ["string", "null"] } as const;
@@ -73,7 +85,34 @@ const projectProperties = {
 
 const projectResponse = { type: "object", properties: projectProperties } as const;
 
-const projectDetailResponse = {
+export const phaseResponse = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+    position: { type: "integer" },
+    plannedStart: { type: "string" },
+    plannedEnd: { type: "string" },
+    baselineStart: nullableString,
+    baselineEnd: nullableString,
+    status: { type: "string" },
+  },
+} as const;
+
+export const milestoneResponse = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+    phaseId: nullableString,
+    dueDate: { type: "string" },
+    baselineDueDate: nullableString,
+    completedAt: nullableString,
+    version: { type: "integer" },
+  },
+} as const;
+
+export const projectDetailResponse = {
   type: "object",
   properties: {
     ...projectProperties,
@@ -90,36 +129,8 @@ const projectDetailResponse = {
         },
       },
     },
-    phases: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          name: { type: "string" },
-          position: { type: "integer" },
-          plannedStart: { type: "string" },
-          plannedEnd: { type: "string" },
-          baselineStart: nullableString,
-          baselineEnd: nullableString,
-          status: { type: "string" },
-        },
-      },
-    },
-    milestones: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          name: { type: "string" },
-          phaseId: nullableString,
-          dueDate: { type: "string" },
-          baselineDueDate: nullableString,
-          completedAt: nullableString,
-        },
-      },
-    },
+    phases: { type: "array", items: phaseResponse },
+    milestones: { type: "array", items: milestoneResponse },
   },
 } as const;
 
@@ -127,6 +138,7 @@ const projectDetailResponse = {
 
 interface ProjectRow {
   id: string;
+  tenant_id: string;
   key: string;
   name: string;
   description: string | null;
@@ -145,7 +157,7 @@ interface ProjectRow {
 
 // Dates leave the database as YYYY-MM-DD text so no time zone conversion can shift them. The lead is
 // joined through the coworker-scoped users policy; a lead the actor can no longer see reads as no lead.
-const SELECT_PROJECT = `SELECT p.id, p.key, p.name, p.description, p.methodology,
+const SELECT_PROJECT = `SELECT p.id, p.tenant_id, p.key, p.name, p.description, p.methodology,
   to_char(p.start_date, 'YYYY-MM-DD') AS start_date, to_char(p.target_date, 'YYYY-MM-DD') AS target_date,
   p.sprint_length_days, p.baselined_at, p.settings_version, p.created_at,
   u.id AS lead_id, u.display_name AS lead_display_name,
@@ -189,36 +201,58 @@ interface PhaseRow {
   baseline_end: string | null;
   status: string;
 }
-interface MilestoneRow { id: string; name: string; phase_id: string | null; due_date: string; baseline_due_date: string | null; completed_at: Date | null }
+interface MilestoneRow {
+  id: string;
+  name: string;
+  phase_id: string | null;
+  due_date: string;
+  baseline_due_date: string | null;
+  completed_at: Date | null;
+  version: number;
+}
 
-/** The project as the actor sees it (any active member), or null when it is not visible. */
-export async function readProjectDetail(client: PoolClient, by: { id: string } | { workspaceId: string; key: string }): Promise<ProjectDetail | null> {
-  const found = "id" in by
-    ? await client.query<ProjectRow>(`${SELECT_PROJECT} WHERE p.id = $1`, [by.id])
-    : await client.query<ProjectRow>(`${SELECT_PROJECT} WHERE p.tenant_id = $1 AND p.key = $2`, [by.workspaceId, by.key]);
-  const row = found.rows[0];
-  if (!row) return null;
-  const scope = [row.id];
-  const statuses = await client.query<StatusRow>(
-    "SELECT s.id, s.name, s.category, s.position, s.wip_limit FROM spark.issue_statuses s WHERE s.project_id = $1 ORDER BY s.position, s.id",
-    scope,
+const MILESTONE_COLUMNS = `ms.id, ms.name, ms.phase_id, to_char(ms.due_date, 'YYYY-MM-DD') AS due_date,
+  to_char(ms.baseline_due_date, 'YYYY-MM-DD') AS baseline_due_date, ms.completed_at, ms.version`;
+
+function toMilestone(m: MilestoneRow): Milestone {
+  return {
+    id: m.id,
+    name: m.name,
+    phaseId: m.phase_id,
+    dueDate: m.due_date,
+    baselineDueDate: m.baseline_due_date,
+    completedAt: m.completed_at ? m.completed_at.toISOString() : null,
+    version: m.version,
+  };
+}
+
+/** One milestone as the actor sees it (any active member of its workspace), or null when it is not visible. */
+export async function readMilestone(client: PoolClient, milestoneId: string): Promise<Milestone | null> {
+  const found = await client.query<MilestoneRow>(
+    `SELECT ${MILESTONE_COLUMNS} FROM spark.project_milestones ms
+     WHERE ms.id = $1 AND ms.tenant_id = ANY ((SELECT spark.session_workspace_ids())::uuid[])`,
+    [milestoneId],
   );
+  const row = found.rows[0];
+  return row ? toMilestone(row) : null;
+}
+
+/** The phase plan and milestones of a project the caller has already resolved. */
+export async function readPlanItems(client: PoolClient, tenantId: string, projectId: string): Promise<{ phases: Phase[]; milestones: Milestone[] }> {
+  const scope = [tenantId, projectId];
   const phases = await client.query<PhaseRow>(
     `SELECT ph.id, ph.name, ph.position, to_char(ph.planned_start, 'YYYY-MM-DD') AS planned_start,
      to_char(ph.planned_end, 'YYYY-MM-DD') AS planned_end, to_char(ph.baseline_start, 'YYYY-MM-DD') AS baseline_start,
      to_char(ph.baseline_end, 'YYYY-MM-DD') AS baseline_end, ph.status
-     FROM spark.project_phases ph WHERE ph.project_id = $1 ORDER BY ph.position`,
+     FROM spark.project_phases ph WHERE ph.tenant_id = $1 AND ph.project_id = $2 ORDER BY ph.position`,
     scope,
   );
   const milestones = await client.query<MilestoneRow>(
-    `SELECT ms.id, ms.name, ms.phase_id, to_char(ms.due_date, 'YYYY-MM-DD') AS due_date,
-     to_char(ms.baseline_due_date, 'YYYY-MM-DD') AS baseline_due_date, ms.completed_at
-     FROM spark.project_milestones ms WHERE ms.project_id = $1 ORDER BY ms.due_date, ms.name, ms.id`,
+    `SELECT ${MILESTONE_COLUMNS} FROM spark.project_milestones ms
+     WHERE ms.tenant_id = $1 AND ms.project_id = $2 ORDER BY ms.due_date, ms.name, ms.id`,
     scope,
   );
   return {
-    ...toProject(row),
-    statuses: statuses.rows.map((s) => ({ id: s.id, name: s.name, category: s.category, position: Number(s.position), wipLimit: s.wip_limit })),
     phases: phases.rows.map((p) => ({
       id: p.id,
       name: p.name,
@@ -229,14 +263,25 @@ export async function readProjectDetail(client: PoolClient, by: { id: string } |
       baselineEnd: p.baseline_end,
       status: p.status,
     })),
-    milestones: milestones.rows.map((m) => ({
-      id: m.id,
-      name: m.name,
-      phaseId: m.phase_id,
-      dueDate: m.due_date,
-      baselineDueDate: m.baseline_due_date,
-      completedAt: m.completed_at ? m.completed_at.toISOString() : null,
-    })),
+    milestones: milestones.rows.map(toMilestone),
+  };
+}
+
+/** The project as the actor sees it (any active member), or null when it is not visible. */
+export async function readProjectDetail(client: PoolClient, by: { id: string } | { workspaceId: string; key: string }): Promise<ProjectDetail | null> {
+  const found = "id" in by
+    ? await client.query<ProjectRow>(`${SELECT_PROJECT} WHERE p.id = $1`, [by.id])
+    : await client.query<ProjectRow>(`${SELECT_PROJECT} WHERE p.tenant_id = $1 AND p.key = $2`, [by.workspaceId, by.key]);
+  const row = found.rows[0];
+  if (!row) return null;
+  const statuses = await client.query<StatusRow>(
+    "SELECT s.id, s.name, s.category, s.position, s.wip_limit FROM spark.issue_statuses s WHERE s.tenant_id = $1 AND s.project_id = $2 ORDER BY s.position, s.id",
+    [row.tenant_id, row.id],
+  );
+  return {
+    ...toProject(row),
+    statuses: statuses.rows.map((s) => ({ id: s.id, name: s.name, category: s.category, position: Number(s.position), wipLimit: s.wip_limit })),
+    ...(await readPlanItems(client, row.tenant_id, row.id)),
   };
 }
 

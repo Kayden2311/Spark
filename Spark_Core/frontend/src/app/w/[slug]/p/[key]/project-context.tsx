@@ -16,6 +16,8 @@ interface ProjectContextValue {
   announce(text: string): void;
   /** Refetches the project in the background (for example its progress after board changes). */
   reloadProject(): void;
+  /** Shows a project a write returned (or a teammate's newer copy from a 412) until the next load. */
+  replaceProject(project: ProjectDetail, etag?: string): void;
 }
 
 const ProjectContext = createContext<ProjectContextValue | null>(null);

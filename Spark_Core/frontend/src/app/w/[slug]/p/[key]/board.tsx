@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import { initials } from "../../../../components";
-import { ApiError, messageOf, workspaceApi } from "../../../_lib/api";
+import { ApiError, messageOf } from "../../../_lib/api";
 import { addCard, columnIssues, currentTarget, keyboardTarget, moveCard, positionOf, removeCard, replaceCard, wipBlocked, wipMessage, type ArrowKey, type MoveTarget } from "../../../_lib/board-moves";
 import { boardPath, createIssue, moveIssue, priorityLabel, toCard, typeLabel, type BoardState, type BoardStatus, type IssueCard, type IssueDetail, type IssueMove } from "../../../_lib/issues";
 import { formatDay, methodologyOf, todayIso } from "../../../_lib/projects";
-import { useWorkspaceData } from "../../../_lib/use-workspace-data";
+import { useOptimisticBoard } from "../../../_lib/use-optimistic-board";
 import { useWorkspace } from "../../workspace-context";
+import { MoveMenu } from "./move-menu";
 import { useProject } from "./project-context";
 import { TASK_GONE, TaskDrawer } from "./task-drawer";
 
@@ -18,6 +19,8 @@ export const TEAMMATE_MOVED = "Updated by a teammate — the board was refreshed
 export const TEAMMATE_MOVED_STALE = "Updated by a teammate. Reload the page to see the latest board.";
 const ARROWS: readonly string[] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
 const ISSUE_PARAM = "issue";
+/** `?phase=none` (the Timeline's Unphased link) shows only the cards without a phase. */
+const PHASE_PARAM = "phase";
 export const TASK_NOT_LOADED = "That task isn't on the loaded board. Open it from the task list.";
 
 /** Sets or removes ?issue= without a navigation; Next.js syncs useSearchParams with history.replaceState. */
@@ -53,16 +56,11 @@ type MoveSource = "keyboard" | "pointer" | "menu";
 export function ProjectBoard() {
   const { project, notify, announce, reloadProject } = useProject();
   const { workspace } = useWorkspace();
-  const issueParam = useSearchParams().get(ISSUE_PARAM);
+  const searchParams = useSearchParams();
+  const issueParam = searchParams.get(ISSUE_PARAM);
+  const unphasedOnly = searchParams.get(PHASE_PARAM) === "none";
   const path = boardPath(project.id);
-  const loaded = useWorkspaceData<BoardState>(path);
-  const base = loaded.dataPath === path ? loaded.data : null;
-  // Optimistic edits apply to the loaded copy they were made on; a reload (or 412 refresh) drops them.
-  const [local, setLocal] = useState<{ source: BoardState; board: BoardState } | null>(null);
-  const committed = base && local?.source === base ? local.board : base;
-  const baseRef = useRef<BoardState | null>(null);
-  // Moves still waiting for the API; the silent refresh after a move waits until none are left.
-  const pendingRef = useRef(0);
+  const { loaded, base, committed, pendingRef, update, refresh } = useOptimisticBoard(path);
   const [pickup, setPickup] = useState<Pickup | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -96,10 +94,6 @@ export function ProjectBoard() {
     notify(missingLink.truncated ? TASK_NOT_LOADED : TASK_GONE, missingLink.truncated ? "info" : "error");
   }, [missingLink, notify]);
 
-  useEffect(() => {
-    baseRef.current = base;
-  }, [base]);
-
   // Moving a card to another column remounts it, so focus follows it explicitly.
   useEffect(() => {
     if (focusRequest) document.querySelector<HTMLElement>(focusRequest.selector)?.focus();
@@ -107,30 +101,6 @@ export function ProjectBoard() {
 
   const focusCard = (issueId: string) => setFocusRequest((current) => ({ selector: `[data-card-id="${issueId}"]`, serial: (current?.serial ?? 0) + 1 }));
   const focusMoveButton = (issueId: string) => setFocusRequest((current) => ({ selector: `[data-move-for="${issueId}"]`, serial: (current?.serial ?? 0) + 1 }));
-
-  /** Applies a change to the board copy that `source` was loaded as; changes for an outdated copy are dropped. */
-  const update = (source: BoardState, change: (board: BoardState) => BoardState) => {
-    if (baseRef.current !== null && source !== baseRef.current) return;
-    setLocal((previous) => ({ source, board: change(previous && previous.source === source ? previous.board : source) }));
-  };
-
-  /**
-   * Refetches the board without a loading state and puts it in place of the local copy, so versions
-   * reranked by the server and counts stay current. A silent refresh is skipped while other moves are
-   * in flight (the last one to settle refreshes again); `force` applies it regardless. Resolves false
-   * when the board could not be fetched.
-   */
-  const refresh = async (force: boolean): Promise<boolean> => {
-    const source = baseRef.current;
-    if (!source) return false;
-    try {
-      const { data } = await workspaceApi<BoardState>(path);
-      if (baseRef.current === source && (force || pendingRef.current === 0)) setLocal({ source, board: data });
-      return true;
-    } catch {
-      return false;
-    }
-  };
 
   const setNotice = (statusId: string, text: string | null) =>
     setNotices((current) => {
@@ -165,8 +135,14 @@ export function ProjectBoard() {
   const today = todayIso();
   const statusById = new Map(board.statuses.map((status) => [status.id, status]));
 
+  /**
+   * The cards the viewer sees: with ?phase=none only unphased ones. Keyboard targets, positions and focus
+   * use it, so a move steps over visible cards only; the API still places the card among all of them.
+   */
+  const view = (state: BoardState): BoardState => (unphasedOnly ? { ...state, issues: state.issues.filter((issue) => issue.phaseId === null) } : state);
+
   const describe = (state: BoardState, issue: IssueCard) => {
-    const where = positionOf(state, issue.id);
+    const where = positionOf(view(state), issue.id);
     const status = where ? state.statuses.find((item) => item.id === where.statusId) : undefined;
     return where && status ? `${status.name}, position ${where.position} of ${where.size}` : "";
   };
@@ -251,7 +227,7 @@ export function ProjectBoard() {
     }
     if (ARROWS.includes(key)) {
       event.preventDefault();
-      const target = keyboardTarget(pickup.preview, issue.id, key as ArrowKey);
+      const target = keyboardTarget(view(pickup.preview), issue.id, key as ArrowKey);
       if (!target) {
         announce(`${issue.key} in ${describe(pickup.preview, issue)}`);
         return;
@@ -299,7 +275,7 @@ export function ProjectBoard() {
     const issue = committed.issues.find((item) => item.id === issueId);
     const fallback = `[data-card-id]:not([data-card-id="${issueId}"])`;
     if (!issue) return fallback;
-    const column = columnIssues(committed, issue.statusId);
+    const column = columnIssues(view(committed), issue.statusId);
     const index = column.findIndex((item) => item.id === issueId);
     const neighbour = column[index + 1] ?? column[index - 1];
     if (neighbour) return `[data-card-id="${neighbour.id}"]`;
@@ -405,9 +381,16 @@ export function ProjectBoard() {
           Showing the first 500 tasks.
         </p>
       )}
+      {unphasedOnly && (
+        <p className="wsBoardFilter">
+          <span>Showing unphased tasks</span>
+          <span aria-hidden="true">·</span>
+          <Link aria-label="Clear the unphased filter" href={`/w/${workspace.slug}/p/${encodeURIComponent(project.key)}`}>Clear</Link>
+        </p>
+      )}
       <div className="wsBoardScroller">
         {board.statuses.map((status) => {
-          const cards = columnIssues(board, status.id);
+          const cards = columnIssues(view(board), status.id);
           const full = wipBlocked(committed, null, status.id);
           const notice = notices[status.id] ?? (full && status.category !== "done" ? wipMessage(status) : null);
           const noticeId = `${helpId}-notice-${status.id}`;
@@ -436,13 +419,17 @@ export function ProjectBoard() {
                     marker={over && over.afterIssueId === issue.id ? marker : null}
                     menu={menuFor === issue.id ? (
                       <MoveMenu
-                        board={committed}
-                        issue={issue}
+                        issueId={issue.id}
+                        label={`Move ${issue.key} to`}
                         onClose={(restoreFocus) => {
                           setMenuFor(null);
                           if (restoreFocus) focusMoveButton(issue.id);
                         }}
-                        onPick={(target) => moveToColumn(issue, target)}
+                        onPick={(option) => {
+                          const target = committed.statuses.find((item) => item.id === option.id);
+                          if (target) moveToColumn(issue, target);
+                        }}
+                        options={committed.statuses.map((item) => ({ id: item.id, name: item.name, current: item.id === issue.statusId, disabled: wipBlocked(committed, issue.id, item.id) }))}
                       />
                     ) : null}
                     menuOpen={menuFor === issue.id}
@@ -570,94 +557,6 @@ function BoardCardItem({ issue, helpId, picked, busy, dragging, overdue, phaseNa
       </li>
       {marker}
     </>
-  );
-}
-
-function MoveMenu({ issue, board, onClose, onPick }: {
-  issue: IssueCard;
-  board: BoardState;
-  onClose(restoreFocus: boolean): void;
-  onPick(status: BoardStatus): void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-
-  useEffect(() => {
-    closeRef.current = onClose;
-  }, [onClose]);
-
-  // The board scrolls sideways, which clips anything inside it, so the menu lives in <body> with fixed
-  // coordinates taken from its button: below it, or above it when the viewport has no room below.
-  useLayoutEffect(() => {
-    const menu = ref.current;
-    const anchor = document.querySelector<HTMLElement>(`[data-move-for="${issue.id}"]`);
-    if (!menu || !anchor) return;
-    const rect = anchor.getBoundingClientRect();
-    const margin = 8;
-    const below = window.innerHeight - rect.bottom;
-    const top = below >= menu.offsetHeight + margin || rect.top < menu.offsetHeight + margin ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
-    const left = Math.min(Math.max(margin, rect.right - menu.offsetWidth), window.innerWidth - menu.offsetWidth - margin);
-    menu.style.top = `${Math.max(margin, top)}px`;
-    menu.style.left = `${Math.max(margin, left)}px`;
-  }, [issue.id]);
-
-  useEffect(() => {
-    ref.current?.querySelector<HTMLElement>("[role=\"menuitemradio\"]:not([aria-disabled=\"true\"])")?.focus({ preventScroll: true });
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      const anchor = document.querySelector(`[data-move-for="${issue.id}"]`);
-      if (!ref.current?.contains(target) && !anchor?.contains(target)) closeRef.current(false);
-    };
-    // Fixed coordinates go stale when anything scrolls or the viewport changes.
-    const onMoved = (event: Event) => {
-      if (!(event.target instanceof Node && ref.current?.contains(event.target))) closeRef.current(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("scroll", onMoved, true);
-    window.addEventListener("resize", onMoved);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("scroll", onMoved, true);
-      window.removeEventListener("resize", onMoved);
-    };
-  }, [issue.id]);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=\"menuitemradio\"]") ?? []);
-    const index = items.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose(true);
-    } else if (event.key === "Tab") {
-      // The menu sits at the end of <body>; return to the button so Tab continues from the card.
-      event.preventDefault();
-      onClose(true);
-    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const step = event.key === "ArrowDown" ? 1 : -1;
-      items[(index + step + items.length) % items.length]?.focus();
-    } else if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      (event.key === "Home" ? items[0] : items.at(-1))?.focus();
-    }
-  };
-
-  return createPortal(
-    <div aria-label={`Move ${issue.key} to`} className="wsBoardMenu" onKeyDown={onKeyDown} ref={ref} role="menu">
-      {board.statuses.map((status) => {
-        const current = status.id === issue.statusId;
-        const full = !current && wipBlocked(board, issue.id, status.id);
-        return (
-          <button aria-checked={current} aria-disabled={full || undefined} aria-label={`${status.name}${current ? " (current)" : full ? " (full)" : ""}`} className="wsBoardMenuItem" key={status.id} onClick={() => !full && onPick(status)} role="menuitemradio" tabIndex={-1} type="button">
-            <span aria-hidden="true" className="wsBoardMenuCheck">{current && <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>}</span>
-            {status.name}
-            {current && <span className="wsBoardMenuHint"> (current)</span>}
-            {full && <span className="wsBoardMenuHint"> (full)</span>}
-          </button>
-        );
-      })}
-    </div>,
-    document.body,
   );
 }
 

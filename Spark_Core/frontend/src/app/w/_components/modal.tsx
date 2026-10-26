@@ -8,7 +8,7 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 /**
  * Accessible modal dialog: labelled by its title, focus moves in on open and back to the opener on close,
  * Tab stays inside, Escape and the backdrop close it (unless `busy`). The "drawer" variant slides in from the
- * right on wide screens and fills the screen on phones.
+ * right on wide screens and fills the screen on phones; "wide" is a dialog with room for multi-step forms.
  */
 export function Modal({ title, description, onClose, busy = false, tone = "default", variant = "dialog", children }: {
   title: string;
@@ -16,7 +16,7 @@ export function Modal({ title, description, onClose, busy = false, tone = "defau
   onClose(): void;
   busy?: boolean;
   tone?: "default" | "danger";
-  variant?: "dialog" | "drawer";
+  variant?: "dialog" | "drawer" | "wide";
   children: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
