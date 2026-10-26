@@ -470,8 +470,11 @@ function completion(agg: ScopeAggregate, window: { start: string; end: string } 
   const unit = chooseUnit(Array.from({ length: count }, (_, index) => ({ points: index < estimated ? 1 : null })));
   const total = unit === "points" ? num(agg.total_points) : count;
   const done = unit === "points" ? num(agg.done_points) : num(agg.done_count);
-  const donePercent = total > 0 ? (done / total) * 100 : 0;
-  const elapsed = planPercent(window, day);
+  // Both percentages are rounded to the one decimal the UI shows before the status is decided, so the pill never
+  // contradicts the numbers next to it at the -10 / -25 edges.
+  const donePercent = total > 0 ? round((done / total) * 100, 1) : 0;
+  const raw = planPercent(window, day);
+  const elapsed = raw === null ? null : round(raw, 1);
   // An empty scope has nothing to be late on.
   const status: PlanStatus = total === 0 && elapsed !== null ? "on_track" : planStatus(donePercent, elapsed);
   return { unit, total, done, donePercent, planPercent: elapsed, status };
@@ -514,7 +517,9 @@ interface MemberStatRow {
 interface MemberData {
   stats: MemberStatRow[];
   members: Array<{ user_id: string; display_name: string }>;
-  /** Assignees holding work who are no longer active members, with their names. */
+  /** Assignees holding work who are no longer active members. */
+  departed: string[];
+  /** The departed assignees' names, for those still readable. */
   extra: Array<{ id: string; display_name: string }>;
 }
 
@@ -536,18 +541,20 @@ async function readMemberData(
   );
   const known = new Set(members.rows.map((row) => row.user_id));
   const departed = stats.rows.map((row) => row.user_id).filter((id): id is string => id !== null && !known.has(id));
-  // Departed members' names are read from global spark.users under the coworker policy; the ids come from tenant-scoped stats.
+  // Departed assignees' names are read from global spark.users under the coworker policy (the ids come from the
+  // tenant-scoped stats). That policy only shows users who still share an active workspace with the viewer, so a
+  // name may be missing; the row is kept anyway (as "Former member") so the table adds up to the project's totals.
   const extra = departed.length === 0
     ? []
     : (await client.query<{ id: string; display_name: string }>("SELECT u.id, u.display_name FROM spark.users u WHERE u.id = ANY ($1::uuid[])", [departed])).rows;
-  return { stats: stats.rows, members: members.rows, extra };
+  return { stats: stats.rows, members: members.rows, departed, extra };
 }
 
 /** Every active member (zeros when idle), departed assignees still holding work, then Unassigned last. */
-function memberItems({ stats, members, extra }: MemberData) {
+function memberItems({ stats, members, departed, extra }: MemberData) {
   const names = new Map<string, string>([...members.map((m) => [m.user_id, m.display_name] as const), ...extra.map((u) => [u.id, u.display_name] as const)]);
   const byUser = new Map(stats.map((row) => [row.user_id, row]));
-  const ids = [...members.map((m) => m.user_id), ...extra.map((u) => u.id)];
+  const ids = [...members.map((m) => m.user_id), ...departed];
   const rows: Array<{ id: string | null; name: string }> = ids.map((id) => ({ id, name: names.get(id) ?? FORMER_MEMBER }));
   if (byUser.has(null)) rows.push({ id: null, name: "Unassigned" });
 
@@ -578,7 +585,8 @@ interface SprintWindowRow { id: string; name: string; starts_on: string | null; 
 interface RangeQuery { days: number }
 interface PeriodQuery { period?: string }
 
-const nextPeriodTo = (period: MethodologyPeriod): string => period.endedAt ?? new Date().toISOString();
+/** The period's exclusive upper bound; the open period is unbounded, so the API clock never cuts off a just-completed sprint. */
+const periodUpperBound = (period: MethodologyPeriod): string => period.endedAt ?? "infinity";
 
 /** The requested period, else the open one; undefined for an id that is not one of the project's periods. */
 function pickPeriod(periods: MethodologyPeriod[], requested: string | undefined): MethodologyPeriod | undefined {
@@ -680,6 +688,8 @@ export function registerInsightRoutes(app: FastifyInstance, guard: MemberGuard):
       const progress = completion(data.scoped, window, day);
       const { unit, total, done } = progress;
 
+      // For Scrum the remaining work is the active sprint's, while the rate is the whole project's completions over the
+      // last 14 days (sprint work is most of what a Scrum project finishes, and a new sprint has no history of its own).
       const throughput = data.flow.slice(-THROUGHPUT_DAYS).map((row) => (unit === "points" ? num(row.completed_points) : row.completed));
       const rate = forecast(total - done, throughput, day);
 
@@ -883,7 +893,7 @@ export function registerInsightRoutes(app: FastifyInstance, guard: MemberGuard):
              o.base_count, o.base_points, o.base_estimated, o.base_done_count, o.base_done_points, o.already_done_count,
              o.added_count, o.added_points, o.removed_count
            FROM spark.insight_sprint_outcomes($1, $2, $3::timestamptz, $4::timestamptz, $5) o ORDER BY o.completed_at, o.sprint_id`,
-          [project.tenant_id, project.id, period.startedAt, nextPeriodTo(period), VELOCITY_SPRINTS],
+          [project.tenant_id, project.id, period.startedAt, periodUpperBound(period), VELOCITY_SPRINTS],
         );
         return { period, outcomes: found.rows };
       });
@@ -913,7 +923,9 @@ export function registerInsightRoutes(app: FastifyInstance, guard: MemberGuard):
           creepPercent: creepPercent(added, base),
         };
       });
-      const averageVelocity = sprints.length === 0 ? null : round(sprints.reduce((sum, s) => sum + (s.completedPoints ?? 0), 0) / sprints.length, 1);
+      // Mean completed per sprint in the list's unit (frozen completed points, or completed counts).
+      const completedIn = (s: (typeof sprints)[number]) => (unit === "points" ? s.completedPoints : s.completedCount) ?? 0;
+      const averageVelocity = sprints.length === 0 ? null : round(sprints.reduce((sum, s) => sum + completedIn(s), 0) / sprints.length, 1);
       return { period, unit, sprints, averageVelocity };
     },
   );
@@ -1041,27 +1053,47 @@ export function registerInsightRoutes(app: FastifyInstance, guard: MemberGuard):
              FROM spark.insight_sprint_burndown($1, $2) b ORDER BY b.day`,
             [sprint.tenant_id, sprint.id],
           );
-          // The unit is decided once per sprint from what was committed; before any commitment, from what is in it now.
-          const committed = await client.query<{ points: string | null }>(
-            "SELECT c.story_points AS points FROM spark.sprint_commitments c WHERE c.tenant_id = $1 AND c.sprint_id = $2",
-            [sprint.tenant_id, sprint.id],
+          // The unit is decided once per sprint from what was committed; before the sprint starts, from what is in it now.
+          // The base is what the ideal line burns from: the committed issues not in a done category at started_at
+          // (replayed; an issue that did not exist yet counts), in committed story points, the same rule as the
+          // velocity's base. Work finished on day 1 stays in it. A planned sprint has no commitments yet, so its base
+          // is the issues in it now that are not done.
+          if (sprint.started_at) {
+            const committed = await client.query<{ points: string | null; start_category: string | null }>(
+              `SELECT c.story_points AS points, a.category AS start_category
+               FROM spark.sprint_commitments c
+               LEFT JOIN spark.insight_issue_states($1, $2, $3::timestamptz) a
+                 ON a.issue_id = c.issue_id AND (a.valid_to IS NULL OR a.valid_to >= $3::timestamptz)
+               WHERE c.tenant_id = $1 AND c.sprint_id = $4`,
+              [sprint.tenant_id, sprint.project_id, sprint.started_at.toISOString(), sprint.id],
+            );
+            if (committed.rows.length > 0) {
+              const items = committed.rows.map((row) => ({ points: nullableNum(row.points), open: row.start_category !== "done" }));
+              return { days: days.rows, items };
+            }
+          }
+          const current = await client.query<{ points: string | null; category: string }>(
+            `SELECT i.story_points AS points, st.category
+             FROM spark.issues i
+             JOIN spark.issue_statuses st ON st.tenant_id = i.tenant_id AND st.project_id = i.project_id AND st.id = i.status_id
+             WHERE i.tenant_id = $1 AND i.project_id = $2 AND i.sprint_id = $3 AND i.archived_at IS NULL
+               AND st.tenant_id = $1 AND st.project_id = $2`,
+            [sprint.tenant_id, sprint.project_id, sprint.id],
           );
-          const basis = committed.rows.length > 0
-            ? committed.rows
-            : (await client.query<{ points: string | null }>(
-              "SELECT i.story_points AS points FROM spark.issues i WHERE i.tenant_id = $1 AND i.project_id = $2 AND i.sprint_id = $3 AND i.archived_at IS NULL",
-              [sprint.tenant_id, sprint.project_id, sprint.id],
-            )).rows;
-          return { days: days.rows, unit: chooseUnit(basis.map((row) => ({ points: nullableNum(row.points) }))) };
+          // A started sprint without commitments committed nothing: its base is 0.
+          const open = (category: string) => !sprint.started_at && category !== "done";
+          return { days: days.rows, items: current.rows.map((row) => ({ points: nullableNum(row.points), open: open(row.category) })) };
         },
       );
       if (!result) return reply;
       if (!result.data) return problem(request, reply, ...sprintMissingDates);
-      const { days, unit } = result.data;
+      const { days, items } = result.data;
+      const unit = chooseUnit(items);
 
       const value = (points: string | null, count: number | null): number | null => (unit === "points" ? nullableNum(points) : count);
       const rows = days.map((row) => ({ day: row.day, scope: value(row.scope_points, row.scope_count), remaining: value(row.remaining_points, row.remaining_count) }));
-      const base = rows[0]?.remaining ?? 0;
+      const baseItems = items.filter((item) => item.open);
+      const base = unit === "points" ? round(baseItems.reduce((sum, item) => sum + (item.points ?? 0), 0), 2) : baseItems.length;
       const ideal = new Map(idealLine(base, result.scope.starts_on!, result.scope.ends_on!).map((point) => [point.day, point.ideal]));
       return {
         sprint: toSprint(result.scope),
@@ -1093,6 +1125,8 @@ export function registerInsightRoutes(app: FastifyInstance, guard: MemberGuard):
         },
         async (client, workspaceId) => {
           // Per project in one statement: the scoped aggregate (active sprint for Scrum) plus whole-project open and overdue counts.
+          // LIMIT 50 never truncates: it relies on the cap of 50 non-archived projects per workspace (ws_create_project,
+          // migration 0018 line 102; there is no unarchive path). Raise both together.
           const projects = await client.query<WorkspaceProjectRow>(
             `SELECT p.id, p.key, p.name, p.methodology, to_char(p.start_date, 'YYYY-MM-DD') AS start_date,
                to_char(p.target_date, 'YYYY-MM-DD') AS target_date, sp.id AS sprint_id, sp.name AS sprint_name,

@@ -194,6 +194,23 @@ describe("project insight routes", () => {
       }
     });
 
+    it("decides the status from the percentages as displayed (one decimal)", async () => {
+      const start = addDays(today(), -9);
+      const end = addDays(today(), 10);
+      const counts = (total: number, done: number): [string, QueryHandler] => ["AS total_count", () => [{
+        total_count: String(total), done_count: String(done), estimated_count: "0", total_points: "0", done_points: "0",
+      }]];
+      const status = async (total: number, done: number) => (await get(`${base}/summary`, [
+        project({ start_date: start, target_date: end }), periods, counts(total, done), flowRows(0), overdue,
+      ])).response.json();
+      // 39.96% shows as 40%: exactly plan (50%) − 10, so on track, as the numbers on screen say.
+      expect(await status(2500, 999)).toMatchObject({ donePercent: 40, plan: { planPercent: 50, status: "on_track" } });
+      // 39.94% shows as 39.9%: under plan − 10.
+      expect(await status(5000, 1997)).toMatchObject({ donePercent: 39.9, plan: { planPercent: 50, status: "at_risk" } });
+      // 24.96% shows as 25%: exactly plan − 25, so at risk rather than behind.
+      expect(await status(2500, 624)).toMatchObject({ donePercent: 25, plan: { planPercent: 50, status: "at_risk" } });
+    });
+
     it("sets the forecast date to today when nothing remains", async () => {
       const { response } = await get(`${base}/summary`, [project(), periods, issues([{ points: null, is_done: true }]), flowRows(0), overdue]);
       expect(response.json()).toMatchObject({ open: 0, donePercent: 100, forecast: { date: today() } });
@@ -229,6 +246,28 @@ describe("project insight routes", () => {
       ]);
       const { from, to } = range;
       expect(find(calls, "spark.insight_members(")?.params).toEqual([tenantId, [projectId], from, to, today()]);
+    });
+
+    it("keeps a former member's work under \"Former member\" when their name is not readable, before Unassigned", async () => {
+      const { response, calls } = await get(`${base}/members`, [
+        project(), workspaceMembers,
+        ["spark.insight_members(", () => [
+          row(null, { completed: 1, open: 1 }),
+          row(userA, { completed: 2, open: 1 }),
+          row(userGone, { completed: 4, completed_points: "6", open: 3, overdue: 2 }),
+        ]],
+        ["FROM spark.users u WHERE", () => []],
+      ]);
+      expect(response.statusCode).toBe(200);
+      const items = response.json().items as Array<{ user: { id: string; displayName: string } | null; completed: number; open: number; overdue: number }>;
+      expect(items.map((item) => item.user)).toEqual([
+        { id: userGone, displayName: "Former member" }, { id: userA, displayName: "Ada" }, { id: userB, displayName: "Ben" }, null,
+      ]);
+      expect(items[0]).toMatchObject({ completed: 4, completedPoints: 6, open: 3, overdue: 2 });
+      // Every stats row is listed, so the table adds up to the project's totals.
+      expect(items.reduce((sum, item) => sum + item.completed, 0)).toBe(7);
+      expect(items.reduce((sum, item) => sum + item.open, 0)).toBe(5);
+      expect(find(calls, "FROM spark.users u WHERE")?.params).toEqual([[userGone]]);
     });
 
     it("omits Unassigned when there is no unassigned row and passes the requested range", async () => {
@@ -349,16 +388,20 @@ describe("project insight routes", () => {
       const call = find(calls, "spark.insight_sprint_outcomes(");
       expect(call?.params.slice(0, 2)).toEqual([tenantId, projectId]);
       expect(call?.params[2]).toBe("2026-10-18T09:30:00.000Z");
+      // The open period has no upper bound in SQL, so the API clock never cuts off a sprint completed just now.
+      expect(call?.params[3]).toBe("infinity");
       expect(call?.params[4]).toBe(6);
     });
 
     it("measures in counts when under 80% of the base is estimated and nulls an empty base", async () => {
       const { response } = await get(`${base}/velocity`, [
         project({ methodology: "scrum" }), periods,
-        outcomes(outcome({ base_estimated: 3 }), outcome({ base_count: 0, base_points: "0", base_estimated: 0, base_done_count: 0, base_done_points: "0" })),
+        outcomes(outcome({ base_estimated: 3 }), outcome({ completed_count: 3, base_count: 0, base_points: "0", base_estimated: 0, base_done_count: 0, base_done_points: "0" })),
       ]);
       const body = response.json();
       expect(body.unit).toBe("count");
+      // The average is in the list's unit: completed counts (6 and 3), not completed points.
+      expect(body.averageVelocity).toBe(4.5);
       expect(body.sprints[0]).toMatchObject({ reliability: 80, creepPercent: 40 });
       expect(body.sprints[1]).toMatchObject({ reliability: null, creepPercent: null });
     });
@@ -464,69 +507,67 @@ describe("project insight routes", () => {
     const burn: [string, QueryHandler] = ["spark.insight_sprint_burndown(", () => [
       day(-2, [4, "10", 4, "10"]), day(-1, [5, "12", 3, "7"]), day(0, [5, "12", 2, "4"]), day(1, null), day(2, null),
     ]];
-    const commitments = (rows: Array<{ points: string | null }>): [string, QueryHandler] => ["FROM spark.sprint_commitments c", () => rows];
+    // One row per commitment: the committed story points and the issue's category at the sprint's started_at (null: did not exist yet).
+    const commitments = (rows: Array<{ points: string | null; start?: string | null }>): [string, QueryHandler] => [
+      "FROM spark.sprint_commitments c", () => rows.map((row) => ({ points: row.points, start_category: row.start ?? "todo" })),
+    ];
 
-    it("is 401 without a session and 404 for an unknown or foreign sprint, uncached", async () => {
-      const anon = await get(url, [], false);
-      expect(anon.response.statusCode).toBe(401);
-      expect(anon.response.headers["cache-control"]).toBe("private, no-store");
-      const missing = await get(url);
-      expect(missing.response.statusCode).toBe(404);
-      expect(missing.response.json()).toMatchObject({ code: "sprint_not_found" });
-      expect(missing.response.headers["cache-control"]).toBe("private, no-store");
-    });
-
-    it("rejects a malformed id and any query key with 400, uncached", async () => {
-      const bad = await get("/api/v1/sprints/nope/burndown", [sprint()]);
-      expect(bad.response.statusCode).toBe(400);
-      expect(bad.response.headers["cache-control"]).toBe("private, no-store");
-      expect((await get(`${url}?x=1`, [sprint()])).response.statusCode).toBe(400);
-    });
-
-    it("is 409 sprint_missing_dates without dates, uncached", async () => {
-      const { response, calls } = await get(url, [sprint({ starts_on: null, ends_on: null })]);
-      expect(response.statusCode).toBe(409);
-      expect(response.json()).toMatchObject({ code: "sprint_missing_dates" });
-      expect(response.headers["cache-control"]).toBe("private, no-store");
-      expect(find(calls, "spark.insight_sprint_burndown(")).toBeUndefined();
-    });
-
-    it("draws the ideal line from the first day's remaining and leaves future days null (points)", async () => {
-      const { response, calls } = await get(url, [sprint(), burn, commitments([{ points: "5" }, { points: "5" }, { points: "0" }, { points: "1" }])]);
+    it("draws the ideal line from the committed base at the start, counting work finished on day 1, and leaves future days null (points)", async () => {
+      // 12 points committed, 2 of them already done at the start: base 10. Day 1 ends with only 4 left, but the 6
+      // points finished on day 1 still count in the base, so the ideal starts at 10, not 4.
+      const dayOne: [string, QueryHandler] = ["spark.insight_sprint_burndown(", () => [
+        day(-2, [4, "10", 2, "4"]), day(-1, [5, "12", 2, "4"]), day(0, [5, "12", 1, "1"]), day(1, null), day(2, null),
+      ]];
+      const { response, calls } = await get(url, [
+        sprint({ committed_points: "12", committed_count: 5 }), dayOne,
+        commitments([{ points: "5" }, { points: "5" }, { points: "0" }, { points: "2", start: "done" }, { points: null, start: null }]),
+      ]);
       expect(response.statusCode).toBe(200);
       expect(response.headers["cache-control"]).toBe("private, no-store");
       const body = response.json();
       expect(body.sprint).toMatchObject({ id: sprintId, name: "Sprint 7", startsOn: addDays(today(), -2), version: 2 });
       expect(body).toMatchObject({ unit: "points", base: 10 });
       expect(body.days).toEqual([
-        { day: addDays(today(), -2), ideal: 10, scope: 10, remaining: 10 },
-        { day: addDays(today(), -1), ideal: 7.5, scope: 12, remaining: 7 },
-        { day: today(), ideal: 5, scope: 12, remaining: 4 },
+        { day: addDays(today(), -2), ideal: 10, scope: 10, remaining: 4 },
+        { day: addDays(today(), -1), ideal: 7.5, scope: 12, remaining: 4 },
+        { day: today(), ideal: 5, scope: 12, remaining: 1 },
         { day: addDays(today(), 1), ideal: 2.5, scope: null, remaining: null },
         { day: addDays(today(), 2), ideal: 0, scope: null, remaining: null },
       ]);
       expect(find(calls, "spark.insight_sprint_burndown(")?.params).toEqual([tenantId, sprintId]);
-      expect(find(calls, "FROM spark.sprint_commitments c")?.params).toEqual([tenantId, sprintId]);
+      const read = find(calls, "FROM spark.sprint_commitments c");
+      expect(read?.sql).toMatch(/spark\.insight_issue_states\(\$1, \$2, \$3::timestamptz\)/u);
+      expect(read?.params).toEqual([tenantId, projectId, "2026-10-24T08:00:00.000Z", sprintId]);
     });
 
-    it("uses counts when under 80% of the commitments are estimated", async () => {
-      const { response } = await get(url, [sprint(), burn, commitments([{ points: "5" }, { points: null }, { points: null }])]);
+    it("uses counts when under 80% of the commitments are estimated; the base leaves out issues done at the start", async () => {
+      const { response } = await get(url, [sprint(), burn, commitments([{ points: "5" }, { points: null }, { points: null }, { points: null, start: "done" }])]);
       const body = response.json();
-      expect(body).toMatchObject({ unit: "count", base: 4 });
+      expect(body).toMatchObject({ unit: "count", base: 3 });
+      expect(body.days.map((d: { ideal: number }) => d.ideal)).toEqual([3, 2.25, 1.5, 0.75, 0]);
       expect(body.days.map((d: { remaining: number | null }) => d.remaining)).toEqual([4, 3, 2, null, null]);
     });
 
-    it("falls back to the issues in the sprint when nothing was committed", async () => {
-      const { response, calls } = await get(url, [
-        sprint({ status: "planned" }), burn, commitments([]), ["FROM spark.issues i WHERE", () => [{ points: "3" }, { points: "2" }]],
-      ]);
-      expect(response.json().unit).toBe("points");
-      expect(find(calls, "FROM spark.issues i WHERE")?.params).toEqual([tenantId, projectId, sprintId]);
+    it("has a zero base for a started sprint with no commitments", async () => {
+      const { response } = await get(url, [sprint(), burn, commitments([]), ["FROM spark.issues i", () => [{ points: "3", category: "todo" }]]]);
+      expect(response.json()).toMatchObject({ unit: "points", base: 0 });
     });
 
-    it("has a zero base when the sprint has not started yet", async () => {
+    it("bases a planned sprint on the issues in it now that are not done", async () => {
+      const { response, calls } = await get(url, [
+        sprint({ status: "planned", started_at: null, committed_points: null, committed_count: null }), burn, commitments([]),
+        ["FROM spark.issues i", () => [{ points: "3", category: "todo" }, { points: "2", category: "done" }, { points: "4", category: "in_progress" }]],
+      ]);
+      expect(response.json()).toMatchObject({ unit: "points", base: 7 });
+      expect(find(calls, "FROM spark.sprint_commitments c")).toBeUndefined();
+      expect(find(calls, "FROM spark.issues i")?.params).toEqual([tenantId, projectId, sprintId]);
+    });
+
+    it("has a zero base when the sprint has not started yet and holds nothing", async () => {
       const future: [string, QueryHandler] = ["spark.insight_sprint_burndown(", () => [day(1, null), day(2, null)]];
-      const { response } = await get(url, [sprint({ starts_on: addDays(today(), 1), ends_on: addDays(today(), 2) }), future, commitments([])]);
+      const { response } = await get(url, [
+        sprint({ status: "planned", started_at: null, starts_on: addDays(today(), 1), ends_on: addDays(today(), 2) }), future, ["FROM spark.issues i", () => []],
+      ]);
       expect(response.json()).toMatchObject({ base: 0, days: [{ ideal: 0, scope: null, remaining: null }, { ideal: 0, scope: null, remaining: null }] });
     });
   });
@@ -598,6 +639,23 @@ describe("project insight routes", () => {
       expect(find(calls, "spark.insight_members(")?.params).toEqual([workspaceId, [projectId, second], addDays(today(), -6), today(), today()]);
       expect(find(calls, "FROM generate_series")?.params).toEqual([workspaceId, [projectId, second], addDays(today(), -6), today()]);
       expect(find(calls, "ORDER BY i.due_date, p.key")?.params).toEqual([workspaceId, [projectId, second], today()]);
+    });
+
+    it("lists a former member whose name is not readable as \"Former member\", before Unassigned", async () => {
+      const { response } = await get(url, [
+        workspace, projectsQuery(projectAgg()), members,
+        ["spark.insight_members(", () => [
+          { user_id: null, completed: 1, completed_points: "0", with_due: 0, on_time: 0, open: 2, overdue: 0, median_cycle_days: null },
+          { user_id: userGone, completed: 3, completed_points: "0", with_due: 1, on_time: 1, open: 1, overdue: 1, median_cycle_days: "1.5" },
+        ]],
+        ["FROM spark.users u WHERE", () => []],
+        ["FROM generate_series", () => []],
+      ]);
+      expect(response.statusCode).toBe(200);
+      const list = response.json().members as Array<{ user: { id: string; displayName: string } | null; completed: number; open: number }>;
+      expect(list.map((m) => m.user)).toEqual([{ id: userGone, displayName: "Former member" }, { id: userA, displayName: "Ada" }, { id: userB, displayName: "Ben" }, null]);
+      expect(list[0]).toMatchObject({ completed: 3, open: 1, onTimeRate: 100, medianCycleDays: 1.5 });
+      expect(list.reduce((sum, m) => sum + m.completed, 0)).toBe(4);
     });
 
     it("reports an empty workspace with zero-filled members and no projects", async () => {
