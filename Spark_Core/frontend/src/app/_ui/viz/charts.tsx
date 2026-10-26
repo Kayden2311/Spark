@@ -238,7 +238,7 @@ function MarkerLabel({ label, end, viewBox }: { label: string; end: boolean; vie
   );
 }
 
-/** Change over time./** Change over time. One y-axis only: measures of different scale go in separate charts. */
+/** Change over time. One y-axis only: measures of different scale go in separate charts. */
 export function TrendChart({ data, series, xKey = "day", kind = "area", stacked = false, height = 260, valueFormat = formatCount, xFormat = shortDate, markers = [] }: TrendChartProps) {
   const reduced = useReducedMotion();
   const gradientBase = useId().replace(/:/gu, "");

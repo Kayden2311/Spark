@@ -106,9 +106,10 @@ const SPRINTS = {
 const BURNDOWN = (sprint: ReturnType<typeof SPRINT>) => ({
   sprint,
   unit: "points",
+  // The base is the committed work not done at the sprint's start: 6 points finished on day 1 still count in it.
   base: 20,
   days: [
-    { day: "2026-10-19", ideal: 20, scope: 20, remaining: 20 },
+    { day: "2026-10-19", ideal: 20, scope: 20, remaining: 14 },
     { day: "2026-10-20", ideal: 10, scope: 22, remaining: 15 },
     { day: "2026-10-21", ideal: 0, scope: null, remaining: null },
   ],
@@ -262,6 +263,9 @@ describe("project insights", () => {
     await waitFor(() => expect(calls).toContain("/api/v1/sprints/sp4/burndown"));
     expect(await within(burndown).findByText("Ideal")).toBeInTheDocument();
     expect(within(burndown).getByText("Sprint 4: 20 points at the start, 3 already done · Oct 19 – Oct 21")).toBeInTheDocument();
+    await userEvent.click(within(burndown).getByRole("button", { name: /table/iu }));
+    const firstDay = within(burndown).getAllByRole("row")[1]!;
+    expect(within(firstDay).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["20", "14", "20"]);
 
     const velocity = await screen.findByRole("region", { name: "Velocity" });
     expect(await within(velocity).findByText("Committed")).toBeInTheDocument();
@@ -288,7 +292,7 @@ describe("project insights", () => {
     expect(await within(velocity).findByText("No completed sprints in this period yet")).toBeInTheDocument();
   });
 
-  it("averages a count-unit velocity in tasks, not the API's points average", async () => {
+  it("shows the API's count-unit average in tasks", async () => {
     const counted = {
       ...VELOCITY,
       unit: "count",
@@ -296,7 +300,7 @@ describe("project insights", () => {
         { ...VELOCITY.sprints[0]!, committedPoints: 0, completedPoints: 0, committedCount: 8, completedCount: 6 },
         { ...VELOCITY.sprints[0]!, id: "sp2", name: "Sprint 2", committedPoints: 0, completedPoints: 0, committedCount: 5, completedCount: 3 },
       ],
-      averageVelocity: 0,
+      averageVelocity: 4.5,
     };
     mockApi(SCRUM, { "/api/v1/projects/p-atlas/insights/velocity": json(counted) });
     renderInsights("ATLAS");
@@ -354,11 +358,14 @@ describe("project insights", () => {
     const wip = await screen.findByRole("region", { name: "WIP vs limit" });
     expect(await within(wip).findByRole("img", { name: "In progress: 4, 1.3× over target" })).toBeInTheDocument();
     expect(within(wip).getByText("In review")).toBeInTheDocument();
+    expect(within(wip).getByText(/· Current board$/u)).toBeInTheDocument();
     expect(within(wip).queryByText("Done")).not.toBeInTheDocument();
     const aging = screen.getByRole("region", { name: "Aging work in progress" });
     expect(await within(aging).findByText("Migrate billing")).toBeInTheDocument();
     expect(within(aging).getByText("Over p85")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Cycle and lead time" })).toBeInTheDocument();
+    expect(within(aging).getByText(/· Current board$/u)).toBeInTheDocument();
+    const cycleCard = screen.getByRole("region", { name: "Cycle and lead time" });
+    expect(within(cycleCard).queryByText(/Current board/u)).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Sprint burndown" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Velocity" })).not.toBeInTheDocument();
   });
@@ -397,7 +404,9 @@ describe("project insights", () => {
     const overdue = await screen.findByRole("region", { name: "Overdue work" });
     expect(await within(overdue).findByRole("link", { name: /Fix login redirect/u })).toHaveAttribute("href", "/w/northstar-labs/p/ATLAS?issue=ATLAS-4");
     const flow = screen.getByRole("region", { name: "Cumulative flow" });
-    await waitFor(() => expect(flow.querySelector(".vizMarkerLabel")?.textContent).toBe("Switched Kanban → Scrumon Oct 18"));
+    await waitFor(() => expect(flow.querySelector(".vizMarkerLabel")).not.toBeNull());
+    const lines = Array.from(flow.querySelectorAll(".vizMarkerLabel tspan"), (tspan) => tspan.textContent);
+    expect(lines).toEqual(["Switched Kanban → Scrum", "on Oct 18"]);
     expect(within(flow).getByText(/· Switched Kanban → Scrum on Oct 18/)).toBeInTheDocument();
   });
 
@@ -414,6 +423,21 @@ describe("project insights", () => {
     const variance = screen.getByRole("region", { name: "Schedule variance" });
     expect(await within(variance).findByText("6 days behind baseline")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Period" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Current plan/u)).not.toBeInTheDocument();
+  });
+
+  it("marks the Waterfall cards as the current plan when a past Waterfall period is selected", async () => {
+    const periods = [
+      { id: "pw1", methodology: "waterfall", startedAt: "2026-08-19T09:00:00.000Z", endedAt: "2026-10-18T09:30:00.000Z" },
+      { id: "ps1", methodology: "scrum", startedAt: "2026-10-18T09:30:00.000Z", endedAt: null },
+    ];
+    mockApi(SCRUM, {}, periods);
+    renderInsights("ATLAS", "?period=pw1");
+    for (const name of ["Schedule variance", "Phase progress", "Milestones"]) {
+      const card = await screen.findByRole("region", { name });
+      expect(await within(card).findByText(/· Current plan$/u)).toBeInTheDocument();
+    }
+    await waitFor(() => expect(calls).toContain("/api/v1/projects/p-atlas/insights/schedule?period=pw1"));
   });
 });
 

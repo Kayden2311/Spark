@@ -16,22 +16,26 @@ function VarianceBadge({ days }: { days: number | null }) {
   return <span className="wsTimelineVariance" data-tone={varianceTone(days)} title={varianceDescription(days)}>{varianceLabel(days)}</span>;
 }
 
+/** Appended to the subtitles when a past period is selected: phases and milestones are always read as they are now. */
+const CURRENT_PLAN = " · Current plan";
+
 /** Waterfall: progress per phase against its plan, milestone outcomes and the schedule variance. */
-export function WaterfallSection({ projectId, periodId }: { projectId: string; periodId: string | null }) {
+export function WaterfallSection({ projectId, periodId, pastPeriod = false }: { projectId: string; periodId: string | null; pastPeriod?: boolean }) {
   const schedule = useInsight<ScheduleInsights>(insightPaths.schedule(projectId, periodId));
+  const note = pastPeriod ? CURRENT_PLAN : "";
   return (
     <section aria-labelledby="insights-waterfall" className="wsInsightsGroup">
       <GroupHeading id="insights-waterfall" note="Phases against their planned windows and the baseline." title="Schedule" />
       <div className="wsInsightsGrid">
-        <VarianceCard schedule={schedule} />
-        <PhaseCard schedule={schedule} />
-        <MilestoneCard schedule={schedule} />
+        <VarianceCard note={note} schedule={schedule} />
+        <PhaseCard note={note} schedule={schedule} />
+        <MilestoneCard note={note} schedule={schedule} />
       </div>
     </section>
   );
 }
 
-function VarianceCard({ schedule }: { schedule: InsightQuery<ScheduleInsights> }) {
+function VarianceCard({ schedule, note }: { schedule: InsightQuery<ScheduleInsights>; note: string }) {
   const data = schedule.data;
   const days = data?.scheduleVarianceDays ?? null;
   return (
@@ -43,7 +47,7 @@ function VarianceCard({ schedule }: { schedule: InsightQuery<ScheduleInsights> }
       height={72}
       loading={schedule.loading}
       onRetry={schedule.reload}
-      subtitle="The latest planned phase end against the latest baseline end"
+      subtitle={`The latest planned phase end against the latest baseline end${note}`}
       title="Schedule variance"
     >
       <div className="wsInsightsVariance">
@@ -54,7 +58,7 @@ function VarianceCard({ schedule }: { schedule: InsightQuery<ScheduleInsights> }
   );
 }
 
-function PhaseCard({ schedule }: { schedule: InsightQuery<ScheduleInsights> }) {
+function PhaseCard({ schedule, note }: { schedule: InsightQuery<ScheduleInsights>; note: string }) {
   const phases = schedule.data?.phases ?? [];
   const rows = phases.map((phase) => ({ label: phase.name, done: phase.donePercent, plan: phase.planPercent }));
   return (
@@ -66,7 +70,7 @@ function PhaseCard({ schedule }: { schedule: InsightQuery<ScheduleInsights> }) {
       legend={<ChartLegend series={PHASE_SERIES} />}
       loading={schedule.loading}
       onRetry={schedule.reload}
-      subtitle="Share done vs the share of each phase's window already elapsed"
+      subtitle={`Share done vs the share of each phase's window already elapsed${note}`}
       table={{
         columns: ["Phase", "Done", "Plan by today", "Variance", "Status"],
         rows: phases.map((phase) => [phase.name, percentText(phase.donePercent), percentText(phase.planPercent), varianceDescription(phase.varianceDays), planStatusLabel(phase.status)]),
@@ -90,7 +94,7 @@ function PhaseCard({ schedule }: { schedule: InsightQuery<ScheduleInsights> }) {
   );
 }
 
-function MilestoneCard({ schedule }: { schedule: InsightQuery<ScheduleInsights> }) {
+function MilestoneCard({ schedule, note }: { schedule: InsightQuery<ScheduleInsights>; note: string }) {
   const data = schedule.data;
   const milestones = data?.milestones ?? [];
   const phaseName = new Map((data?.phases ?? []).map((phase) => [phase.id, phase.name]));
@@ -104,7 +108,7 @@ function MilestoneCard({ schedule }: { schedule: InsightQuery<ScheduleInsights> 
       height={120}
       loading={schedule.loading}
       onRetry={schedule.reload}
-      subtitle={counts ? `${counts.hit} hit · ${counts.missed} missed · ${counts.atRisk} at risk · ${counts.upcoming} upcoming` : undefined}
+      subtitle={counts ? `${counts.hit} hit · ${counts.missed} missed · ${counts.atRisk} at risk · ${counts.upcoming} upcoming${note}` : undefined}
       title="Milestones"
     >
       <div className="vizChartTableWrap wsInsightsTableWrap">

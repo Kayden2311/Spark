@@ -30,19 +30,9 @@ function velocityRow(sprint: SprintOutcome, unit: string) {
 }
 
 /**
- * Mean completed per sprint in the velocity's unit. The API's `averageVelocity` averages completed points
- * (frozen at 0 for unestimated sprints), so it is used only when the unit is points; counts are averaged here.
- */
-function averageVelocity(data: VelocityInsights | null, rows: ReadonlyArray<{ completed: number | null }>): number | null {
-  if (!data || rows.length === 0) return null;
-  if (data.unit === "points") return data.averageVelocity;
-  return Math.round((rows.reduce((sum, row) => sum + (row.completed ?? 0), 0) / rows.length) * 10) / 10;
-}
-
-/**
- * "Sprint 7: 34 points at the start, 3 already done · Oct 22 – Nov 5". The base leaves out committed work that
- * was already done when the sprint started; the difference to the frozen commitment is named so the gap
- * between the scope and remaining lines is explained.
+ * "Sprint 7: 34 points at the start, 3 already done · Oct 22 – Nov 5". The base is the committed work not done
+ * when the sprint started (work finished on day 1 stays in it); committed work already done at the start is the
+ * difference to the frozen commitment and is named, so the gap between the scope and remaining lines is explained.
  */
 export function burndownSubtitle(data: Burndown): string {
   const committed = data.unit === "points" ? data.sprint.committedPoints : data.sprint.committedCount;
@@ -108,7 +98,8 @@ function VelocityCard({ velocity }: { velocity: InsightQuery<VelocityInsights> }
   const data = velocity.data;
   const unit = data?.unit ?? "count";
   const rows = (data?.sprints ?? []).map((sprint) => velocityRow(sprint, unit));
-  const average = averageVelocity(data, rows);
+  // The API averages completed work in the list's unit.
+  const average = rows.length === 0 ? null : (data?.averageVelocity ?? null);
   return (
     <ChartCard
       empty={Boolean(data) && rows.length === 0}

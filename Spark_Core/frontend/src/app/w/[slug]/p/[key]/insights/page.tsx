@@ -46,6 +46,8 @@ export default function ProjectInsightsPage() {
   // An unknown ?period= falls back to the current period; the API is then asked without one.
   const periodId = requestedPeriod && period?.id === requestedPeriod ? requestedPeriod : null;
   const methodology = methodologyOf(period?.methodology ?? project.methodology);
+  // A past period's Kanban and Waterfall cards still show the board and plan as they are now; they say so.
+  const pastPeriod = Boolean(period && period.endedAt !== null);
   // A linked ?period= waits for the period list, so the wrong section never flashes in.
   const methodReady = requestedPeriod === null || plan.data !== null || plan.error !== null;
   const boardHref = `/w/${workspace.slug}/p/${encodeURIComponent(project.key)}`;
@@ -93,8 +95,8 @@ export default function ProjectInsightsPage() {
       </div>
 
       {methodReady && methodology === "scrum" && <ScrumSection key={`scrum-${periodId ?? "current"}`} periodId={periodId} projectId={project.id} />}
-      {methodReady && methodology === "kanban" && <KanbanSection days={days} key="kanban" projectId={project.id} />}
-      {methodReady && methodology === "waterfall" && <WaterfallSection key={`waterfall-${periodId ?? "current"}`} periodId={periodId} projectId={project.id} />}
+      {methodReady && methodology === "kanban" && <KanbanSection days={days} key="kanban" pastPeriod={pastPeriod} projectId={project.id} />}
+      {methodReady && methodology === "waterfall" && <WaterfallSection key={`waterfall-${periodId ?? "current"}`} pastPeriod={pastPeriod} periodId={periodId} projectId={project.id} />}
 
       <section aria-labelledby="insights-flow" className="wsInsightsGroup">
         <GroupHeading id="insights-flow" note="Across the project's whole history, whatever the methodology." title="Flow" />

@@ -14,23 +14,30 @@ const LEAD_COLOR = VIZ.orange;
 const P50_COLOR = "#475569";
 const P85_COLOR = VIZ.violet;
 
-/** Kanban: column load against WIP limits, how old the work in progress is, and cycle and lead times. */
-export function KanbanSection({ projectId, days }: { projectId: string; days: number }) {
+/** Appended to the subtitles of cards that show the board as it is now, when a past period is selected. */
+const CURRENT_BOARD = " · Current board";
+
+/**
+ * Kanban: column load against WIP limits, how old the work in progress is, and cycle and lead times. Columns and
+ * aging are always the current board, so with a past period selected (`pastPeriod`) those cards say so.
+ */
+export function KanbanSection({ projectId, days, pastPeriod = false }: { projectId: string; days: number; pastPeriod?: boolean }) {
+  const note = pastPeriod ? CURRENT_BOARD : "";
   const aging = useInsight<AgingInsights>(insightPaths.agingWip(projectId));
   const cycle = useInsight<CycleTimeInsights>(insightPaths.cycleTime(projectId, days));
   return (
     <section aria-labelledby="insights-kanban" className="wsInsightsGroup">
       <GroupHeading id="insights-kanban" note="Limit work in progress, finish what is started, and keep items moving." title="Work in progress" />
       <div className="wsInsightsGrid">
-        <WipCard aging={aging} />
-        <AgingCard aging={aging} />
+        <WipCard aging={aging} note={note} />
+        <AgingCard aging={aging} note={note} />
         <CycleCard cycle={cycle} days={days} />
       </div>
     </section>
   );
 }
 
-function WipCard({ aging }: { aging: InsightQuery<AgingInsights> }) {
+function WipCard({ aging, note }: { aging: InsightQuery<AgingInsights>; note: string }) {
   const columns = (aging.data?.columns ?? []).filter((column) => column.category !== "done");
   return (
     <ChartCard
@@ -41,7 +48,7 @@ function WipCard({ aging }: { aging: InsightQuery<AgingInsights> }) {
       height={150}
       loading={aging.loading}
       onRetry={aging.reload}
-      subtitle="Cards in each column now; columns without a limit show the count only"
+      subtitle={`Cards in each column now; columns without a limit show the count only${note}`}
       table={{ columns: ["Column", "Category", "Cards", "WIP limit"], rows: columns.map((column) => [column.name, categoryLabel(column.category), formatCount(column.count), column.wipLimit === null ? "None" : formatCount(column.wipLimit)]) }}
       title="WIP vs limit"
     >
@@ -64,7 +71,7 @@ function WipCard({ aging }: { aging: InsightQuery<AgingInsights> }) {
   );
 }
 
-function AgingCard({ aging }: { aging: InsightQuery<AgingInsights> }) {
+function AgingCard({ aging, note }: { aging: InsightQuery<AgingInsights>; note: string }) {
   const data = aging.data;
   const items = data?.items ?? [];
   const reference = data?.cycle ?? { p50: null, p85: null };
@@ -86,7 +93,7 @@ function AgingCard({ aging }: { aging: InsightQuery<AgingInsights> }) {
       legend={<ChartLegend series={bands.map((band) => ({ label: `${ageBandLabel(band)} · ${bandNote[band]}`, color: BAND_COLORS[band] }))} />}
       loading={aging.loading}
       onRetry={aging.reload}
-      subtitle="Oldest first, against the last 90 days' cycle time (p50 / p85)"
+      subtitle={`Oldest first, against the last 90 days' cycle time (p50 / p85)${note}`}
       table={{ columns: ["Item", "Status", "Assignee", "Age", "Band"], rows: items.map((item) => [`${item.key} ${item.title}`, item.statusName, item.assignee?.displayName ?? "Unassigned", daysText(item.ageDays), ageBandLabel(ageBand(item.ageDays, reference))]) }}
       title="Aging work in progress"
     >

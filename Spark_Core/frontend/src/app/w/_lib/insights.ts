@@ -154,6 +154,7 @@ export interface VelocityInsights {
   period: MethodologyPeriod;
   unit: InsightUnit | string;
   sprints: SprintOutcome[];
+  /** Mean completed per sprint in `unit` (completed points, or completed counts); null without sprints. */
   averageVelocity: number | null;
 }
 
@@ -168,6 +169,7 @@ export interface BurndownDay {
 export interface Burndown {
   sprint: Sprint;
   unit: InsightUnit | string;
+  /** Committed work not done at the sprint's start (a planned sprint: its issues not done now), in `unit`. */
   base: number;
   days: BurndownDay[];
 }
