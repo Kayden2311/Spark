@@ -360,6 +360,55 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
   - Completed sprints stay as history. Leaving Scrum cancels every planned sprint and returns its open tasks to the backlog (each with a new version, history event and outbox row); done and archived tasks keep their sprint. So entering Scrum again starts with every open task in the backlog and no stale plan. Leaving Waterfall keeps the phases read-only and the milestones usable; entering Waterfall gives tasks no phase, so they show as Unphased on the Timeline.
   - Refusals: `409 active_sprint`, `409 same_methodology`, `409 wip_below_occupancy`, `412` when a teammate changed the project (the wizard keeps the plan, adapts it to the newer columns and says "Updated by a teammate — review the latest values and save again."), `428` without `If-Match` and `403 insufficient_role` for members who cannot plan.
 
+### US-E12: See how a project is doing, by methodology
+
+- **Actor**: Any Workspace Member
+- **Priority**: Must
+- **Status**: Implemented (`GET /api/v1/projects/{projectId}/insights/summary`, `.../insights/flow`, `.../insights/cycle-time`, `.../insights/aging-wip`, `.../insights/velocity`, `.../insights/schedule`, `GET /api/v1/sprints/{sprintId}/burndown`; migration `0026`; screen: the Insights tab `/w/[slug]/p/[key]/insights`)
+- **Story**: As a member of a project, I want to see progress against the plan and the charts that fit the way the project works so that I can tell early whether the work will land on time.
+- **Acceptance criteria**:
+  - Every member, including plain members, sees an Insights tab after Overview. Nothing on it offers a write.
+  - The header has a range control (7 / 30 / 90 / 180 days, default 30, kept in `?days=`). Days are UTC calendar days ending today; anything else is refused with `400`.
+  - A key-number strip shows done % with its unit, plan %, a status pill (On track green, At risk amber, Behind red, No plan grey), the forecast date ("No forecast yet" when nothing finished in the last 14 days) and the overdue count; a plan-vs-done bar puts a tick where the plan says the work should be by today. A metric counts story points when at least 80% of its tasks have points, otherwise tasks. The plan is the active sprint (Scrum), the project dates (Waterfall, and Kanban when both dates are set) or none.
+  - **Scrum**: the sprint burndown (the active sprint by default, completed sprints in a picker; ideal dashed, remaining and scope per UTC day, later days empty; the subtitle names committed work already done at the start, "34 points at the start, 3 already done"). Velocity bars compare committed and completed for the last 6 completed sprints with the average, and a commitment reliability table gives reliability, added and removed work and scope creep per sprint; committed work already done at the start is left out of both sides and noted ("2 already done at start"). A sprint without dates answers `409 sprint_missing_dates`.
+  - **Kanban**: WIP vs limit gauges per column (columns without a limit show the count only), aging work in progress with p50/p85 bands from the last 90 days, and a cycle and lead time scatter (at most 500 points) with p50/p85 lines.
+  - **Waterfall**: the schedule variance ("+6 d", latest planned phase end against the latest baseline end), phase done vs plan bars with variance badges (on baseline green, 1–7 d late amber, later red) and status, and a milestone table with Hit, Missed, At risk (due within 7 days) and Upcoming pills.
+  - Always: cumulative flow by category and throughput per day; a Members table and an overdue list (at most 20) that links to the task drawer.
+  - Every chart sits in a card with a legend and "View as table"; each card loads, fails and retries on its own. At 390 px cards stack and tables scroll inside their card.
+
+### US-E13: See completion by member
+
+- **Actor**: Any Workspace Member
+- **Priority**: Must
+- **Status**: Implemented (`GET /api/v1/projects/{projectId}/insights/members`, and the `members` of `GET /api/v1/workspaces/{workspaceId}/insights`; screens: the Members card on both Insights pages)
+- **Story**: As a team member, I want to see what each person finished and has open so that load and deadlines are shared fairly.
+- **Acceptance criteria**:
+  - Rows are grouped by the current assignee with initials avatars: tasks and points completed in the range, on-time rate (completed by the due date, of those with a due date; "—" without any), open, overdue (open past the due date) and median cycle time in days.
+  - Sorted by completed, then name; "Unassigned" is always last. Only active members appear, plus a departed member who still holds an assignment.
+  - Every active member sees every row; there is no extra role gate.
+
+### US-E14: See the whole workspace at a glance
+
+- **Actor**: Any Workspace Member
+- **Priority**: Should
+- **Status**: Implemented (`GET /api/v1/workspaces/{workspaceId}/insights?days`; screen: `/w/[slug]/insights`, "Insights" in the sidebar next to Members)
+- **Story**: As a member of a workspace, I want one page with every project's progress, every member's completion and the team's activity so that I know where help is needed.
+- **Acceptance criteria**:
+  - The same range control as the project page. One card per non-archived project: key, methodology tag, done % bar with a plan tick, status pill, open and overdue counts; it links to the project's Insights.
+  - The Members table as in US-E13 across the workspace's non-archived projects, an activity calendar (task events per UTC day) and an overdue list across projects (at most 50, oldest due first) linking to the task drawer.
+  - A workspace without projects says "No projects yet", with "Create a project" for owners and admins and plain text for members.
+
+### US-E15: Keep metrics across a methodology switch
+
+- **Actor**: Any Workspace Member
+- **Priority**: Should
+- **Status**: Implemented (`period` on `.../insights/velocity` and `.../insights/schedule`, `markers` on `.../insights/flow`, `id` on the `periods` of `GET /api/v1/projects/{projectId}/plan`; screen: the period selector on the Insights tab)
+- **Story**: As a member of a project that changed methodology, I want its history to stay readable so that the switch does not erase how the team performed before.
+- **Acceptance criteria**:
+  - The key numbers, flow, cycle time, aging work and members span the whole history whatever the methodology. Flow charts mark each switch inside the range ("Switched Kanban → Scrum on Sep 6").
+  - A project with more than one period shows a period selector ("Scrum since Sep 6", "Kanban Jul 8–Sep 6", kept in `?period=`). The methodology section follows the selected period: choosing the Kanban period shows the Kanban charts, and velocity counts only the sprints of the selected Scrum period. An unknown or foreign period answers `404 period_not_found`.
+  - A member of another workspace who asks for any insight of a project, sprint, period or workspace gets `404` and no number from it.
+
 ## Epic F: Notifications (US-06)
 
 ### US-F1: Receive notifications
@@ -488,7 +537,7 @@ Mentor matching, file uploads, rich realtime collaboration, AI summaries, and bi
 | US-02 | US-C1, US-C2, US-C3 | Journeys 1 and 2 |
 | US-03 | US-D1, US-D2, US-D3, US-D4 | Journey 2 |
 | US-04 | US-E1, US-E2, US-E3 | Journey 3 |
-| US-05 | US-E4 to US-E11 | Journey 3 |
+| US-05 | US-E4 to US-E15 | Journey 3 |
 | US-06 | US-F1, US-F2 | Journey 3 |
 | US-07 | US-G1, US-G2, US-G3 | Journey 4 |
 | Auth and governance | US-A1 to US-A5, US-H1 to US-H4, US-I1 | Journeys 5 and 6 |
