@@ -13,6 +13,8 @@ const nextSprintId = "5d4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
 const statusId = "6d4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
 const milestoneId = "7d4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
 const phaseId = "8d4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
+const periodKanbanId = "ad4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
+const periodScrumId = "bd4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
 const doneId = "9d4f5e2a-3b6c-4d7e-8f90-a1b2c3d4e5f6";
 
 const projectRef = { id: projectId, tenant_id: tenantId, baselined_at: new Date("2026-10-18T09:00:00Z"), settings_version: 4 };
@@ -106,8 +108,8 @@ const called = (calls: Array<{ sql: string; params: unknown[] }>, fn: string) =>
 const projectRefHandler: [string, QueryHandler] = ["FROM spark.projects p WHERE", () => [projectRef]];
 const sprintHandler = (row: object = sprintRow): [string, QueryHandler] => ["FROM spark.sprints s", () => [row]];
 const periodRows = [
-  { methodology: "kanban", started_at: new Date("2026-10-03T08:00:00Z"), ended_at: new Date("2026-10-18T09:30:00Z") },
-  { methodology: "scrum", started_at: new Date("2026-10-18T09:30:00Z"), ended_at: null },
+  { id: periodKanbanId, methodology: "kanban", started_at: new Date("2026-10-03T08:00:00Z"), ended_at: new Date("2026-10-18T09:30:00Z") },
+  { id: periodScrumId, methodology: "scrum", started_at: new Date("2026-10-18T09:30:00Z"), ended_at: null },
 ];
 const planHandlers: Array<[string, QueryHandler]> = [
   projectRefHandler,
@@ -469,8 +471,8 @@ describe("planning routes", () => {
         milestones: [{ id: milestoneId, name: "Beta", phaseId, dueDate: "2026-11-06", baselineDueDate: null, completedAt: null, version: 2 }],
         baselinedAt: "2026-10-18T09:00:00.000Z",
         periods: [
-          { methodology: "kanban", startedAt: "2026-10-03T08:00:00.000Z", endedAt: "2026-10-18T09:30:00.000Z" },
-          { methodology: "scrum", startedAt: "2026-10-18T09:30:00.000Z", endedAt: null },
+          { id: periodKanbanId, methodology: "kanban", startedAt: "2026-10-03T08:00:00.000Z", endedAt: "2026-10-18T09:30:00.000Z" },
+          { id: periodScrumId, methodology: "scrum", startedAt: "2026-10-18T09:30:00.000Z", endedAt: null },
         ],
         version: 4,
       });

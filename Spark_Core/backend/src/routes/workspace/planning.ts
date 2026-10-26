@@ -45,6 +45,7 @@ export interface Sprint {
 
 /** Which methodology the project used when; `endedAt` null is the current period. */
 export interface MethodologyPeriod {
+  id: string;
   methodology: string;
   startedAt: string;
   endedAt: string | null;
@@ -89,7 +90,7 @@ const planResponse = {
     baselinedAt: nullableString,
     periods: {
       type: "array",
-      items: { type: "object", properties: { methodology: { type: "string" }, startedAt: { type: "string" }, endedAt: nullableString } },
+      items: { type: "object", properties: { id: { type: "string" }, methodology: { type: "string" }, startedAt: { type: "string" }, endedAt: nullableString } },
     },
     version: { type: "integer" },
   },
@@ -163,13 +164,13 @@ async function readSprint(client: PoolClient, sprintId: string): Promise<Sprint 
 }
 
 /** The project's methodology history, oldest first (who changed it and why stay out of the plan). */
-async function readPeriods(client: PoolClient, tenantId: string, projectId: string): Promise<MethodologyPeriod[]> {
-  const found = await client.query<{ methodology: string; started_at: Date; ended_at: Date | null }>(
-    `SELECT mp.methodology, mp.started_at, mp.ended_at FROM spark.project_methodology_periods mp
+export async function readPeriods(client: PoolClient, tenantId: string, projectId: string): Promise<MethodologyPeriod[]> {
+  const found = await client.query<{ id: string; methodology: string; started_at: Date; ended_at: Date | null }>(
+    `SELECT mp.id, mp.methodology, mp.started_at, mp.ended_at FROM spark.project_methodology_periods mp
      WHERE mp.tenant_id = $1 AND mp.project_id = $2 ORDER BY mp.started_at, mp.id`,
     [tenantId, projectId],
   );
-  return found.rows.map((row) => ({ methodology: row.methodology, startedAt: row.started_at.toISOString(), endedAt: iso(row.ended_at) }));
+  return found.rows.map((row) => ({ id: row.id, methodology: row.methodology, startedAt: row.started_at.toISOString(), endedAt: iso(row.ended_at) }));
 }
 
 async function readPlan(client: PoolClient, projectId: string): Promise<Plan | null> {
