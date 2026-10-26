@@ -1,7 +1,7 @@
 "use client";
 
 import { isValidElement, useId, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { formatCount, shortDate } from "./format";
 import { motionClass, useReducedMotion } from "./motion";
@@ -13,6 +13,17 @@ export interface ChartSeries {
   key: string;
   label: string;
   color: string;
+  /** Draws a line or area outline dashed, e.g. an ideal or target line next to the actuals. */
+  dashed?: boolean;
+}
+
+/** The dash pattern for `dashed` series and reference lines. */
+export const DASH = "6 4";
+
+/** A labelled vertical line at one x value (a day), such as a methodology switch. */
+export interface ChartMarker {
+  day: string;
+  label: string;
 }
 
 export interface TableSpec {
@@ -193,10 +204,12 @@ interface TrendChartProps {
   height?: number;
   valueFormat?: Formatter;
   xFormat?: (value: string) => string;
+  /** Labelled reference lines at these x values; a marker outside the data is not drawn. */
+  markers?: ChartMarker[];
 }
 
 /** Change over time. One y-axis only: measures of different scale go in separate charts. */
-export function TrendChart({ data, series, xKey = "day", kind = "area", stacked = false, height = 260, valueFormat = formatCount, xFormat = shortDate }: TrendChartProps) {
+export function TrendChart({ data, series, xKey = "day", kind = "area", stacked = false, height = 260, valueFormat = formatCount, xFormat = shortDate, markers = [] }: TrendChartProps) {
   const reduced = useReducedMotion();
   const gradientBase = useId().replace(/:/gu, "");
   const axis = { stroke: CHART_INK.axis, fontSize: 12 };
@@ -210,6 +223,15 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
         cursor={kind === "bar" ? { fill: "rgba(148, 163, 184, .12)" } : { stroke: CHART_INK.cursor, strokeWidth: 1 }}
         isAnimationActive={false}
       />
+      {markers.map((marker) => (
+        <ReferenceLine
+          key={`${marker.day}-${marker.label}`}
+          label={{ value: marker.label, position: "insideTopLeft", fill: CHART_INK.axis, fontSize: 11 }}
+          stroke={CHART_INK.axis}
+          strokeDasharray={DASH}
+          x={marker.day}
+        />
+      ))}
     </>
   );
   return (
@@ -237,7 +259,7 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
           <LineChart data={data} margin={CHART_MARGIN}>
             {shared}
             {series.map((item) => (
-              <Line activeDot={{ r: 4, stroke: CHART_INK.surface, strokeWidth: 2 }} dataKey={item.key} dot={false} isAnimationActive={!reduced} key={item.key} name={item.label} stroke={item.color} strokeWidth={2} type="monotone" />
+              <Line activeDot={{ r: 4, stroke: CHART_INK.surface, strokeWidth: 2 }} dataKey={item.key} dot={false} isAnimationActive={!reduced && !item.dashed} key={item.key} name={item.label} stroke={item.color} strokeDasharray={item.dashed ? DASH : undefined} strokeWidth={2} type="monotone" />
             ))}
           </LineChart>
         ) : (
@@ -261,6 +283,7 @@ export function TrendChart({ data, series, xKey = "day", kind = "area", stacked 
                 name={item.label}
                 stackId={stacked ? "stack" : undefined}
                 stroke={item.color}
+                strokeDasharray={item.dashed ? DASH : undefined}
                 strokeWidth={2}
                 type="monotone"
               />

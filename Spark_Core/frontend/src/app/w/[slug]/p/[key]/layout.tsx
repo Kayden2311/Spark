@@ -15,7 +15,7 @@ import { ProjectProvider, type ToastTone } from "./project-context";
 type Toast = { id: number; text: string; tone: ToastTone };
 type Announcement = { id: number; text: string };
 
-/** Shared header (name, methodology, view tabs: Board · Backlog (Scrum) · Timeline (Waterfall, or a kept plan) · Overview · Settings (planners)) and the one live region for every project view. */
+/** Shared header (name, methodology, view tabs: Board · Backlog (Scrum) · Timeline (Waterfall, or a kept plan) · Overview · Insights · Settings (planners)) and the one live region for every project view. */
 export default function ProjectLayout({ children }: { children: ReactNode }) {
   const { key = "" } = useParams<{ key: string }>();
   const pathname = usePathname();
@@ -96,6 +96,8 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
       // A project that left Waterfall keeps its phases and milestones there as history (milestones stay editable).
       { href: `${base}/timeline`, label: "Timeline", show: methodology === "waterfall" || ready.phases.length > 0 || ready.milestones.length > 0 },
       { href: `${base}/overview`, label: "Overview", show: true },
+      // Insights are read-only and visible to every member.
+      { href: `${base}/insights`, label: "Insights", show: true },
       { href: `${base}/settings`, label: "Settings", show: canEdit },
     ].filter((tab) => tab.show);
     content = (

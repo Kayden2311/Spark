@@ -217,6 +217,8 @@ export interface PlanMilestone extends ProjectMilestone {
 
 /** Which methodology a project used when; `endedAt` null is the current period. */
 export interface MethodologyPeriod {
+  /** Selects the period for the methodology-specific insights (`?period=`). */
+  id: string;
   methodology: string;
   startedAt: string;
   endedAt: string | null;

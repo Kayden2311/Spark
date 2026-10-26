@@ -185,6 +185,13 @@
 .vizCohortCell[data-dark="true"] { color: #fff; }
 .vizCohortEmpty { border-left: 2px solid var(--viz-surface); background: repeating-linear-gradient(135deg, #f8fafc 0 4px, #f1f4f9 4px 8px); }
 
+/* Grouped bars and scatter plot */
+.vizGroupedBars .recharts-bar-rectangle, .vizScatter .recharts-scatter-symbol { transition: opacity .15s ease; }
+.vizScatter .recharts-reference-line text, .vizChartCanvas .recharts-reference-line text { font-weight: 600; paint-order: stroke; stroke: var(--viz-surface); stroke-width: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .vizGroupedBars .recharts-bar-rectangle, .vizScatter .recharts-scatter-symbol { transition: none; }
+}
+
 /* Ring gauge */
 .vizGauge { position: relative; display: grid; flex: none; place-items: center; }
 .vizGaugeValue { position: absolute; color: var(--viz-ink); font-size: var(--viz-text-3xs); font-weight: 700; font-variant-numeric: tabular-nums; }

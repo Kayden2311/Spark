@@ -332,7 +332,7 @@ describe("project settings tab", () => {
       navigation.params = { slug: "northstar-labs", key: "OPS" };
       render(<WorkspaceLayout><ProjectLayout><p>Overview</p></ProjectLayout></WorkspaceLayout>);
       const tabs = await screen.findByRole("navigation", { name: "Project views" });
-      expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Overview"]);
+      expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Overview", "Insights"]);
       expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
     });
 

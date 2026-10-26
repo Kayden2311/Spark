@@ -5,7 +5,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BarList, ChartCard, Gauge, Heatmap, Sparkline, TargetGauge } from "../src/app/_ui/viz";
+import { BarList, ChartCard, ChartLegend, Gauge, GroupedBars, Heatmap, ScatterPlot, Sparkline, TargetGauge, TrendChart, groupedBarsTable, scatterTable } from "../src/app/_ui/viz";
 
 function mockReducedMotion(reduce: boolean) {
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -219,6 +219,79 @@ describe("shared viz module", () => {
     expect(alpha).toHaveFocus();
     await userEvent.tab();
     expect(screen.getByRole("link", { name: "Beta" })).toHaveFocus();
+  });
+
+  it("GroupedBars draws one bar per series and category, with a legend and a table view", async () => {
+    const series = [
+      { key: "committed", label: "Committed", color: "#2563eb" },
+      { key: "completed", label: "Completed", color: "#1baf7a" },
+    ];
+    const data = [
+      { label: "Sprint 1", committed: 20, completed: 18 },
+      { label: "Sprint 2", committed: 24, completed: 12 },
+    ];
+    const { container } = render(
+      <ChartCard legend={<ChartLegend series={series} />} table={groupedBarsTable(data, series)} title="Velocity">
+        <GroupedBars data={data} series={series} />
+      </ChartCard>,
+    );
+    const legend = container.querySelector(".vizLegend")!;
+    expect(within(legend as HTMLElement).getByText("Committed")).toBeInTheDocument();
+    expect(within(legend as HTMLElement).getByText("Completed")).toBeInTheDocument();
+    expect(container.querySelectorAll(".recharts-bar-rectangle")).toHaveLength(4);
+    await userEvent.click(screen.getByRole("button", { name: "View as table" }));
+    const table = screen.getByRole("table", { name: "Velocity" });
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["", "Committed", "Completed"]);
+    const row = within(table).getByRole("rowheader", { name: "Sprint 2" }).closest("tr")!;
+    expect(within(row).getByText("24")).toBeInTheDocument();
+    expect(within(row).getByText("12")).toBeInTheDocument();
+  });
+
+  it("GroupedBars and ScatterPlot turn animation off under reduced motion", () => {
+    mockReducedMotion(true);
+    const { container } = render(
+      <>
+        <GroupedBars data={[{ label: "A", value: 2 }]} series={[{ key: "value", label: "Value", color: "#2563eb" }]} />
+        <ScatterPlot series={[{ key: "cycle", label: "Cycle time", color: "#2563eb", points: [{ x: Date.UTC(2026, 9, 2), y: 3 }] }]} />
+      </>,
+    );
+    expect(container.querySelectorAll(".recharts-bar-rectangle")).toHaveLength(1);
+    expect(container.querySelectorAll(".recharts-scatter-symbol")).toHaveLength(1);
+  });
+
+  it("ScatterPlot draws points and labelled reference lines, with a table view", async () => {
+    const series = [{ key: "cycle", label: "Cycle time", color: "#2563eb", points: [
+      { x: Date.UTC(2026, 9, 2), y: 3.5, label: "OPS-1" },
+      { x: Date.UTC(2026, 9, 5), y: 1, label: "OPS-2" },
+    ] }];
+    const { container } = render(
+      <ChartCard legend={<ChartLegend series={series} />} table={scatterTable(series, { yFormat: (value) => `${value} d` })} title="Cycle time">
+        <ScatterPlot references={[{ y: 2, label: "p50 2 d" }, { y: 3.2, label: "p85 3.2 d" }]} series={series} yFormat={(value) => `${value} d`} />
+      </ChartCard>,
+    );
+    expect(container.querySelectorAll(".recharts-scatter-symbol")).toHaveLength(2);
+    expect(screen.getByText("p50 2 d")).toBeInTheDocument();
+    expect(screen.getByText("p85 3.2 d")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "View as table" }));
+    const table = screen.getByRole("table", { name: "Cycle time" });
+    const row = within(table).getByRole("rowheader", { name: "OPS-1" }).closest("tr")!;
+    expect(within(row).getByText("Oct 2")).toBeInTheDocument();
+    expect(within(row).getByText("3.5 d")).toBeInTheDocument();
+  });
+
+  it("TrendChart draws labelled markers as reference lines and dashed series", () => {
+    mockReducedMotion(true);
+    const { container } = render(
+      <TrendChart
+        data={[{ day: "2026-10-01", a: 1, b: 2 }, { day: "2026-10-02", a: 3, b: 1 }, { day: "2026-10-03", a: 2, b: 0 }]}
+        kind="line"
+        markers={[{ day: "2026-10-02", label: "Switched Kanban → Scrum on Oct 2" }]}
+        series={[{ key: "a", label: "A", color: "#2563eb" }, { key: "b", label: "B", color: "#94a3b8", dashed: true }]}
+      />,
+    );
+    expect(screen.getByText("Switched Kanban → Scrum on Oct 2")).toBeInTheDocument();
+    expect(container.querySelectorAll(".recharts-reference-line")).toHaveLength(1);
+    expect(container.querySelector('path[name="B"]')).toHaveAttribute("stroke-dasharray", "6 4");
   });
 
   it("shared modules never import admin", () => {

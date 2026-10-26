@@ -211,7 +211,7 @@ describe("scrum backlog", () => {
     expect(within(lane("Sprint 4")).getByText("Planned")).toBeInTheDocument();
 
     const tabs = screen.getByRole("navigation", { name: "Project views" });
-    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Backlog", "Overview", "Settings"]);
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Backlog", "Overview", "Insights", "Settings"]);
     expect(within(tabs).getByRole("link", { name: "Backlog" })).toHaveAttribute("aria-current", "page");
     expect(within(tabs).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/w/northstar-labs/p/ATLAS/settings");
   });
@@ -587,7 +587,7 @@ describe("scrum backlog", () => {
 
     // Members see neither the Settings tab nor the header's Settings button.
     const tabs = screen.getByRole("navigation", { name: "Project views" });
-    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Backlog", "Overview"]);
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Backlog", "Overview", "Insights"]);
     expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
   });
 
@@ -604,7 +604,7 @@ describe("scrum backlog", () => {
     await renderBacklog("OPS");
     expect(await screen.findByRole("heading", { name: "The backlog is for Scrum projects" })).toBeInTheDocument();
     const tabs = screen.getByRole("navigation", { name: "Project views" });
-    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Overview", "Settings"]);
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Overview", "Insights", "Settings"]);
     expect(requests(SPRINTS_KEY)).toHaveLength(0);
   });
 });

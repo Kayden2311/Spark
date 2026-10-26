@@ -604,14 +604,14 @@ describe("waterfall timeline", () => {
     mockApi({ project: { ...KANBAN, milestones: [WATERFALL.milestones[0]] } });
     renderTimeline("OPS");
     const tabs = await screen.findByRole("navigation", { name: "Project views" });
-    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Timeline", "Overview", "Settings"]);
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Timeline", "Overview", "Insights", "Settings"]);
   });
 
   it("leaves the Timeline tab out for a project without a plan", async () => {
     mockApi({ project: KANBAN });
     renderTimeline("OPS");
     const tabs = await screen.findByRole("navigation", { name: "Project views" });
-    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Overview", "Settings"]);
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Board", "Overview", "Insights", "Settings"]);
   });
 
   it("points other methodologies to the board", async () => {
