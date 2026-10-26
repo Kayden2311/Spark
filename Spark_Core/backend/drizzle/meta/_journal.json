@@ -183,6 +183,13 @@
       "when": 1792390000000,
       "tag": "0025_methodology_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792400000000,
+      "tag": "0026_insight_reads",
+      "breakpoints": true
     }
   ]
 }

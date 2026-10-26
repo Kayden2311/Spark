@@ -497,7 +497,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(26);
+    expect(result.rows[0].count).toBe(27);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -1084,7 +1084,7 @@ describe("Local PostgreSQL schema", () => {
     const runtimeFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
-      "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "is_community_member",
+      "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "insight_flow", "insight_issue_states", "insight_members", "insight_sprint_burndown", "insight_sprint_outcomes", "is_community_member",
       "is_coworker", "is_session_user", "is_workspace_member", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
       "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_daily", "staff_community_health", "staff_community_health_counts", "staff_community_series", "staff_engagement_heatmap", "staff_grant_role",
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
@@ -3800,5 +3800,330 @@ describe("Local PostgreSQL schema", () => {
     expect((await issueEvents(onBacklog)).map((row) => row.to_version)).toEqual([1, 2, 3]);
     expect((await boardColumns(project)).map((row) => row.name)).toEqual(["Backlog", "In progress", "Done"]);
     expect((await methodologyPeriods(project)).map((row) => row.methodology)).toEqual(["kanban", "scrum", "kanban"]);
+  });
+});
+
+// M5 insight reads (0026). Fixtures are written by the table owner after the full migration: every issue
+// version is one change set (issue row, issue_events row with a back-dated created_at, processed outbox row),
+// so the deferred check_issue_change_set trigger accepts the history.
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dayFromToday = (offset = 0) => new Date(Date.now() + offset * DAY_MS).toISOString().slice(0, 10);
+const shiftDay = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+const utcAt = (day: string, time = "00:00:00") => `${day}T${time}Z`;
+const iso = (value: string | Date | null) => (value === null ? null : new Date(value).toISOString());
+type Category = "backlog" | "todo" | "in_progress" | "done";
+type InsightProject = { owner: Account; workspace: string; project: string; statuses: Record<Category, string>; next: number };
+type Snapshot = { category: Category; sprint?: string | null; assignee?: string | null; points?: number | null; archived?: boolean };
+// after: null writes an event without a snapshot (the replay ignores it; the issue row keeps its state).
+type HistoryStep = { at: string; after: Snapshot | null };
+type IssueCurrent = { due?: string | null; startedAt?: string | null; completedAt?: string | null };
+// A project with one status per category (no WIP limits) and its open methodology period.
+async function insightProject(who: Account, workspace?: string): Promise<InsightProject> {
+  const tenant = workspace ?? (await createWorkspace(who)).workspace_id!;
+  const project = randomUUID();
+  const statuses: Record<Category, string> = { backlog: randomUUID(), todo: randomUUID(), in_progress: randomUUID(), done: randomUUID() };
+  const key = `I${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+  await owner.query("SET ROLE spark_owner");
+  await owner.query("BEGIN");
+  try {
+    await owner.query(`INSERT INTO ${table("projects")} (id,tenant_id,key,name) VALUES ($1,$2,$3,'Insights')`, [project, tenant, key]);
+    await owner.query(`INSERT INTO ${table("boards")} (tenant_id,project_id,name) VALUES ($1,$2,'Board')`, [tenant, project]);
+    await owner.query(`INSERT INTO ${table("issue_statuses")} (id,tenant_id,project_id,name,category,position) VALUES
+      ($3,$1,$2,'Backlog','backlog',1),($4,$1,$2,'To do','todo',2),($5,$1,$2,'Doing','in_progress',3),($6,$1,$2,'Done','done',4)`,
+      [tenant, project, statuses.backlog, statuses.todo, statuses.in_progress, statuses.done]);
+    await owner.query(`INSERT INTO ${table("project_methodology_periods")} (tenant_id,project_id,methodology,changed_by_user_id,reason) VALUES ($1,$2,'kanban',$3,'Created by test')`, [tenant, project, who.id]);
+    await owner.query("COMMIT");
+  } catch (error) { await owner.query("ROLLBACK"); throw error; }
+  return { owner: who, workspace: tenant, project, statuses, next: 0 };
+}
+// Writes one issue with a back-dated history, one change set per step: the issue row at version n, its
+// issue_events row (created_at = step.at, the M3/M4 change shape) and a processed outbox row. completed_at
+// follows the guard (set while done: current.completedAt or the time it became done); archived_at is set while
+// archived. Returns the issue id.
+async function issueHistory(fx: InsightProject, steps: HistoryStep[], current: IssueCurrent = {}) {
+  const id = randomUUID(), number = ++fx.next;
+  await owner.query("SET ROLE spark_owner");
+  await owner.query("BEGIN");
+  try {
+    let state: Snapshot | null = null, doneSince: string | null = null, archivedSince: string | null = null;
+    for (const [index, step] of steps.entries()) {
+      state = step.after ?? state;
+      if (!state) throw new Error("The first step needs a snapshot");
+      doneSince = state.category === "done" ? doneSince ?? step.at : null;
+      archivedSince = state.archived ? archivedSince ?? step.at : null;
+      const completedAt = state.category === "done" ? current.completedAt ?? doneSince : null;
+      const values = [id, fx.workspace, fx.project, fx.statuses[state.category], state.assignee ?? null, state.sprint ?? null, state.points ?? null, archivedSince, completedAt, index + 1];
+      await owner.query("SET CONSTRAINTS ALL DEFERRED");
+      if (index === 0) {
+        await owner.query(`INSERT INTO ${table("issues")} (id,tenant_id,project_id,status_id,assignee_user_id,sprint_id,story_points,archived_at,completed_at,version,
+          number,title,reporter_user_id,created_at,due_date,started_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Insight',$12,$13,$14,$15)`,
+          [...values, number, fx.owner.id, step.at, current.due ?? null, current.startedAt ?? null]);
+      } else {
+        await owner.query(`UPDATE ${table("issues")} SET status_id=$4,assignee_user_id=$5,sprint_id=$6,story_points=$7,archived_at=$8,completed_at=$9,version=$10
+          WHERE id=$1 AND tenant_id=$2 AND project_id=$3`, values);
+      }
+      const changes = step.after
+        ? { fields: [], after: { statusId: fx.statuses[state.category], category: state.category, assigneeUserId: state.assignee ?? null, storyPoints: state.points ?? null,
+          phaseId: null, sprintId: state.sprint ?? null, archived: state.archived ?? false } }
+        : { fields: ["title"] };
+      const eventType = index === 0 ? "issue.created" : "issue.updated";
+      await owner.query(`INSERT INTO ${table("issue_events")} (tenant_id,project_id,issue_id,actor_user_id,event_type,from_version,to_version,changes,created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [fx.workspace, fx.project, id, fx.owner.id, eventType, index, index + 1, JSON.stringify(changes), step.at]);
+      await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload,created_at,available_at,processed_at)
+        VALUES ($1,$2,'issue',$3,$4,'{}',$5,$5,$5)`, [fx.workspace, eventType, id, index + 1, step.at]);
+      await owner.query("SET CONSTRAINTS ALL IMMEDIATE");
+    }
+    await owner.query("COMMIT");
+  } catch (error) { await owner.query("ROLLBACK"); throw error; }
+  return id;
+}
+const flowCall = `SELECT day::text AS day,backlog,todo,in_progress,done,completed,completed_points::float8 AS completed_points FROM "${namespace}".insight_flow($1,$2,$3,$4) ORDER BY day`;
+const burndownCall = `SELECT day::text AS day,scope_count,scope_points::float8 AS scope_points,remaining_count,remaining_points::float8 AS remaining_points
+  FROM "${namespace}".insight_sprint_burndown($1,$2) ORDER BY day`;
+const outcomesCall = `SELECT sprint_id,name,completed_at,committed_points::float8 AS committed_points,completed_points::float8 AS completed_points,committed_count,completed_count,
+  base_count,base_points::float8 AS base_points,base_estimated,base_done_count,base_done_points::float8 AS base_done_points,already_done_count,added_count,
+  added_points::float8 AS added_points,removed_count FROM "${namespace}".insight_sprint_outcomes($1,$2,$3,$4,$5)`;
+const membersCall = `SELECT user_id,completed,completed_points::float8 AS completed_points,with_due,on_time,open,overdue,median_cycle_days::float8 AS median_cycle_days
+  FROM "${namespace}".insight_members($1,$2,$3,$4,$5)`;
+const statesCall = `SELECT issue_id,valid_from,valid_to,category,status_id,sprint_id,phase_id,assignee_user_id,story_points::float8 AS story_points,archived
+  FROM "${namespace}".insight_issue_states($1,$2,$3) ORDER BY issue_id,valid_from`;
+type SprintSetup = InsightProject & { sprint: string; older: string; firstDay: string; today: string; olderCompletedAt: string; completedAt: string };
+// The Review Focus 2 sprint: 10 committed issues, 2 of them already done at the start; 1 issue added on day 2;
+// 6 of the 8 open committed issues finish; at completion (today 00:00:01 UTC) the 2 open committed issues and the
+// added one go back to the backlog in change sets sharing completed_at. The window runs from 5 days ago to 2 days
+// ahead. One of the two carried-over committed issues is unestimated. An older completed sprint has no commitments.
+async function sprintFixture(): Promise<SprintSetup> {
+  const who = await account("Sprint Insights");
+  const fx = await insightProject(who);
+  const today = dayFromToday(), firstDay = shiftDay(today, -5);
+  const sprint = randomUUID(), older = randomUUID();
+  const startedAt = utcAt(firstDay, "09:00:00"), completedAt = utcAt(today, "00:00:01"), olderCompletedAt = utcAt(shiftDay(firstDay, -1), "10:00:00");
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("sprints")} (id,tenant_id,project_id,name,starts_at,ends_at,status,started_at,completed_at,committed_points,committed_count,completed_points,completed_count)
+    VALUES ($1,$3,$4,'Sprint 2',$5,$6,'completed',$7,$8,16,10,14,8),($2,$3,$4,'Sprint 1',$9,$10,'completed',$11,$12,0,0,0,0)`,
+    [sprint, older, fx.workspace, fx.project, utcAt(firstDay), utcAt(shiftDay(firstDay, 7)), startedAt, completedAt,
+      utcAt(shiftDay(firstDay, -14)), utcAt(shiftDay(firstDay, -1)), utcAt(shiftDay(firstDay, -14), "09:00:00"), olderCompletedAt]);
+  const created = utcAt(shiftDay(firstDay, -3), "10:00:00"), planned = utcAt(shiftDay(firstDay, -1), "12:00:00");
+  const committed: { id: string; points: number | null }[] = [];
+  for (let index = 0; index < 2; index++) {
+    committed.push({ id: await issueHistory(fx, [
+      { at: created, after: { category: "todo", points: 1 } },
+      { at: utcAt(shiftDay(firstDay, -2), "10:00:00"), after: { category: "done", points: 1 } },
+      { at: planned, after: { category: "done", points: 1, sprint } },
+    ]), points: 1 });
+  }
+  const finishedOn = [1, 1, 2, 3, 4, 4];
+  for (let index = 0; index < 8; index++) {
+    const points = index === 7 ? null : 2;
+    const steps: HistoryStep[] = [{ at: created, after: { category: "todo", points } }, { at: planned, after: { category: "todo", points, sprint } }];
+    steps.push(index < 6
+      ? { at: utcAt(shiftDay(firstDay, finishedOn[index]!), "15:00:00"), after: { category: "done", points, sprint } }
+      : { at: completedAt, after: { category: "todo", points, sprint: null } });
+    committed.push({ id: await issueHistory(fx, steps), points });
+  }
+  await issueHistory(fx, [
+    { at: created, after: { category: "todo", points: 3 } },
+    { at: utcAt(shiftDay(firstDay, 2), "12:00:00"), after: { category: "todo", points: 3, sprint } },
+    { at: completedAt, after: { category: "todo", points: 3, sprint: null } },
+  ]);
+  for (const item of committed) {
+    await owner.query(`INSERT INTO ${table("sprint_commitments")} (tenant_id,sprint_id,issue_id,story_points,created_at) VALUES ($1,$2,$3,$4,$5)`,
+      [fx.workspace, sprint, item.id, item.points, startedAt]);
+  }
+  return { ...fx, sprint, older, firstDay, today, olderCompletedAt, completedAt };
+}
+let sprintSetup: Promise<SprintSetup> | undefined;
+const sharedSprint = () => (sprintSetup ??= sprintFixture());
+
+describe("Insight reads", () => {
+  it("replays issue states", async () => {
+    const fx = await insightProject(await account("States"));
+    const base = dayFromToday(-12), t1 = utcAt(base, "10:00:00"), t2 = utcAt(base, "11:00:00"), t3 = utcAt(shiftDay(base, 1), "09:00:00"), t4 = utcAt(shiftDay(base, 2), "09:00:00");
+    const tracked = await issueHistory(fx, [
+      { at: t1, after: { category: "todo", points: 1 } },
+      { at: t2, after: null },
+      { at: t3, after: { category: "in_progress", points: 2, assignee: fx.owner.id } },
+      { at: t4, after: { category: "done", points: 2, assignee: fx.owner.id, archived: true } },
+    ]);
+    const late = await issueHistory(fx, [{ at: t3, after: { category: "backlog" } }]);
+    const read = async (until: string) => (await asSession(fx.owner.token, statesCall, [fx.workspace, fx.project, until])).rows
+      .map((row) => ({ ...row, valid_from: iso(row.valid_from), valid_to: iso(row.valid_to) }));
+    const row = (issue: string, from: string, to: string | null, category: Category, extra: Record<string, unknown> = {}) => ({
+      issue_id: issue, valid_from: iso(from), valid_to: iso(to), category, status_id: fx.statuses[category], sprint_id: null, phase_id: null,
+      assignee_user_id: null, story_points: null, archived: false, ...extra });
+    // Before the first event the issue did not exist; an event without a snapshot is ignored.
+    expect(await read(t1)).toEqual([]);
+    expect(await read(t3)).toEqual([row(tracked, t1, null, "todo", { story_points: 1 })]);
+    const all = await read(utcAt(dayFromToday(1)));
+    expect(all.filter((item) => item.issue_id === tracked)).toEqual([
+      row(tracked, t1, t3, "todo", { story_points: 1 }),
+      row(tracked, t3, t4, "in_progress", { story_points: 2, assignee_user_id: fx.owner.id }),
+      row(tracked, t4, null, "done", { story_points: 2, assignee_user_id: fx.owner.id, archived: true }),
+    ]);
+    expect(all.filter((item) => item.issue_id === late)).toEqual([row(late, t3, null, "backlog")]);
+  });
+  it("counts the CFD per UTC day", async () => {
+    const fx = await insightProject(await account("Flow"));
+    const first = dayFromToday(-20), day = (offset: number, time = "00:00:00") => utcAt(shiftDay(first, offset), time);
+    await issueHistory(fx, [
+      { at: day(-2, "10:00:00"), after: { category: "backlog", points: 3 } },
+      { at: day(1, "23:59:59"), after: { category: "todo", points: 3 } },
+      { at: day(3, "12:00:00"), after: { category: "in_progress", points: 3 } },
+      { at: day(5, "09:00:00"), after: { category: "done", points: 3 } },
+    ]);
+    await issueHistory(fx, [{ at: day(0, "08:00:00"), after: { category: "todo", points: 2 } }, { at: day(2), after: { category: "done", points: 2 } }]);
+    await issueHistory(fx, [
+      { at: day(1, "12:00:00"), after: { category: "in_progress" } },
+      { at: day(2, "10:00:00"), after: { category: "done" } },
+      { at: day(3, "10:00:00"), after: { category: "in_progress" } },
+      { at: day(4, "10:00:00"), after: { category: "done" } },
+    ]);
+    await issueHistory(fx, [{ at: day(-1, "10:00:00"), after: { category: "todo" } }, { at: day(3, "15:00:00"), after: { category: "todo", archived: true } }]);
+    await issueHistory(fx, [{ at: day(4), after: { category: "backlog", points: 5 } }, { at: day(6, "23:59:59"), after: { category: "in_progress", points: 5 } }]);
+    const flow = (await asSession(fx.owner.token, flowCall, [fx.workspace, fx.project, first, shiftDay(first, 6)])).rows;
+    const counts = (offset: number, backlog: number, todo: number, in_progress: number, done: number, completed: number, completed_points: number) =>
+      ({ day: shiftDay(first, offset), backlog, todo, in_progress, done, completed, completed_points });
+    expect(flow).toEqual([
+      counts(0, 1, 2, 0, 0, 0, 0),
+      counts(1, 0, 3, 1, 0, 0, 0),
+      counts(2, 0, 2, 0, 2, 2, 2),
+      counts(3, 0, 0, 2, 1, 0, 0),
+      counts(4, 1, 0, 1, 2, 1, 0),
+      counts(5, 1, 0, 0, 3, 1, 3),
+      counts(6, 0, 0, 1, 3, 0, 0),
+    ]);
+    await expect(asSession(fx.owner.token, flowCall, [fx.workspace, fx.project, first, shiftDay(first, -1)])).rejects.toMatchObject({ code: "22023" });
+    await expect(asSession(fx.owner.token, flowCall, [fx.workspace, fx.project, first, shiftDay(first, 400)])).rejects.toMatchObject({ code: "22023" });
+  });
+  it("counts done transitions including reopen", async () => {
+    const fx = await insightProject(await account("Throughput"));
+    const first = dayFromToday(-40), day = (offset: number, time: string) => utcAt(shiftDay(first, offset), time);
+    // Done, done again with new points (no transition), reopened and done again (counts twice).
+    await issueHistory(fx, [
+      { at: day(0, "10:00:00"), after: { category: "todo", points: 1 } },
+      { at: day(0, "11:00:00"), after: { category: "done", points: 1 } },
+      { at: day(0, "12:00:00"), after: { category: "done", points: 2 } },
+      { at: day(1, "10:00:00"), after: { category: "todo", points: 2 } },
+      { at: day(1, "11:00:00"), after: { category: "done", points: 2 } },
+    ]);
+    // Created directly in a done status: no previous snapshot, counts.
+    await issueHistory(fx, [{ at: day(0, "09:00:00"), after: { category: "done", points: 2 } }]);
+    // Done and archived in the same change set: excluded.
+    await issueHistory(fx, [{ at: day(0, "08:00:00"), after: { category: "todo" } }, { at: day(1, "08:00:00"), after: { category: "done", archived: true } }]);
+    const flow = (await asSession(fx.owner.token, flowCall, [fx.workspace, fx.project, first, shiftDay(first, 2)])).rows;
+    expect(flow).toEqual([
+      { day: first, backlog: 0, todo: 1, in_progress: 0, done: 2, completed: 2, completed_points: 3 },
+      { day: shiftDay(first, 1), backlog: 0, todo: 0, in_progress: 0, done: 2, completed: 1, completed_points: 2 },
+      { day: shiftDay(first, 2), backlog: 0, todo: 0, in_progress: 0, done: 2, completed: 0, completed_points: 0 },
+    ]);
+  });
+  it("computes the sprint burndown", async () => {
+    const fx = await sharedSprint();
+    const rows = (await asSession(fx.owner.token, burndownCall, [fx.workspace, fx.sprint])).rows;
+    const point = (offset: number, scope_count: number | null, scope_points: number | null, remaining_count: number | null, remaining_points: number | null) =>
+      ({ day: shiftDay(fx.firstDay, offset), scope_count, scope_points, remaining_count, remaining_points });
+    expect(rows).toEqual([
+      point(0, 10, 16, 8, 14),
+      point(1, 10, 16, 6, 10),
+      point(2, 11, 19, 6, 11),
+      point(3, 11, 19, 5, 9),
+      point(4, 11, 19, 3, 5),
+      // Today: read just before completion, so the carry-over at completed_at does not count as burn.
+      point(5, 11, 19, 3, 5),
+      point(6, null, null, null, null),
+      point(7, null, null, null, null),
+    ]);
+    expect((await asSession(fx.owner.token, burndownCall, [fx.workspace, randomUUID()])).rows).toEqual([]);
+  });
+  it("computes sprint outcomes with already-done commitments", async () => {
+    const fx = await sharedSprint();
+    const from = utcAt(shiftDay(fx.firstDay, -30)), to = utcAt(dayFromToday(1));
+    const outcomes = async (start: string, end: string, limit: number) =>
+      (await asSession(fx.owner.token, outcomesCall, [fx.workspace, fx.project, start, end, limit])).rows.map((row) => ({ ...row, completed_at: iso(row.completed_at) }));
+    const current = {
+      sprint_id: fx.sprint, name: "Sprint 2", completed_at: iso(fx.completedAt), committed_points: 16, completed_points: 14, committed_count: 10, completed_count: 8,
+      base_count: 8, base_points: 14, base_estimated: 7, base_done_count: 6, base_done_points: 12, already_done_count: 2, added_count: 1, added_points: 3, removed_count: 0,
+    };
+    const previous = {
+      sprint_id: fx.older, name: "Sprint 1", completed_at: iso(fx.olderCompletedAt), committed_points: 0, completed_points: 0, committed_count: 0, completed_count: 0,
+      base_count: 0, base_points: 0, base_estimated: 0, base_done_count: 0, base_done_points: 0, already_done_count: 0, added_count: 0, added_points: 0, removed_count: 0,
+    };
+    // Oldest first; the limit keeps the newest; the range is [from, to).
+    expect(await outcomes(from, to, 6)).toEqual([previous, current]);
+    expect(await outcomes(from, to, 1)).toEqual([current]);
+    expect(await outcomes(from, fx.completedAt, 6)).toEqual([previous]);
+    expect(await outcomes(new Date(Date.parse(fx.olderCompletedAt) + 1000).toISOString(), to, 6)).toEqual([current]);
+    for (const limit of [0, 7]) await expect(outcomes(from, to, limit)).rejects.toMatchObject({ code: "22023" });
+  });
+  it("computes member stats", async () => {
+    const alice = await account("Alice Insight"), bob = await account("Bob Insight");
+    const fx = await insightProject(alice);
+    await addMember(fx.workspace, bob, "member");
+    const second = await insightProject(alice, fx.workspace), excluded = await insightProject(alice, fx.workspace);
+    const first = dayFromToday(-30), day = (offset: number, time = "00:00:00") => utcAt(shiftDay(first, offset), time);
+    const created = day(-5, "08:00:00");
+    const done = (project: InsightProject, assignee: string | null, completedAt: string, points: number | null, current: IssueCurrent = {}, archived = false) =>
+      issueHistory(project, [
+        { at: created, after: { category: "todo", assignee, points } },
+        { at: completedAt, after: { category: "done", assignee, points, archived } },
+      ], { completedAt, ...current });
+    const open = (category: Category, assignee: string | null, due: string | null, archived = false) =>
+      issueHistory(fx, [{ at: created, after: { category, assignee, archived } }], { due });
+    // Alice: on time on the due day (cycle 1.5), late (3.0), at the last instant of the range (0.5); out of range
+    // on both sides; archived; one overdue open issue and one due on p_today; work in a project outside p_projects.
+    await done(fx, alice.id, day(2, "12:00:00"), 3, { due: shiftDay(first, 2), startedAt: day(1) });
+    await done(fx, alice.id, day(5), 2, { due: shiftDay(first, 4), startedAt: day(2) });
+    await done(fx, alice.id, day(9, "23:59:59"), null, { startedAt: day(9, "11:59:59") });
+    await done(fx, alice.id, day(10), 5, { startedAt: day(9) });
+    await done(fx, alice.id, day(-1, "23:59:59"), 5, { startedAt: day(-2) });
+    await done(fx, alice.id, day(3), 8, { startedAt: day(1) }, true);
+    await open("todo", alice.id, shiftDay(first, 9));
+    await open("in_progress", alice.id, shiftDay(first, 10));
+    await open("todo", alice.id, shiftDay(first, 1), true);
+    await done(excluded, alice.id, day(3), 13, { startedAt: day(1) });
+    // Bob: on time (cycle 2.0) and one without a start (no cycle) in the second project.
+    await done(fx, bob.id, day(3), 1, { due: shiftDay(first, 3), startedAt: day(1) });
+    await done(second, bob.id, day(4, "08:00:00"), null);
+    // Unassigned: an overdue open issue and a completed one without a start.
+    await open("backlog", null, shiftDay(first, 5));
+    await done(fx, null, day(6), null);
+    const rows = (await asSession(alice.token, membersCall, [fx.workspace, [fx.project, second.project], first, shiftDay(first, 9), shiftDay(first, 10)])).rows;
+    expect(rows).toEqual([
+      ...[
+        { user_id: alice.id, completed: 3, completed_points: 5, with_due: 2, on_time: 1, open: 2, overdue: 1, median_cycle_days: 1.5 },
+        { user_id: bob.id, completed: 2, completed_points: 1, with_due: 1, on_time: 1, open: 0, overdue: 0, median_cycle_days: 2 },
+      ].sort((a, b) => (a.user_id < b.user_id ? -1 : 1)),
+      { user_id: null, completed: 1, completed_points: 0, with_due: 0, on_time: 0, open: 1, overdue: 1, median_cycle_days: null },
+    ]);
+    await expect(asSession(alice.token, membersCall, [fx.workspace, [fx.project], first, shiftDay(first, -1), first])).rejects.toMatchObject({ code: "22023" });
+  });
+  it("isolates tenants", async () => {
+    const fx = await sharedSprint();
+    const stranger = await account("Insight Stranger");
+    const strangerWorkspace = (await createWorkspace(stranger)).workspace_id!;
+    const from = shiftDay(fx.firstDay, -30), to = dayFromToday();
+    const calls: [string, (tenant: string) => unknown[]][] = [
+      [statesCall, (tenant) => [tenant, fx.project, utcAt(dayFromToday(1))]],
+      [flowCall, (tenant) => [tenant, fx.project, from, to]],
+      [burndownCall, (tenant) => [tenant, fx.sprint]],
+      [outcomesCall, (tenant) => [tenant, fx.project, utcAt(from), utcAt(dayFromToday(1)), 6]],
+      [membersCall, (tenant) => [tenant, [fx.project], from, to, to]],
+    ];
+    for (const [sql, args] of calls) {
+      // The member sees the rows; another workspace's session sees none (the functions run as the caller, under RLS).
+      expect((await asSession(fx.owner.token, sql, args(fx.workspace))).rows.length).toBeGreaterThan(0);
+      expect((await asSession(stranger.token, sql, args(fx.workspace))).rows).toEqual([]);
+      expect((await asSession(null, sql, args(fx.workspace))).rows).toEqual([]);
+      // The explicit tenant filter holds even for a role that bypasses the workspace policies.
+      await owner.query("SET ROLE spark_owner");
+      expect((await owner.query(sql, args(strangerWorkspace))).rows).toEqual([]);
+    }
+  });
+  it("functions are invokers with an empty search_path and not executable by PUBLIC", async () => {
+    const rows = await owner.query(`SELECT p.proname, p.prosecdef, p.provolatile, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE') AS public
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname LIKE 'insight\\_%' ORDER BY p.proname`, [namespace]);
+    expect(rows.rows).toEqual(["insight_flow", "insight_issue_states", "insight_members", "insight_sprint_burndown", "insight_sprint_outcomes"].map((proname) =>
+      ({ proname, prosecdef: false, provolatile: "s", proconfig: ['search_path=""'], runtime: true, public: false })));
   });
 });
