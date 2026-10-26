@@ -61,7 +61,7 @@ export default function ProjectInsightsPage() {
   };
 
   return (
-    <div className="wsInsights" key={project.id}>
+    <div className="wsInsights">
       <section aria-label="Insights controls" className="wsInsightsBar">
         <div className="wsInsightsBarTitle">
           <h2>Insights</h2>

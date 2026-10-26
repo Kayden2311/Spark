@@ -4,14 +4,16 @@ import { planStatusLabel } from "../../../../_lib/insights";
 import { useWorkspaceData } from "../../../../_lib/use-workspace-data";
 
 /**
- * One insights card's request. `loading` is true only until the first answer, so a range change keeps the
- * previous numbers on screen while the new ones load; `error` and `reload` drive the card's own retry.
+ * One insights card's request. Data loaded for another path (an earlier range or period) is never shown
+ * under the new one: the card shows its loading state until the new answer arrives. A retry of the same
+ * path keeps the numbers on screen. `error` and `reload` drive the card's own retry.
  */
 export function useInsight<T>(path: string | null) {
   const result = useWorkspaceData<T>(path);
+  const data = result.dataPath === path ? result.data : null;
   return {
-    data: result.data,
-    loading: result.loading && result.data === null && !result.error,
+    data,
+    loading: result.loading && data === null && !result.error,
     error: result.loading ? null : result.error,
     errorCode: result.errorCode,
     reload: result.reload,

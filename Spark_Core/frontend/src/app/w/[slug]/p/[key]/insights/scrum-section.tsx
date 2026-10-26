@@ -29,6 +29,16 @@ function velocityRow(sprint: SprintOutcome, unit: string) {
     : { label: sprint.name, committed: sprint.committedCount, completed: sprint.completedCount };
 }
 
+/**
+ * Mean completed per sprint in the velocity's unit. The API's `averageVelocity` averages completed points
+ * (frozen at 0 for unestimated sprints), so it is used only when the unit is points; counts are averaged here.
+ */
+function averageVelocity(data: VelocityInsights | null, rows: ReadonlyArray<{ completed: number | null }>): number | null {
+  if (!data || rows.length === 0) return null;
+  if (data.unit === "points") return data.averageVelocity;
+  return Math.round((rows.reduce((sum, row) => sum + (row.completed ?? 0), 0) / rows.length) * 10) / 10;
+}
+
 /** Scrum: the burndown of one sprint (active by default) and the velocity of the period's completed sprints. */
 export function ScrumSection({ projectId, periodId }: { projectId: string; periodId: string | null }) {
   const sprints = useInsight<{ items: Sprint[] }>(sprintsPath(projectId));
@@ -84,6 +94,7 @@ function VelocityCard({ velocity }: { velocity: InsightQuery<VelocityInsights> }
   const data = velocity.data;
   const unit = data?.unit ?? "count";
   const rows = (data?.sprints ?? []).map((sprint) => velocityRow(sprint, unit));
+  const average = averageVelocity(data, rows);
   return (
     <ChartCard
       empty={Boolean(data) && rows.length === 0}
@@ -93,7 +104,7 @@ function VelocityCard({ velocity }: { velocity: InsightQuery<VelocityInsights> }
       legend={<ChartLegend series={VELOCITY_SERIES} />}
       loading={velocity.loading}
       onRetry={velocity.reload}
-      subtitle={data?.averageVelocity != null ? `Average ${formatCount(data.averageVelocity)} points a sprint · last ${rows.length} completed` : `Committed vs completed ${unitLabel(unit)}, last 6 sprints`}
+      subtitle={average !== null ? `Average ${formatCount(average)} ${unitLabel(unit)} a sprint · last ${rows.length} completed` : `Committed vs completed ${unitLabel(unit)}, last 6 sprints`}
       table={groupedBarsTable(rows, VELOCITY_SERIES)}
       title="Velocity"
     >

@@ -174,14 +174,14 @@ const SCHEDULE = {
   scheduleVarianceDays: 6,
 };
 
-type Handler = () => Response;
+type Handler = () => Response | Promise<Response>;
 let calls: string[] = [];
 const json = (payload: unknown, status = 200): Handler => () =>
   new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json", ETag: "\"v3\"" } });
 const failure = (status = 500): Handler => () =>
   new Response(JSON.stringify({ code: "internal", detail: "The server could not load this." }), { status, headers: { "content-type": "application/problem+json" } });
 
-/** Routes match on the path; the query string is recorded in `calls` for assertions. */
+/** Routes match on the full URL first, then on the path; the query string is recorded in `calls` for assertions. */
 function mockApi(project: { id: string; key: string }, overrides: Record<string, Handler> = {}, periods = PERIODS) {
   calls = [];
   const p = `/api/v1/projects/${project.id}`;
@@ -207,7 +207,7 @@ function mockApi(project: { id: string; key: string }, overrides: Record<string,
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     if ((init?.method ?? "GET") !== "GET") throw new Error(`Unexpected write ${init?.method} ${url}`);
     calls.push(url);
-    const handler = routes[url.split("?")[0]!];
+    const handler = routes[url] ?? routes[url.split("?")[0]!];
     return handler ? handler() : new Response(JSON.stringify({ code: "project_not_found", detail: "Project does not exist." }), { status: 404 });
   }));
 }
@@ -284,6 +284,61 @@ describe("project insights", () => {
     renderInsights("ATLAS");
     const velocity = await screen.findByRole("region", { name: "Velocity" });
     expect(await within(velocity).findByText("No completed sprints in this period yet")).toBeInTheDocument();
+  });
+
+  it("averages a count-unit velocity in tasks, not the API's points average", async () => {
+    const counted = {
+      ...VELOCITY,
+      unit: "count",
+      sprints: [
+        { ...VELOCITY.sprints[0]!, committedPoints: 0, completedPoints: 0, committedCount: 8, completedCount: 6 },
+        { ...VELOCITY.sprints[0]!, id: "sp2", name: "Sprint 2", committedPoints: 0, completedPoints: 0, committedCount: 5, completedCount: 3 },
+      ],
+      averageVelocity: 0,
+    };
+    mockApi(SCRUM, { "/api/v1/projects/p-atlas/insights/velocity": json(counted) });
+    renderInsights("ATLAS");
+    const velocity = await screen.findByRole("region", { name: "Velocity" });
+    expect(await within(velocity).findByText("Average 4.5 tasks a sprint · last 2 completed")).toBeInTheDocument();
+    const reliability = screen.getByRole("region", { name: "Commitment reliability" });
+    expect(await within(reliability).findAllByText("+1")).toHaveLength(2);
+  });
+
+  it("opens with the range and period already in the URL", async () => {
+    mockApi(SCRUM);
+    renderInsights("ATLAS", "?days=90&period=pk1");
+    const range = await screen.findByRole("group", { name: "Range" });
+    expect(within(range).getByRole("button", { name: "90 days" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("combobox", { name: "Period" })).toHaveValue("pk1");
+    expect(await screen.findByRole("region", { name: "WIP vs limit" })).toBeInTheDocument();
+    await waitFor(() => expect(calls).toContain("/api/v1/projects/p-atlas/insights/cycle-time?days=90"));
+    expect(calls).toContain("/api/v1/projects/p-atlas/insights/flow?days=90");
+    expect(calls.some((url) => url.includes("days=30"))).toBe(false);
+    expect(screen.queryByRole("region", { name: "Sprint burndown" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to the open period for an unknown ?period=", async () => {
+    mockApi(SCRUM);
+    renderInsights("ATLAS", "?period=00000000-0000-4000-8000-000000000000");
+    expect(await screen.findByRole("combobox", { name: "Period" })).toHaveValue("ps1");
+    expect(await screen.findByRole("region", { name: "Velocity" })).toBeInTheDocument();
+    await waitFor(() => expect(calls).toContain("/api/v1/projects/p-atlas/insights/velocity"));
+    expect(calls.some((url) => url.includes("period="))).toBe(false);
+    expect(screen.queryByRole("region", { name: "WIP vs limit" })).not.toBeInTheDocument();
+  });
+
+  it("shows the loading state, not the old range's numbers, while a new range loads", async () => {
+    let release: (() => void) | null = null;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    mockApi(SCRUM, { "/api/v1/projects/p-atlas/insights/flow?days=90": async () => { await pending; return json(FLOW)(); } });
+    renderInsights("ATLAS");
+    const flow = await screen.findByRole("region", { name: "Cumulative flow" });
+    await waitFor(() => expect(flow.querySelector(".recharts-area")).not.toBeNull());
+    await userEvent.click(within(await screen.findByRole("group", { name: "Range" })).getByRole("button", { name: "90 days" }));
+    expect(await within(flow).findByRole("status", { name: "Loading chart" })).toBeInTheDocument();
+    expect(flow.querySelector(".recharts-area")).toBeNull();
+    release!();
+    await waitFor(() => expect(flow.querySelector(".recharts-area")).not.toBeNull());
   });
 
   it("switches to the Kanban section when the Kanban period is selected", async () => {

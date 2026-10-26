@@ -92,7 +92,7 @@ export function PlanVsDone({ summary }: { summary: Query<InsightSummary> }) {
               <span aria-hidden="true" className="wsInsightsPlanTick" style={{ "--insights-x": `${Math.min(100, Math.max(0, planPercent))}%`, background: PLAN_COLOR } as CSSProperties} />
             )}
           </div>
-          {planPercent === null && <p className="wsInsightsMuted">No plan window: {data.plan.kind === null ? "set the dates (or start a sprint) to compare progress with the plan." : "the plan has no dates."}</p>}
+          {planPercent === null && <p className="wsInsightsMuted">No plan window: set the project&apos;s dates (or start a sprint) to compare progress with the plan.</p>}
         </div>
       )}
     </ChartCard>
