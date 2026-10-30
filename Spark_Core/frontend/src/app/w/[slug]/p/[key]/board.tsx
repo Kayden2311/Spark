@@ -68,7 +68,7 @@ export function ProjectBoard() {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [focusRequest, setFocusRequest] = useState<{ selector: string; serial: number } | null>(null);
   const helpId = useId();
-  // The task drawer. A ?issue=<KEY>-<n> link (the assignment email's) opens it once the board is loaded;
+  // The task drawer. A ?issue=<KEY>-<n> link (the assignment email's; the schedule links by issue id) opens it once the board is loaded;
   // the parameter is acted on when it changes, so opening and closing here only keep it in sync.
   const [drawer, setDrawer] = useState<{ id: string; key: string } | null>(null);
   const [seenParam, setSeenParam] = useState<string | null>(null);
@@ -78,7 +78,7 @@ export function ProjectBoard() {
   if (committed && issueParam !== seenParam) {
     setSeenParam(issueParam);
     if (issueParam !== null) {
-      const linked = committed.issues.find((issue) => issue.key.toUpperCase() === issueParam.toUpperCase());
+      const linked = committed.issues.find((issue) => issue.key.toUpperCase() === issueParam.toUpperCase() || issue.id === issueParam);
       if (linked) {
         if (drawer?.id !== linked.id) setDrawer({ id: linked.id, key: linked.key });
       } else {

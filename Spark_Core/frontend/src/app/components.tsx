@@ -199,7 +199,7 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
     ["Home", active ? `/w/${active.slug}` : "/workspace"],
     ...(active ? [["Members", `/w/${active.slug}/members`] as [string, string], ["Insights", `/w/${active.slug}/insights`] as [string, string]] : []),
     ["Communities", "/communities"],
-    ["Schedule", "/schedule"],
+    ["Schedule", active ? `/w/${active.slug}/schedule` : "/schedule"],
     ["Notifications", "/notifications"],
     ["Billing", "/billing"],
   ];

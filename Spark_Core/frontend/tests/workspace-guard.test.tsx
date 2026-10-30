@@ -27,7 +27,7 @@ vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 import WorkspaceResolverPage from "../src/app/workspace/page";
 import WorkspaceLayout from "../src/app/w/[slug]/layout";
 import WorkspaceHomePage from "../src/app/w/[slug]/page";
-import SchedulePage from "../src/app/schedule/page";
+import { WorkspaceShell } from "../src/app/components";
 
 const LAST_KEY = "spark:last-workspace";
 const northstar: AuthWorkspace = { workspaceId: "w1", workspaceName: "Northstar Labs", workspaceSlug: "northstar-labs", role: "owner" };
@@ -190,7 +190,7 @@ describe("workspace home", () => {
 describe("workspace shell", () => {
   it("lists workspaces in the switcher and offers to create one", async () => {
     navigation.pathname = "/schedule";
-    render(<SchedulePage />);
+    render(<WorkspaceShell current="Home"><p>Inside</p></WorkspaceShell>);
     await userEvent.click(screen.getByRole("button", { name: /switch workspace/i }));
     const menu = await screen.findByRole("navigation", { name: "Your workspaces" });
     expect(within(menu).getByRole("link", { name: /Orbit Studio/ })).toHaveAttribute("href", "/w/orbit-studio");
@@ -199,7 +199,7 @@ describe("workspace shell", () => {
 
   it("closes the switcher on Escape and returns focus to its button", async () => {
     navigation.pathname = "/schedule";
-    render(<SchedulePage />);
+    render(<WorkspaceShell current="Home"><p>Inside</p></WorkspaceShell>);
     const trigger = screen.getByRole("button", { name: /switch workspace/i });
     await userEvent.click(trigger);
     const menu = await screen.findByRole("navigation", { name: "Your workspaces" });
@@ -211,7 +211,7 @@ describe("workspace shell", () => {
 
   it("closes the mobile menu on Escape", async () => {
     navigation.pathname = "/schedule";
-    render(<SchedulePage />);
+    render(<WorkspaceShell current="Home"><p>Inside</p></WorkspaceShell>);
     const toggle = screen.getByRole("button", { name: "Menu" });
     await userEvent.click(toggle);
     expect(screen.getByRole("button", { name: "Close" })).toHaveAttribute("aria-expanded", "true");
@@ -223,7 +223,7 @@ describe("workspace shell", () => {
   it("works with zero workspaces", async () => {
     auth.workspaces = [];
     navigation.pathname = "/schedule";
-    render(<SchedulePage />);
+    render(<WorkspaceShell current="Home"><p>Inside</p></WorkspaceShell>);
     await userEvent.click(screen.getByRole("button", { name: /switch workspace/i }));
     const menu = await screen.findByRole("navigation", { name: "Your workspaces" });
     expect(within(menu).getAllByRole("link")).toHaveLength(1);
