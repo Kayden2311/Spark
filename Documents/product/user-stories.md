@@ -281,11 +281,21 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 ### US-E6: Schedule events
 
-- **Actor**: Workspace Member
+- **Actor**: Workspace Member (create, answer, read); the organizer, Owner or Admin (edit, cancel)
 - **Priority**: Could
-- **Status**: Mockup (`/schedule`)
-- **Story**: As a Workspace Member, I want to add events and delivery dates so that the team coordinates sessions.
-- **Acceptance criteria**: Persisted behavior is defined when this story is scheduled; until then the screen shows illustrative data only.
+- **Status**: Implemented (`GET /api/v1/workspaces/{workspaceId}/calendar?from&to&tz`, `POST /api/v1/workspaces/{workspaceId}/calendar-events`, `GET`/`PATCH /api/v1/calendar-events/{eventId}`, `POST /api/v1/calendar-events/{eventId}/cancel`, `PUT /api/v1/calendar-events/{eventId}/attendees/me`; migration `0027`; screen `/w/[slug]/schedule`)
+- **Story**: As a Workspace Member, I want to add events and see delivery dates so that the team coordinates sessions around the work that is due.
+- **Acceptance criteria**:
+  - The Schedule page (`/w/[slug]/schedule`, "Schedule" in the sidebar; `/schedule` opens the last workspace's page) shows one local week (Monday to Sunday, in the viewer's browser time zone) with Previous, Today and Next, an "Only mine" toggle and "New event". The week is a seven-day grid from 1280 px of window width and a day-by-day agenda below it; the shell sidebar is why the grid needs that width. `?week=` keeps the shown week in the URL. A tab that regains focus (or visibility) reloads the week once and moves "Today" past midnight.
+  - Given deadlines in non-archived projects, then the week lists them as chips on their day: open tasks with a due date ("Task due"), planned or active sprints' end ("Sprint ends") and open milestones' due date ("Milestone"), each with the project key and a link to the task, backlog or timeline. Deadlines are calendar dates: a date counts in the week when it falls on a day of the viewer's zone. "Only mine" keeps events I organize or am invited to, and tasks assigned to me, and leaves sprint and milestone dates.
+  - Given any member, when they choose "New event", then the dialog takes a title (1–200), start and end (an end after the start, 5 minutes to 14 days, 2000–2100), a time zone (default the browser's), an optional location (200) and description (2000), an optional project and task, and up to 50 teammates. The creator is the organizer and always attends ("Going"); invited teammates start "Awaiting reply" and get an in-app `event_invited` notice. The dialog warns "Overlaps with N of your events" and refuses an end before the start inline.
+  - Given an event, then everyone in the workspace can open it: when and where in the viewer's zone (and the organizer's zone when it differs), organizer, project and task, description and every attendee's answer. Events are team-visible; a cancelled event stays listed, struck through and marked "Cancelled", and cannot change.
+  - Given I am invited, then the event offers Accept, Maybe and Decline (answer shown at once, restored on failure, keyboard focus stays on the pressed button); the organizer sees my answer. Answering a cancelled event says "This event was cancelled" (`409 event_cancelled`); a member who is not invited has no answer buttons (`403 not_invited`).
+  - Given the organizer, an owner or an admin edits the event and changes its start or end, then every other attendee's answer goes back to "Awaiting reply" and each is told with an `event_rescheduled` notice ("<title> moved to <local date and time in the event's zone>"); attendees who are added start pending and are invited, attendees who are removed are dropped. Edits and Cancel send `If-Match`.
+  - Given a plain member opens someone else's event, then they see it (and may answer their own invitation) but no Edit or Cancel event; the API refuses their writes with `403 insufficient_role`.
+  - Given two people edit the same event, then the one who saves second gets `412`, the dialog shows the teammate's version with "Updated by a teammate. The event was reloaded with their changes; review it and save again." and the week reloads. Cancelling asks "Cancel this event?" first, sends `If-Match`, tells every attendee but the person who cancelled (`event_cancelled`) and treats a stale version the same way.
+  - Given a member of another workspace (or an unknown id), then reading, editing, cancelling or answering an event returns the same `404 event_not_found`; an invited person who has since left the workspace can no longer answer.
+  - A phone (390 px) shows the agenda with no horizontal scroll and a dialog that fits the screen; every motion stops under `prefers-reduced-motion`.
 
 ### US-E7: Choose a methodology for a project
 
