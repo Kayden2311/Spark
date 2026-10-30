@@ -4900,7 +4900,7 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 .wsSchedChip[data-kind="sprint_end"] .wsKeyTag { color: #fff; background: rgba(255, 255, 255, .2); }
 .wsSchedChip[data-kind="milestone_due"] { color: #78350f; background: #fef3c7; }
 .wsSchedChip .wsKeyTag { flex: none; font-size: .62rem; }
-.wsSchedChipTitle { min-width: 0; overflow-wrap: anywhere; }
+.wsSchedChipTitle { min-width: 0; }
 .wsSchedChip[data-kind="milestone_due"] .wsSchedChipMark { width: .55rem; height: .55rem; flex: none; background: #d97706; transform: rotate(45deg); }
 .wsSchedChipMark { display: none; }
 .wsSchedChip[data-kind="milestone_due"] .wsSchedChipMark { display: block; }
@@ -4931,10 +4931,14 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 .wsSchedAgendaHead small { font-size: .7rem; font-weight: 750; }
 .wsSchedAgendaDay .wsSchedChips { grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); }
 
-@media (max-width: 1180px) and (min-width: 900px) {
-  .wsSchedTitle { font-size: .82rem; }
-  .wsSchedChip { flex-wrap: wrap; }
+.wsSchedWeek .wsSchedChips { grid-template-columns: minmax(0, 1fr); }
+.wsSchedChips > li { min-width: 0; }
+.wsSchedWeek .wsSchedChip { flex-wrap: wrap; }
+@media (max-width: 1439px) {
+  .wsSchedWeek .wsSchedDayHead small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
+.wsSchedWeek .wsSchedChipTitle { flex: 1 1 100%; }
+.wsSchedChipTitle { overflow-wrap: break-word; }
 @media (max-width: 899px) {
   .wsSchedControls { width: 100%; }
   .wsSchedControls .sparkPrimary { margin-left: auto; }
@@ -4989,6 +4993,7 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 .wsEventRsvp { display: flex; flex-wrap: wrap; gap: .5rem; }
 .wsEventAnswer { min-height: 2.6rem; flex: 1 1 6rem; padding: .5rem 1rem; border: 1.5px solid #cbd7e8; border-radius: .65rem; color: var(--ink-secondary); background: #fff; font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; transition: background .15s ease, color .15s ease, border-color .15s ease; }
 .wsEventAnswer:hover { background: #f1f5f9; }
+.wsEventAnswer[aria-disabled="true"] { cursor: progress; opacity: .7; }
 .wsEventAnswer[aria-pressed="true"] { border-color: var(--blue); color: #fff; background: var(--blue); }
 .wsEventAnswer[data-response="declined"][aria-pressed="true"] { border-color: #b91c1c; background: #b91c1c; }
 .wsEventAnswer[data-response="tentative"][aria-pressed="true"] { border-color: #d97706; background: #d97706; }

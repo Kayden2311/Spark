@@ -614,14 +614,18 @@ describe("event dialog fixes", () => {
     expect(within(dialog).getByRole("button", { name: "Cancel event" })).toHaveFocus();
   });
 
-  it("disables the answer buttons while an answer is in flight", async () => {
+  it("marks the answer buttons busy without dropping keyboard focus while an answer is in flight", async () => {
     let release: (response: Response) => void = () => {};
     handler = (request) => (request.method === "PUT" ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
     renderPage();
     const dialog = await openEvent("Founder stand-up");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Accept" }));
-    for (const name of ["Accept", "Maybe", "Decline"]) expect(within(dialog).getByRole("button", { name })).toBeDisabled();
+    const accept = within(dialog).getByRole("button", { name: "Accept" });
+    accept.focus();
+    await userEvent.keyboard("{Enter}");
+    for (const name of ["Accept", "Maybe", "Decline"]) expect(within(dialog).getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
+    expect(accept).toHaveFocus();
     release(json({ ...standup, myResponse: "accepted" }));
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Maybe" })).toBeEnabled());
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Maybe" })).not.toHaveAttribute("aria-disabled"));
+    expect(accept).toHaveFocus();
   });
 });

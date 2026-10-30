@@ -389,12 +389,12 @@ function registerCalendarRoute(app: FastifyInstance, guard: MemberGuard): void {
              WHERE i.tenant_id = $1 AND p.tenant_id = $1 AND st.tenant_id = $1 AND p.archived_at IS NULL AND i.archived_at IS NULL
                AND st.category <> 'done' AND i.due_date IS NOT NULL AND ${inRange("i.due_date")}
              UNION ALL
-             SELECT 'sprint_end', to_char((s.ends_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), s.name, p.id, p.key, p.name, p.methodology,
+             SELECT 'sprint_end', to_char((s.ends_at AT TIME ZONE $4)::date, 'YYYY-MM-DD'), s.name, p.id, p.key, p.name, p.methodology,
                NULL::uuid, NULL::uuid, NULL::text, s.id, NULL::uuid, s.id
              FROM spark.sprints s
              JOIN spark.projects p ON p.tenant_id = s.tenant_id AND p.id = s.project_id
              WHERE s.tenant_id = $1 AND p.tenant_id = $1 AND p.archived_at IS NULL AND s.status IN ('planned', 'active') AND s.ends_at IS NOT NULL
-               AND ${inRange("(s.ends_at AT TIME ZONE 'UTC')::date")}
+               AND ${inRange("(s.ends_at AT TIME ZONE $4)::date")}
              UNION ALL
              SELECT 'milestone_due', to_char(m.due_date, 'YYYY-MM-DD'), m.name, p.id, p.key, p.name, p.methodology,
                NULL::uuid, NULL::uuid, NULL::text, NULL::uuid, m.id, m.id

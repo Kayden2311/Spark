@@ -504,6 +504,9 @@ describe("schedule routes", () => {
       // from is 2026-11-02 00:00 local and to - 1 ms is 2026-11-07 23:59:59.999 local: dates 11-02..11-07 inclusive.
       expect(sql).toMatch(/>= \(\$2::timestamptz AT TIME ZONE \$4\)::date/u);
       expect(sql).toMatch(/<= \(\(\$3::timestamptz - interval '1 millisecond'\) AT TIME ZONE \$4\)::date/u);
+      // sprints.ends_at is a timestamptz, so its date is read in the tz as well, never in a fixed UTC.
+      expect(sql).toContain("(s.ends_at AT TIME ZONE $4)::date");
+      expect(sql).not.toContain("AT TIME ZONE 'UTC'");
     });
 
     it("reports truncation when more than 500 events or deadlines match", async () => {

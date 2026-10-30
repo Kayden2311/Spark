@@ -28,7 +28,8 @@ import { useWorkspace } from "../workspace-context";
 import { EventDetails } from "./event-details";
 import { EventDialog } from "./event-dialog";
 
-const WIDE_QUERY = "(min-width: 900px)";
+// The shell sidebar takes 264 px, so seven day columns need about 1280 px of window to stay readable.
+const WIDE_QUERY = "(min-width: 1280px)";
 const MAX_AVATARS = 3;
 const dayLabel = new Intl.DateTimeFormat("en", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
 const weekdayShort = new Intl.DateTimeFormat("en", { weekday: "short", timeZone: "UTC" });
@@ -42,7 +43,7 @@ function subscribeWide(onChange: () => void): () => void {
   return () => query.removeEventListener("change", onChange);
 }
 
-/** True from 900 px up (also without matchMedia), where the week grid replaces the phone agenda. */
+/** True from 1280 px up (also without matchMedia), where the week grid replaces the agenda. */
 function useWide(): boolean {
   return useSyncExternalStore(subscribeWide, () => (typeof window.matchMedia === "function" ? window.matchMedia(WIDE_QUERY).matches : true), () => true);
 }
@@ -131,7 +132,7 @@ export function ScheduleView() {
   const { user } = useAuth();
   const wide = useWide();
   const [tz] = useState(viewerZone);
-  const [now] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const today = dayOfInstant(now, tz);
   const thisWeek = mondayOf(today);
   const [week, setWeek] = useState(() => parseWeekParam(new URLSearchParams(window.location.search).get("week")) ?? thisWeek);
@@ -140,10 +141,17 @@ export function ScheduleView() {
   const calendar = useInsight<CalendarResponse>(calendarPath(workspace.id, weekBounds(week, tz), tz));
   const { reload } = calendar;
 
-  // A teammate may have changed the schedule while this tab was in the background.
+  // A teammate may have changed the schedule while this tab was in the background, and the day may have rolled over.
+  // focus and visibilitychange usually fire together, so only the first one within a second reloads.
+  const lastRefresh = useRef(0);
   useEffect(() => {
     const refresh = () => {
-      if (document.visibilityState !== "hidden") reload();
+      if (document.visibilityState === "hidden") return;
+      const at = Date.now();
+      if (at - lastRefresh.current < 1000) return;
+      lastRefresh.current = at;
+      setNow(at);
+      reload();
     };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);

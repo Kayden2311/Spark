@@ -237,6 +237,29 @@ describe("workspace schedule", () => {
     await waitFor(() => expect(calendarCalls().length).toBe(before + 1));
   });
 
+  it("reloads once when focus and visibilitychange fire together", async () => {
+    mockApi();
+    renderPage();
+    await screen.findByText("Founder stand-up");
+    const before = calendarCalls().length;
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(calendarCalls().length).toBe(before + 1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calendarCalls().length).toBe(before + 1);
+  });
+
+  it("moves Today to the new day when the tab regains focus after midnight", async () => {
+    mockApi();
+    renderPage();
+    await screen.findByText("Founder stand-up");
+    expect(screen.getByRole("region", { name: /Wednesday, Oct 28/u })).toHaveAttribute("data-today", "true");
+    vi.setSystemTime(new Date("2026-10-29T10:00:00.000Z"));
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(screen.getByRole("region", { name: /Thursday, Oct 29/u })).toHaveAttribute("data-today", "true"));
+    expect(screen.getByRole("region", { name: /Wednesday, Oct 28/u })).not.toHaveAttribute("data-today");
+  });
+
   it("offers a New event button for the event dialog to wire", async () => {
     mockApi();
     renderPage();

@@ -136,7 +136,7 @@ export function EventDetails({ event, me, tz, onClose, onEdit, onChange, onStale
         {invited && (
           <div aria-label="Your response" className="wsEventRsvp" role="group">
             {ANSWERS.map(({ response, label }) => (
-              <button aria-pressed={event.myResponse === response} className="wsEventAnswer" disabled={answerBusy} data-response={response} key={response} onClick={() => void answer(response)} type="button">{label}</button>
+              <button aria-pressed={event.myResponse === response} className="wsEventAnswer" aria-disabled={answerBusy || undefined} data-response={response} key={response} onClick={() => void answer(response)} type="button">{label}</button>
             ))}
           </div>
         )}
