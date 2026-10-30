@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 
 import { useAuth } from "../../../auth-context";
 import { initials } from "../../../components";
@@ -25,6 +25,8 @@ import {
   type Deadline,
 } from "../../_lib/schedule";
 import { useWorkspace } from "../workspace-context";
+import { EventDetails } from "./event-details";
+import { EventDialog } from "./event-dialog";
 
 const WIDE_QUERY = "(min-width: 900px)";
 const MAX_AVATARS = 3;
@@ -76,7 +78,7 @@ function Chip({ deadline, slug }: { deadline: Deadline; slug: string }) {
   );
 }
 
-function EventCard({ day, event, tz }: { day: string; event: CalendarEvent; tz: string }) {
+function EventCard({ day, event, onOpen, tz }: { day: string; event: CalendarEvent; onOpen(event: CalendarEvent): void; tz: string }) {
   const cancelled = event.status === "cancelled";
   const shown = event.attendees.slice(0, MAX_AVATARS);
   const more = event.attendees.length - shown.length;
@@ -84,7 +86,7 @@ function EventCard({ day, event, tz }: { day: string; event: CalendarEvent; tz: 
   return (
     <article className="wsSchedEvent" data-response={event.myResponse ?? undefined} data-status={event.status}>
       <time className="wsSchedTime" dateTime={event.startsAt}>{formatEventTime(event, day, tz)}</time>
-      <h3 className="wsSchedTitle">{event.title}</h3>
+      <h3 className="wsSchedTitle"><button aria-haspopup="dialog" className="wsSchedOpen" onClick={() => onOpen(event)} type="button">{event.title}</button></h3>
       {event.location && <p className="wsSchedPlace">{event.location}</p>}
       <div className="wsSchedMeta">
         {shown.length > 0 && (
@@ -99,7 +101,7 @@ function EventCard({ day, event, tz }: { day: string; event: CalendarEvent; tz: 
   );
 }
 
-function DayItems({ bucket, slug, tz }: { bucket: DayBucket; slug: string; tz: string }) {
+function DayItems({ bucket, onOpen, slug, tz }: { bucket: DayBucket; onOpen(event: CalendarEvent): void; slug: string; tz: string }) {
   return (
     <>
       {bucket.deadlines.length > 0 && (
@@ -107,7 +109,7 @@ function DayItems({ bucket, slug, tz }: { bucket: DayBucket; slug: string; tz: s
           {bucket.deadlines.map((deadline, index) => <li key={`${deadline.kind}-${deadline.issueId ?? deadline.sprintId ?? deadline.milestoneId ?? index}`}><Chip deadline={deadline} slug={slug} /></li>)}
         </ul>
       )}
-      {bucket.events.map((event) => <EventCard day={bucket.day} event={event} key={event.id} tz={tz} />)}
+      {bucket.events.map((event) => <EventCard day={bucket.day} event={event} key={event.id} onOpen={onOpen} tz={tz} />)}
     </>
   );
 }
@@ -121,12 +123,11 @@ function WeekSkeleton() {
   );
 }
 
-/**
- * The week view. `onNewEvent` is the hook for the event dialog (wired separately): without it the button is
- * shown but disabled.
- */
-export function ScheduleView({ onNewEvent }: { onNewEvent?: () => void }) {
-  const { workspace } = useWorkspace();
+type DialogState = { kind: "create"; day: string } | { kind: "details"; event: CalendarEvent } | { kind: "edit"; event: CalendarEvent } | null;
+
+/** The week view, with the event dialog (new, details and answers, edit) opened from it. */
+export function ScheduleView() {
+  const { workspace, projects } = useWorkspace();
   const { user } = useAuth();
   const wide = useWide();
   const [tz] = useState(viewerZone);
@@ -135,6 +136,7 @@ export function ScheduleView({ onNewEvent }: { onNewEvent?: () => void }) {
   const thisWeek = mondayOf(today);
   const [week, setWeek] = useState(() => parseWeekParam(new URLSearchParams(window.location.search).get("week")) ?? thisWeek);
   const [onlyMine, setOnlyMine] = useState(false);
+  const [dialog, setDialog] = useState<DialogState>(null);
   const calendar = useInsight<CalendarResponse>(calendarPath(workspace.id, weekBounds(week, tz), tz));
   const { reload } = calendar;
 
@@ -157,6 +159,33 @@ export function ScheduleView({ onNewEvent }: { onNewEvent?: () => void }) {
   };
 
   const me = user?.id ?? null;
+  const dialogOpen = dialog !== null;
+  const wasOpen = useRef(false);
+  const trigger = useRef<HTMLElement | null>(null);
+
+  // Focus goes back to whatever opened the dialog (a card, the New event button, a day) once it closes.
+  useEffect(() => {
+    if (dialogOpen) {
+      wasOpen.current = true;
+      return;
+    }
+    if (wasOpen.current && trigger.current?.isConnected) trigger.current.focus();
+    wasOpen.current = false;
+  }, [dialogOpen]);
+
+  const remember = () => {
+    if (!dialogOpen) trigger.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+  };
+  const newEventDay = today >= week && today < addDays(week, 7) ? today : week;
+  const openCreate = (day: string) => {
+    remember();
+    setDialog({ kind: "create", day });
+  };
+  const openDetails = (event: CalendarEvent) => {
+    remember();
+    setDialog({ kind: "details", event });
+  };
+
   const buckets = useMemo(() => {
     if (!calendar.data) return null;
     const events = onlyMine ? calendar.data.events.filter((item) => me !== null && (item.organizer.id === me || item.attendees.some((attendee) => attendee.user.id === me))) : calendar.data.events;
@@ -181,8 +210,7 @@ export function ScheduleView({ onNewEvent }: { onNewEvent?: () => void }) {
             <button aria-label="Next week" className="sparkSecondary" onClick={() => goTo(addDays(week, 7))} type="button">›</button>
           </div>
           <button aria-pressed={onlyMine} className="wsSchedToggle" onClick={() => setOnlyMine((value) => !value)} type="button">Only mine</button>
-          {/* The event dialog is attached through onNewEvent. */}
-          <button className="sparkPrimary" disabled={!onNewEvent} onClick={onNewEvent} title={onNewEvent ? undefined : "Creating events is not available yet"} type="button">New event</button>
+          <button className="sparkPrimary" onClick={() => openCreate(newEventDay)} type="button">New event</button>
         </div>
       </section>
 
@@ -200,13 +228,15 @@ export function ScheduleView({ onNewEvent }: { onNewEvent?: () => void }) {
       {buckets && wide && (
         <div className="wsSchedWeek">
           {buckets.map((bucket) => (
-            <section aria-label={dayText(bucket.day)} className="wsSchedDay" data-today={bucket.day === today || undefined} key={bucket.day}>
+            // A click on the empty part of a day starts an event there; the "+" button is the keyboard route.
+            <section aria-label={dayText(bucket.day)} className="wsSchedDay" data-today={bucket.day === today || undefined} key={bucket.day} onClick={(click) => { if (click.target === click.currentTarget) openCreate(bucket.day); }}>
               <header className="wsSchedDayHead">
                 <span>{weekdayShort.format(Date.parse(`${bucket.day}T00:00:00Z`))}</span>
                 <strong>{Number(bucket.day.slice(8))}</strong>
                 {bucket.day === today && <small>Today</small>}
+                <button aria-label={`Add event on ${dayText(bucket.day)}`} className="wsSchedAdd" onClick={() => openCreate(bucket.day)} type="button">+</button>
               </header>
-              <DayItems bucket={bucket} slug={workspace.slug} tz={tz} />
+              <DayItems bucket={bucket} onOpen={openDetails} slug={workspace.slug} tz={tz} />
             </section>
           ))}
         </div>
@@ -220,10 +250,50 @@ export function ScheduleView({ onNewEvent }: { onNewEvent?: () => void }) {
                 <h2>{dayText(bucket.day)}</h2>
                 {bucket.day === today && <small>Today</small>}
               </div>
-              <DayItems bucket={bucket} slug={workspace.slug} tz={tz} />
+              <DayItems bucket={bucket} onOpen={openDetails} slug={workspace.slug} tz={tz} />
             </li>
           ))}
         </ol>
+      )}
+    
+      {dialog?.kind === "create" && (
+        <EventDialog
+          calendarEvents={calendar.data?.events ?? []}
+          day={dialog.day}
+          me={me}
+          mode="create"
+          onClose={() => setDialog(null)}
+          onSaved={() => { setDialog(null); reload(); }}
+          onStale={reload}
+          projects={projects.items ?? []}
+          workspaceId={workspace.id}
+        />
+      )}
+      {dialog?.kind === "details" && (
+        <EventDetails
+          event={dialog.event}
+          me={me}
+          onCancelled={() => { setDialog(null); reload(); }}
+          onChange={(event) => setDialog((current) => (current?.kind === "details" ? { kind: "details", event } : current))}
+          onClose={() => setDialog(null)}
+          onEdit={() => setDialog({ kind: "edit", event: dialog.event })}
+          onStale={reload}
+          tz={tz}
+        />
+      )}
+      {dialog?.kind === "edit" && (
+        <EventDialog
+          calendarEvents={calendar.data?.events ?? []}
+          day={dialog.event.startsAt.slice(0, 10)}
+          event={dialog.event}
+          me={me}
+          mode="edit"
+          onClose={() => setDialog(null)}
+          onSaved={() => { setDialog(null); reload(); }}
+          onStale={reload}
+          projects={projects.items ?? []}
+          workspaceId={workspace.id}
+        />
       )}
     </div>
   );

@@ -206,3 +206,204 @@ export function formatEventTime(item: Pick<CalendarEvent, "startsAt" | "endsAt">
 }
 
 export const RESPONSE_LABELS: Record<string, string> = { pending: "Awaiting reply", accepted: "Going", declined: "Declined", tentative: "Maybe" };
+
+// ---------- Event forms ----------
+
+/** The strong entity tag the API expects in If-Match for an event. */
+export function eventEtag(version: number): string {
+  return `"v${version}"`;
+}
+
+export function isValidZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz.trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
+const TIME_PATTERN = /^(\d{2}):(\d{2})$/;
+
+/**
+ * The instant a wall-clock date ("YYYY-MM-DD") and time ("HH:mm") name in an IANA zone, as an ISO string.
+ * Null for input that is not a real date/time, an unknown zone, or a time the zone skips (spring-forward gap).
+ * A time that happens twice (fall-back) resolves to one of its two occurrences.
+ */
+export function wallClockInstant(day: string, time: string, tz: string): string | null {
+  const stamp = dayStamp(day);
+  const clockMatch = TIME_PATTERN.exec(time);
+  if (Number.isNaN(stamp) || !clockMatch || !isValidZone(tz)) return null;
+  const hours = Number(clockMatch[1]);
+  const minutes = Number(clockMatch[2]);
+  if (hours > 23 || minutes > 59) return null;
+  const wall = stamp + (hours * 60 + minutes) * 60_000;
+  // Two passes settle the offset when the wall time lies near a transition.
+  let instant = wall - offsetAt(wall, tz);
+  instant = wall - offsetAt(instant, tz);
+  const back = wallClockOf(instant, tz);
+  if (back.date !== day || back.time !== time) return null;
+  return new Date(instant).toISOString();
+}
+
+/** The date and time ("HH:mm") an instant shows on the wall in `tz`. */
+export function wallClockOf(instant: string | number, tz: string): { date: string; time: string } {
+  const stamp = typeof instant === "number" ? instant : Date.parse(instant);
+  const p = zoneParts(stamp, tz);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return { date: dayOfInstant(stamp, tz), time: `${pad(p.hour)}:${pad(p.minute)}` };
+}
+
+/** How many of the viewer's live (non-cancelled) events overlap [start, end), ignoring `exceptId`. */
+export function overlapCount(events: CalendarEvent[], userId: string | null, start: number, end: number, exceptId: string | null): number {
+  if (userId === null || Number.isNaN(start) || Number.isNaN(end)) return 0;
+  return events.filter((item) => {
+    if (item.id === exceptId || item.status === "cancelled") return false;
+    if (item.organizer.id !== userId && !item.attendees.some((attendee) => attendee.user.id === userId)) return false;
+    return Date.parse(item.startsAt) < end && Date.parse(item.endsAt) > start;
+  }).length;
+}
+
+const FALLBACK_ZONES = ["UTC", "Europe/London", "Europe/Berlin", "Europe/Paris", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Asia/Ho_Chi_Minh", "Asia/Singapore", "Asia/Tokyo", "Asia/Kolkata", "Australia/Sydney"];
+
+/** IANA zones for the picker, with the given zones (the viewer's, the event's) first. */
+export function zoneChoices(...extra: string[]): string[] {
+  let all = FALLBACK_ZONES;
+  try {
+    const supported = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.("timeZone");
+    if (supported && supported.length > 0) all = supported;
+  } catch {
+    // Older engines: keep the short list.
+  }
+  return [...new Set([...extra.filter(isValidZone), "UTC", ...all])];
+}
+
+/** Everything the event form edits, as the form holds it. */
+export interface EventFormValues {
+  title: string;
+  description: string;
+  location: string;
+  date: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+  timezone: string;
+  projectId: string;
+  issueId: string;
+  attendeeIds: string[];
+}
+
+/** The form values an existing event starts from, in its own zone; attendees limited to `activeIds`, the organizer left out. */
+export function formValuesOf(item: CalendarEvent, activeIds: ReadonlySet<string>): EventFormValues {
+  const start = wallClockOf(item.startsAt, item.timezone);
+  const end = wallClockOf(item.endsAt, item.timezone);
+  return {
+    title: item.title,
+    description: item.description ?? "",
+    location: item.location ?? "",
+    date: start.date,
+    startTime: start.time,
+    endDate: end.date,
+    endTime: end.time,
+    timezone: item.timezone,
+    projectId: item.project?.id ?? "",
+    issueId: item.issue?.id ?? "",
+    attendeeIds: item.attendees.map((attendee) => attendee.user.id).filter((id) => id !== item.organizer.id && activeIds.has(id)),
+  };
+}
+
+export type EventField = "title" | "description" | "location" | "time" | "timezone" | "project" | "issue" | "attendees";
+
+/** Client-side checks; the instants are null when they cannot be built. */
+export function validateEventForm(values: EventFormValues): { errors: Partial<Record<EventField, string>>; startsAt: string | null; endsAt: string | null } {
+  const errors: Partial<Record<EventField, string>> = {};
+  if (values.title.trim() === "") errors.title = "Enter a title.";
+  else if (values.title.trim().length > 200) errors.title = "Use 200 characters or fewer.";
+  if (values.location.trim().length > 200) errors.location = "Use 200 characters or fewer.";
+  if (values.description.length > 2000) errors.description = "Use 2000 characters or fewer.";
+  let startsAt: string | null = null;
+  let endsAt: string | null = null;
+  if (!isValidZone(values.timezone)) {
+    errors.timezone = "Choose a time zone from the list.";
+  } else {
+    startsAt = wallClockInstant(values.date, values.startTime, values.timezone);
+    endsAt = wallClockInstant(values.endDate, values.endTime, values.timezone);
+    if (startsAt === null || endsAt === null) errors.time = "Enter a valid date and time. Times skipped by a clock change do not exist.";
+    else if (Date.parse(endsAt) <= Date.parse(startsAt)) errors.time = "The event must end after it starts.";
+  }
+  return { errors, startsAt, endsAt };
+}
+
+export interface EventCreateBody {
+  title: string;
+  description?: string;
+  location?: string;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  projectId?: string;
+  issueId?: string;
+  attendeeUserIds: string[];
+}
+
+export function createEventBody(values: EventFormValues, startsAt: string, endsAt: string): EventCreateBody {
+  const body: EventCreateBody = { title: values.title.trim(), startsAt, endsAt, timezone: values.timezone, attendeeUserIds: values.attendeeIds };
+  if (values.description.trim() !== "") body.description = values.description;
+  if (values.location.trim() !== "") body.location = values.location.trim();
+  if (values.projectId !== "") {
+    body.projectId = values.projectId;
+    if (values.issueId !== "") body.issueId = values.issueId;
+  }
+  return body;
+}
+
+const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((id) => b.includes(id));
+
+/**
+ * The PATCH body for what changed between the form's starting values and now (empty when nothing did).
+ * `attendeesKnown` false (the member list did not load) leaves the attendees out.
+ */
+export function eventPatchBody(initial: EventFormValues, values: EventFormValues, startsAt: string, endsAt: string, attendeesKnown: boolean): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  if (values.title.trim() !== initial.title.trim()) patch.title = values.title.trim();
+  if (values.description !== initial.description) patch.description = values.description.trim() === "" ? null : values.description;
+  if (values.location.trim() !== initial.location.trim()) patch.location = values.location.trim() === "" ? null : values.location.trim();
+  const timeChanged = values.date !== initial.date || values.startTime !== initial.startTime || values.endDate !== initial.endDate || values.endTime !== initial.endTime || values.timezone !== initial.timezone;
+  if (timeChanged) {
+    patch.startsAt = startsAt;
+    patch.endsAt = endsAt;
+  }
+  if (values.timezone !== initial.timezone) patch.timezone = values.timezone;
+  if (values.projectId !== initial.projectId) {
+    patch.projectId = values.projectId === "" ? null : values.projectId;
+    // Clearing the project must clear the task in the same patch.
+    patch.issueId = values.projectId === "" || values.issueId === "" ? null : values.issueId;
+  } else if (values.issueId !== initial.issueId) {
+    patch.issueId = values.issueId === "" ? null : values.issueId;
+  }
+  if (attendeesKnown && !sameSet(initial.attendeeIds, values.attendeeIds)) patch.attendeeUserIds = values.attendeeIds;
+  return patch;
+}
+
+// ---------- Event text ----------
+
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+
+function dayFormat(tz: string): Intl.DateTimeFormat {
+  let format = dayFormats.get(tz);
+  if (!format) {
+    format = new Intl.DateTimeFormat("en", { timeZone: tz, weekday: "short", month: "short", day: "numeric" });
+    dayFormats.set(tz, format);
+  }
+  return format;
+}
+
+/** "Wed, Oct 28, 12:00 – 13:00" in `tz`; both ends with their dates when the event crosses midnight. */
+export function formatEventRange(item: Pick<CalendarEvent, "startsAt" | "endsAt">, tz: string): string {
+  const start = Date.parse(item.startsAt);
+  const end = Date.parse(item.endsAt);
+  const first = dayOfInstant(start, tz);
+  const last = dayOfInstant(Math.max(start, end - 1), tz);
+  if (first === last) return `${dayFormat(tz).format(start)}, ${clock(start, tz)} – ${clock(end, tz)}`;
+  return `${dayFormat(tz).format(start)}, ${clock(start, tz)} – ${dayFormat(tz).format(end)}, ${clock(end, tz)}`;
+}
