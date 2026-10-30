@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { initials } from "../../../components";
 import { Modal } from "../../_components/modal";
@@ -38,6 +38,17 @@ export function EventDetails({ event, me, tz, onClose, onEdit, onChange, onStale
   const [confirming, setConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const answering = useRef(false);
+  const [answerBusy, setAnswerBusy] = useState(false);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const keepButton = useRef<HTMLButtonElement>(null);
+  const confirmed = useRef(false);
+
+  // Moving between the action row and the confirmation must not drop focus to the page.
+  useEffect(() => {
+    if (!confirmed.current && !confirming) return;
+    confirmed.current = true;
+    (confirming ? keepButton : cancelButton).current?.focus();
+  }, [confirming]);
   const cancelled = event.status === "cancelled";
   const invited = event.myResponse !== null && !cancelled;
   const crossZone = event.timezone !== tz;
@@ -45,6 +56,7 @@ export function EventDetails({ event, me, tz, onClose, onEdit, onChange, onStale
   const answer = async (response: (typeof ANSWERS)[number]["response"]) => {
     if (answering.current || event.myResponse === response) return;
     answering.current = true;
+    setAnswerBusy(true);
     setError(null);
     const before = event;
     onChange({ ...event, myResponse: response, attendees: event.attendees.map((attendee) => (attendee.user.id === me ? { ...attendee, response } : attendee)) });
@@ -62,6 +74,7 @@ export function EventDetails({ event, me, tz, onClose, onEdit, onChange, onStale
       }
     } finally {
       answering.current = false;
+      setAnswerBusy(false);
     }
   };
 
@@ -123,7 +136,7 @@ export function EventDetails({ event, me, tz, onClose, onEdit, onChange, onStale
         {invited && (
           <div aria-label="Your response" className="wsEventRsvp" role="group">
             {ANSWERS.map(({ response, label }) => (
-              <button aria-pressed={event.myResponse === response} className="wsEventAnswer" data-response={response} key={response} onClick={() => void answer(response)} type="button">{label}</button>
+              <button aria-pressed={event.myResponse === response} className="wsEventAnswer" disabled={answerBusy} data-response={response} key={response} onClick={() => void answer(response)} type="button">{label}</button>
             ))}
           </div>
         )}
@@ -132,7 +145,7 @@ export function EventDetails({ event, me, tz, onClose, onEdit, onChange, onStale
 
         {event.canEdit && !confirming && (
           <div className="wsModalActions">
-            <button className="sparkSecondary" onClick={() => setConfirming(true)} type="button">Cancel event</button>
+            <button className="sparkSecondary" onClick={() => setConfirming(true)} ref={cancelButton} type="button">Cancel event</button>
             <button className="sparkPrimary" onClick={onEdit} type="button">Edit</button>
           </div>
         )}
@@ -140,7 +153,7 @@ export function EventDetails({ event, me, tz, onClose, onEdit, onChange, onStale
           <div aria-label="Confirm cancellation" className="wsEventConfirm" role="group">
             <p>Cancel this event? Everyone invited is told it was cancelled. This cannot be undone.</p>
             <div className="wsModalActions">
-              <button className="sparkSecondary" disabled={cancelling} onClick={() => setConfirming(false)} type="button">Keep event</button>
+              <button className="sparkSecondary" disabled={cancelling} onClick={() => setConfirming(false)} ref={keepButton} type="button">Keep event</button>
               <button className="wsDangerButton" disabled={cancelling} onClick={() => void cancelEvent()} type="button">{cancelling ? "Cancelling…" : "Yes, cancel event"}</button>
             </div>
           </div>

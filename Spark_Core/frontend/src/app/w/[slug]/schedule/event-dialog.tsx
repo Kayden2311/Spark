@@ -111,11 +111,8 @@ function EventForm({ workspaceId, me, mode, base, day, projects, calendarEvents,
   const [viewer] = useState(viewerZone);
   const activeIds = useMemo(() => new Set((members ?? []).map((member) => member.userId)), [members]);
   // Edits start from the event as it is now; attendees who have left the workspace are dropped from the selection.
-  const initial = useMemo<EventFormValues>(
-    () => (base ? formValuesOf(base, activeIds) : { title: "", description: "", location: "", date: day, startTime: "09:00", endDate: day, endTime: "10:00", timezone: viewer, projectId: "", issueId: "", attendeeIds: [] }),
-    // The starting point is fixed for the life of this form (a 412 remounts it with the new event).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+  const [initial] = useState<EventFormValues>(() =>
+    base ? formValuesOf(base, activeIds) : { title: "", description: "", location: "", date: day, startTime: "09:00", endDate: day, endTime: "10:00", timezone: viewer, projectId: "", issueId: "", attendeeIds: [] },
   );
   const [values, setValues] = useState<EventFormValues>(initial);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -126,13 +123,16 @@ function EventForm({ workspaceId, me, mode, base, day, projects, calendarEvents,
     if (mode === "edit" || document.activeElement === document.body) titleInput.current?.focus();
   }, [mode]);
 
-  const board = useWorkspaceData<BoardState>(values.projectId === "" ? null : boardPath(values.projectId));
-  const doneStatuses = useMemo(() => new Set((board.data?.statuses ?? []).filter((status) => status.category === "done").map((status) => status.id)), [board.data]);
+  const wantedBoard = values.projectId === "" ? null : boardPath(values.projectId);
+  const board = useWorkspaceData<BoardState>(wantedBoard);
+  // The hook keeps the previous project's data while the new board loads: never offer those tasks.
+  const boardData = wantedBoard !== null && board.dataPath === wantedBoard ? board.data : null;
+  const doneStatuses = useMemo(() => new Set((boardData?.statuses ?? []).filter((status) => status.category === "done").map((status) => status.id)), [boardData]);
   const tasks = useMemo(() => {
-    const open = (board.data?.issues ?? []).filter((issue) => !doneStatuses.has(issue.statusId)).map((issue) => ({ id: issue.id, label: `${issue.key} ${issue.title}` }));
+    const open = (boardData?.issues ?? []).filter((issue) => !doneStatuses.has(issue.statusId)).map((issue) => ({ id: issue.id, label: `${issue.key} ${issue.title}` }));
     if (base?.issue && base.project?.id === values.projectId && !open.some((task) => task.id === base.issue?.id)) open.unshift({ id: base.issue.id, label: `${base.issue.key} ${base.issue.title}` });
     return open;
-  }, [base, board.data, doneStatuses, values.projectId]);
+  }, [base, boardData, doneStatuses, values.projectId]);
 
   const zones = useMemo(() => zoneChoices(values.timezone, base?.timezone ?? viewer, viewer), [base, values.timezone, viewer]);
   const organizerId = base ? base.organizer.id : me;
@@ -253,6 +253,7 @@ function EventForm({ workspaceId, me, mode, base, day, projects, calendarEvents,
         <label htmlFor="event-zone">Time zone</label>
         <input aria-describedby={errors.timezone ? "event-zone-error" : undefined} aria-invalid={errors.timezone ? true : undefined} autoComplete="off" id="event-zone" list={zoneList} onChange={(event) => change({ timezone: event.target.value.trim() }, "timezone")} spellCheck={false} type="text" value={values.timezone} />
         <datalist id={zoneList}>{zones.map((zone) => <option key={zone} value={zone} />)}</datalist>
+        {base && !errors.timezone && <p className="wsFieldHint">Keeps the clock time; changing the zone moves the event and resets responses.</p>}
         {errors.timezone && <p className="wsFieldError" id="event-zone-error">{errors.timezone}</p>}
       </div>
 
@@ -280,7 +281,7 @@ function EventForm({ workspaceId, me, mode, base, day, projects, calendarEvents,
         <div className="wsField">
           <label htmlFor="event-task">Task</label>
           <select aria-invalid={errors.issue ? true : undefined} className="wsSelect" disabled={values.projectId === ""} id="event-task" onChange={(event) => change({ issueId: event.target.value }, "issue")} value={values.issueId}>
-            <option value="">{values.projectId !== "" && board.loading ? "Loading tasks…" : "No task"}</option>
+            <option value="">{values.projectId !== "" && boardData === null && !board.error ? "Loading tasks…" : "No task"}</option>
             {tasks.map((task) => <option key={task.id} value={task.id}>{task.label}</option>)}
           </select>
           {errors.issue && <p className="wsFieldError">{errors.issue}</p>}

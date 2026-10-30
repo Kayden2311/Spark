@@ -71,7 +71,7 @@ function mockApi() {
     const custom = handler?.(request);
     if (custom) return custom;
     if (url === "/api/v1/workspaces/by-slug/northstar-labs") return json(base);
-    if (url === "/api/v1/workspaces/w1/projects") return json({ items: [projectRow] });
+    if (url === "/api/v1/workspaces/w1/projects") return json({ items: [projectRow, { ...projectRow, id: "p2", key: "BETA", name: "Beta app" }] });
     if (url === "/api/v1/workspaces/w1/members") return json(MEMBERS);
     if (url === "/api/v1/workspaces/w1/calendar-events" && request.method === "POST") return json({ ...mine, id: "e-new" }, 201);
     if (url === "/api/v1/projects/p1/board") return json(BOARD);
@@ -142,6 +142,15 @@ describe("wall-clock helpers", () => {
     expect(wallClockInstant("2026-02-30", "10:00", "UTC")).toBeNull();
     expect(wallClockInstant("2026-10-29", "25:00", "UTC")).toBeNull();
     expect(wallClockInstant("2026-10-29", "10:00", "Mars/Olympus")).toBeNull();
+  });
+
+  it("handles zones west of UTC and clock times that cross midnight", () => {
+    expect(wallClockInstant("2026-03-08", "02:30", "America/Los_Angeles")).toBeNull(); // skipped by the spring-forward
+    expect(wallClockInstant("2026-03-08", "12:00", "America/Los_Angeles")).toBe("2026-03-08T19:00:00.000Z"); // PDT, -07:00
+    expect(wallClockInstant("2026-11-01", "01:30", "America/Los_Angeles")).toBe("2026-11-01T08:30:00.000Z"); // happens twice: the first one
+    expect(wallClockInstant("2026-10-29", "23:30", "Europe/Berlin")).toBe("2026-10-29T22:30:00.000Z");
+    expect(wallClockOf("2026-10-29T23:30:00.000Z", "Europe/Berlin")).toEqual({ date: "2026-10-30", time: "00:30" });
+    expect(wallClockOf("2026-10-30T03:00:00.000Z", "America/Los_Angeles")).toEqual({ date: "2026-10-29", time: "20:00" });
   });
 
   it("reads an instant back as the wall clock in a zone", () => {
@@ -505,5 +514,114 @@ describe("edit event", () => {
     fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Nope" } });
     await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Only the organizer, owners and admins can change this event.");
+  });
+});
+
+describe("event dialog fixes", () => {
+  async function openEdit(title = "Design review") {
+    const details = await openEvent(title);
+    await userEvent.click(within(details).getByRole("button", { name: "Edit" }));
+    return screen.findByRole("dialog", { name: "Edit event" });
+  }
+
+  it("never offers the previous project tasks while the new project board loads", async () => {
+    let release: (response: Response) => void = () => {};
+    handler = (request) => (request.url === "/api/v1/projects/p2/board" ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
+    renderPage();
+    const { dialog } = await openNewEvent();
+    await fillBasics();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Project"), "p1");
+    const task = within(dialog).getByLabelText("Task");
+    await waitFor(() => expect(within(task).getByRole("option", { name: /ATLAS-1/ })).toBeInTheDocument());
+    await userEvent.selectOptions(task, "i1");
+
+    await userEvent.selectOptions(within(dialog).getByLabelText("Project"), "p2");
+    expect(within(task).queryByRole("option", { name: /ATLAS-1/ })).not.toBeInTheDocument();
+    expect(task).toHaveValue("");
+    release(json({ ...BOARD, project: { id: "p2", key: "BETA", name: "Beta app", methodology: "scrum" }, issues: [{ id: "i9", number: 1, key: "BETA-1", title: "Beta task", statusId: "s1" }] }));
+    await waitFor(() => expect(within(task).getByRole("option", { name: /BETA-1/ })).toBeInTheDocument());
+    await userEvent.selectOptions(task, "i9");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create event" }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0].body ?? "{}")).toMatchObject({ projectId: "p2", issueId: "i9" });
+  });
+
+  it("a zone-only change keeps the clock time, says so, and sends the new instants", async () => {
+    handler = (request) => (request.method === "PATCH" ? json({ ...mine, version: 2 }) : undefined);
+    renderPage();
+    const dialog = await openEdit();
+    expect(within(dialog).getByText("Keeps the clock time; changing the zone moves the event and resets responses.")).toBeInTheDocument();
+    await setZone("Asia/Ho_Chi_Minh");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0].body ?? "{}")).toEqual({ timezone: "Asia/Ho_Chi_Minh", startsAt: "2026-10-29T06:00:00.000Z", endsAt: "2026-10-29T07:00:00.000Z" });
+  });
+
+  it("a 412 without a current event reloads it with a GET", async () => {
+    handler = (request) => {
+      if (request.method === "PATCH") return problemResponse(412, "version_mismatch", "The resource changed since you loaded it.");
+      if (request.url === "/api/v1/calendar-events/e2") return json({ ...mine, title: "Fetched title", version: 5 });
+      return undefined;
+    };
+    renderPage();
+    const dialog = await openEdit();
+    fireEvent.change(within(dialog).getByLabelText("Description"), { target: { value: "x" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Updated by a teammate");
+    expect(within(dialog).getByLabelText("Title")).toHaveValue("Fetched title");
+  });
+
+  it("leaves attendees out of the PATCH when the member list failed to load", async () => {
+    handler = (request) => {
+      if (request.url === "/api/v1/workspaces/w1/members") return problemResponse(500, "boom", "x");
+      if (request.method === "PATCH") return json({ ...mine, version: 2 });
+      return undefined;
+    };
+    renderPage();
+    const dialog = await openEdit();
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Renamed" } });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(JSON.parse(writes()[0].body ?? "{}")).toEqual({ title: "Renamed" });
+  });
+
+  it("a 412 on cancel says a teammate updated it and shows the current event", async () => {
+    handler = (request) => (request.method === "POST" ? problemResponse(412, "version_mismatch", "changed", { current: { ...mine, title: "Design review v2", version: 2 } }) : undefined);
+    renderPage();
+    const dialog = await openEvent("Design review");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel event" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Yes, cancel event" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Updated by a teammate");
+    expect(screen.getByRole("dialog", { name: "Design review v2" })).toBeInTheDocument();
+  });
+
+  it("a 409 on an answer says the event was cancelled and rolls back", async () => {
+    handler = (request) => (request.method === "PUT" ? problemResponse(409, "event_cancelled", "A cancelled event cannot change.") : undefined);
+    renderPage();
+    const dialog = await openEvent("Founder stand-up");
+    const accept = within(dialog).getByRole("button", { name: "Accept" });
+    await userEvent.click(accept);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("This event was cancelled");
+    expect(accept).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps focus inside the dialog when opening and leaving the cancel confirmation", async () => {
+    renderPage();
+    const dialog = await openEvent("Design review");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel event" }));
+    expect(within(dialog).getByRole("button", { name: "Keep event" })).toHaveFocus();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Keep event" }));
+    expect(within(dialog).getByRole("button", { name: "Cancel event" })).toHaveFocus();
+  });
+
+  it("disables the answer buttons while an answer is in flight", async () => {
+    let release: (response: Response) => void = () => {};
+    handler = (request) => (request.method === "PUT" ? new Promise<Response>((resolve) => { release = resolve; }) : undefined);
+    renderPage();
+    const dialog = await openEvent("Founder stand-up");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Accept" }));
+    for (const name of ["Accept", "Maybe", "Decline"]) expect(within(dialog).getByRole("button", { name })).toBeDisabled();
+    release(json({ ...standup, myResponse: "accepted" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Maybe" })).toBeEnabled());
   });
 });
