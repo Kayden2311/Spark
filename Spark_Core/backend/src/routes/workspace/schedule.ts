@@ -337,6 +337,43 @@ export function registerScheduleRoutes(app: FastifyInstance, guard: MemberGuard)
   registerEventRoutes(app, guard);
 }
 
+/** A deadline is inside the range when its calendar date, read in tz ($4), falls on a local day the range ($2 to $3) touches. */
+const inRange = (column: string) => `${column} >= ($2::timestamptz AT TIME ZONE $4)::date
+  AND ${column} <= (($3::timestamptz - interval '1 millisecond') AT TIME ZONE $4)::date`;
+
+/**
+ * The derived deadlines of a workspace ($1 tenant, $2 from, $3 to, $4 IANA tz). Task due dates and milestone dates are calendar
+ * dates; sprint ends are UTC calendar days (sprints store their days as midnight UTC, like the sprint API reads them).
+ * Exported so the database tests run exactly this text.
+ */
+export const DEADLINES_SQL = `SELECT d.deadline_kind, d.due, d.title, d.project_id, d.project_key, d.project_name, d.methodology, d.issue_id,
+     d.assignee_user_id, d.assignee_name, d.sprint_id, d.milestone_id
+   FROM (
+     SELECT 'task_due' AS deadline_kind, to_char(i.due_date, 'YYYY-MM-DD') AS due, i.title, p.id AS project_id, p.key AS project_key,
+       p.name AS project_name, p.methodology, i.id AS issue_id, i.assignee_user_id, a.display_name AS assignee_name,
+       NULL::uuid AS sprint_id, NULL::uuid AS milestone_id, i.id AS ref_id
+     FROM spark.issues i
+     JOIN spark.projects p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
+     JOIN spark.issue_statuses st ON st.tenant_id = i.tenant_id AND st.project_id = i.project_id AND st.id = i.status_id
+     LEFT JOIN spark.users a ON a.id = i.assignee_user_id
+     WHERE i.tenant_id = $1 AND p.tenant_id = $1 AND st.tenant_id = $1 AND p.archived_at IS NULL AND i.archived_at IS NULL
+       AND st.category <> 'done' AND i.due_date IS NOT NULL AND ${inRange("i.due_date")}
+     UNION ALL
+     SELECT 'sprint_end', to_char((s.ends_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'), s.name, p.id, p.key, p.name, p.methodology,
+       NULL::uuid, NULL::uuid, NULL::text, s.id, NULL::uuid, s.id
+     FROM spark.sprints s
+     JOIN spark.projects p ON p.tenant_id = s.tenant_id AND p.id = s.project_id
+     WHERE s.tenant_id = $1 AND p.tenant_id = $1 AND p.archived_at IS NULL AND s.status IN ('planned', 'active') AND s.ends_at IS NOT NULL
+       AND ${inRange("(s.ends_at AT TIME ZONE 'UTC')::date")}
+     UNION ALL
+     SELECT 'milestone_due', to_char(m.due_date, 'YYYY-MM-DD'), m.name, p.id, p.key, p.name, p.methodology,
+       NULL::uuid, NULL::uuid, NULL::text, NULL::uuid, m.id, m.id
+     FROM spark.project_milestones m
+     JOIN spark.projects p ON p.tenant_id = m.tenant_id AND p.id = m.project_id
+     WHERE m.tenant_id = $1 AND p.tenant_id = $1 AND p.archived_at IS NULL AND m.completed_at IS NULL AND ${inRange("m.due_date")}
+   ) d
+   ORDER BY d.due, d.deadline_kind, d.title, d.ref_id LIMIT ${DEADLINE_LIMIT + 1}`;
+
 function registerCalendarRoute(app: FastifyInstance, guard: MemberGuard): void {
   app.get<{ Params: { workspaceId: string }; Querystring: { from: string; to: string; tz: string } }>(
     "/api/v1/workspaces/:workspaceId/calendar",
@@ -372,39 +409,7 @@ function registerCalendarRoute(app: FastifyInstance, guard: MemberGuard): void {
         );
         const events = await hydrate(client, member.userId, rows.rows.slice(0, EVENT_LIMIT));
 
-        // A deadline is inside the range when its calendar date, read in tz, falls on a local day the range touches.
-        const inRange = (column: string) => `${column} >= ($2::timestamptz AT TIME ZONE $4)::date
-          AND ${column} <= (($3::timestamptz - interval '1 millisecond') AT TIME ZONE $4)::date`;
-        const deadlines = await client.query<DeadlineRow>(
-          `SELECT d.deadline_kind, d.due, d.title, d.project_id, d.project_key, d.project_name, d.methodology, d.issue_id,
-             d.assignee_user_id, d.assignee_name, d.sprint_id, d.milestone_id
-           FROM (
-             SELECT 'task_due' AS deadline_kind, to_char(i.due_date, 'YYYY-MM-DD') AS due, i.title, p.id AS project_id, p.key AS project_key,
-               p.name AS project_name, p.methodology, i.id AS issue_id, i.assignee_user_id, a.display_name AS assignee_name,
-               NULL::uuid AS sprint_id, NULL::uuid AS milestone_id, i.id AS ref_id
-             FROM spark.issues i
-             JOIN spark.projects p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
-             JOIN spark.issue_statuses st ON st.tenant_id = i.tenant_id AND st.project_id = i.project_id AND st.id = i.status_id
-             LEFT JOIN spark.users a ON a.id = i.assignee_user_id
-             WHERE i.tenant_id = $1 AND p.tenant_id = $1 AND st.tenant_id = $1 AND p.archived_at IS NULL AND i.archived_at IS NULL
-               AND st.category <> 'done' AND i.due_date IS NOT NULL AND ${inRange("i.due_date")}
-             UNION ALL
-             SELECT 'sprint_end', to_char((s.ends_at AT TIME ZONE $4)::date, 'YYYY-MM-DD'), s.name, p.id, p.key, p.name, p.methodology,
-               NULL::uuid, NULL::uuid, NULL::text, s.id, NULL::uuid, s.id
-             FROM spark.sprints s
-             JOIN spark.projects p ON p.tenant_id = s.tenant_id AND p.id = s.project_id
-             WHERE s.tenant_id = $1 AND p.tenant_id = $1 AND p.archived_at IS NULL AND s.status IN ('planned', 'active') AND s.ends_at IS NOT NULL
-               AND ${inRange("(s.ends_at AT TIME ZONE $4)::date")}
-             UNION ALL
-             SELECT 'milestone_due', to_char(m.due_date, 'YYYY-MM-DD'), m.name, p.id, p.key, p.name, p.methodology,
-               NULL::uuid, NULL::uuid, NULL::text, NULL::uuid, m.id, m.id
-             FROM spark.project_milestones m
-             JOIN spark.projects p ON p.tenant_id = m.tenant_id AND p.id = m.project_id
-             WHERE m.tenant_id = $1 AND p.tenant_id = $1 AND p.archived_at IS NULL AND m.completed_at IS NULL AND ${inRange("m.due_date")}
-           ) d
-           ORDER BY d.due, d.deadline_kind, d.title, d.ref_id LIMIT ${DEADLINE_LIMIT + 1}`,
-          [tenantId, from, to, tz],
-        );
+        const deadlines = await client.query<DeadlineRow>(DEADLINES_SQL, [tenantId, from, to, tz]);
         return { kind: "ok" as const, tz, events, eventsMore: rows.rows.length > EVENT_LIMIT, deadlines: deadlines.rows };
       });
       if (reply.sent || !result) return reply;

@@ -253,7 +253,7 @@ function EventForm({ workspaceId, me, mode, base, day, projects, calendarEvents,
         <label htmlFor="event-zone">Time zone</label>
         <input aria-describedby={errors.timezone ? "event-zone-error" : undefined} aria-invalid={errors.timezone ? true : undefined} autoComplete="off" id="event-zone" list={zoneList} onChange={(event) => change({ timezone: event.target.value.trim() }, "timezone")} spellCheck={false} type="text" value={values.timezone} />
         <datalist id={zoneList}>{zones.map((zone) => <option key={zone} value={zone} />)}</datalist>
-        {base && !errors.timezone && <p className="wsFieldHint">Keeps the clock time; changing the zone moves the event and resets responses.</p>}
+        {base && !errors.timezone && <p className="wsFieldHint">Keeps the clock time; if the moment changes, responses reset.</p>}
         {errors.timezone && <p className="wsFieldError" id="event-zone-error">{errors.timezone}</p>}
       </div>
 
@@ -308,7 +308,7 @@ function EventForm({ workspaceId, me, mode, base, day, projects, calendarEvents,
             ))}
           </ul>
         )}
-        <p className="wsFieldHint">You are the organizer and always attend.</p>
+        <p className="wsFieldHint">{base && base.organizer.id !== me ? "The organizer always attends." : "You are the organizer and always attend."}</p>
         {errors.attendees && <p className="wsFieldError">{errors.attendees}</p>}
       </fieldset>
 

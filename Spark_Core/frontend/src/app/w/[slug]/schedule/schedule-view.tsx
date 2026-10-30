@@ -131,7 +131,8 @@ export function ScheduleView() {
   const { workspace, projects } = useWorkspace();
   const { user } = useAuth();
   const wide = useWide();
-  const [tz] = useState(viewerZone);
+  const [tz, setTz] = useState(viewerZone);
+  const [zoneFallback, setZoneFallback] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const today = dayOfInstant(now, tz);
   const thisWeek = mondayOf(today);
@@ -140,6 +141,13 @@ export function ScheduleView() {
   const [dialog, setDialog] = useState<DialogState>(null);
   const calendar = useInsight<CalendarResponse>(calendarPath(workspace.id, weekBounds(week, tz), tz));
   const { reload } = calendar;
+
+  // A browser zone the server does not know (400 invalid_input) falls back to UTC with a note instead of a dead page.
+  const zoneRejected = calendar.errorCode === "invalid_input" && tz !== "UTC";
+  if (zoneRejected) {
+    setTz("UTC");
+    setZoneFallback(true);
+  }
 
   // A teammate may have changed the schedule while this tab was in the background, and the day may have rolled over.
   // focus and visibilitychange usually fire together, so only the first one within a second reloads.
@@ -223,7 +231,8 @@ export function ScheduleView() {
       </section>
 
       {calendar.loading && <WeekSkeleton />}
-      {calendar.error && (
+      {zoneFallback && <p className="wsSchedNote" role="status">Your time zone is not known to the server, so the week is shown in UTC.</p>}
+      {calendar.error && !zoneRejected && (
         <div className="vizError" role="alert">
           <span>{calendar.error}</span>
           <button className="vizBtn vizBtnSecondary vizBtnSm" onClick={calendar.reload} type="button">Retry</button>

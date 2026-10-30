@@ -23,7 +23,7 @@ vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 
 import WorkspaceLayout from "../src/app/w/[slug]/layout";
 import WorkspaceSchedulePage from "../src/app/w/[slug]/schedule/page";
-import { overlapCount, wallClockInstant, wallClockOf, type CalendarEvent } from "../src/app/w/_lib/schedule";
+import { overlapCount, validateEventForm, wallClockInstant, wallClockOf, type CalendarEvent, type EventFormValues } from "../src/app/w/_lib/schedule";
 
 const base = { id: "w1", slug: "northstar-labs", name: "Northstar Labs", role: "member", memberCount: 3, version: 2, createdAt: "2026-10-18T10:00:00.000Z" };
 const avery = { id: "u-avery", displayName: "Avery Founder" };
@@ -546,11 +546,32 @@ describe("event dialog fixes", () => {
     expect(JSON.parse(writes()[0].body ?? "{}")).toMatchObject({ projectId: "p2", issueId: "i9" });
   });
 
+  it("an admin editing someone else's event is told the organizer attends, not 'you'", async () => {
+    calendarEvents = [{ ...standup, canEdit: true }];
+    renderPage();
+    const dialog = await openEdit("Founder stand-up");
+    expect(within(dialog).getByText("The organizer always attends.")).toBeInTheDocument();
+    expect(within(dialog).queryByText("You are the organizer and always attend.")).not.toBeInTheDocument();
+  });
+
+  it("the organizer's own edit keeps the 'you' wording", async () => {
+    renderPage();
+    const dialog = await openEdit();
+    expect(within(dialog).getByText("You are the organizer and always attend.")).toBeInTheDocument();
+  });
+
+  it("refuses more than 50 attendees before sending", () => {
+    const values: EventFormValues = { title: "Big", description: "", location: "", date: "2026-10-29", startTime: "09:00", endDate: "2026-10-29", endTime: "10:00", timezone: "UTC", projectId: "", issueId: "", attendeeIds: [] };
+    const ids = (count: number) => Array.from({ length: count }, (_, index) => `u-${index}`);
+    expect(validateEventForm({ ...values, attendeeIds: ids(50) }).errors.attendees).toBeUndefined();
+    expect(validateEventForm({ ...values, attendeeIds: ids(51) }).errors.attendees).toBe("Invite at most 50 people.");
+  });
+
   it("a zone-only change keeps the clock time, says so, and sends the new instants", async () => {
     handler = (request) => (request.method === "PATCH" ? json({ ...mine, version: 2 }) : undefined);
     renderPage();
     const dialog = await openEdit();
-    expect(within(dialog).getByText("Keeps the clock time; changing the zone moves the event and resets responses.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Keeps the clock time; if the moment changes, responses reset.")).toBeInTheDocument();
     await setZone("Asia/Ho_Chi_Minh");
     await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(writes()).toHaveLength(1));

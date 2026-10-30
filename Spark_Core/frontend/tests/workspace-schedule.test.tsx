@@ -63,15 +63,18 @@ const CALENDAR = {
 
 let calls: string[] = [];
 let failing = false;
+let rejectZone = false;
 function mockApi(calendar: unknown = CALENDAR) {
   calls = [];
   failing = false;
+  rejectZone = false;
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     calls.push(url);
     const reply = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
     if (url === "/api/v1/workspaces/by-slug/northstar-labs") return reply(base);
     if (url === "/api/v1/workspaces/w1/projects") return reply({ items: [] });
     if (url.startsWith("/api/v1/workspaces/w1/calendar")) {
+      if (rejectZone && !url.endsWith("&tz=UTC")) return new Response(JSON.stringify({ code: "invalid_input", detail: "tz must be an IANA time zone name." }), { status: 400, headers: { "content-type": "application/problem+json" } });
       if (failing) return new Response(JSON.stringify({ code: "boom" }), { status: 500, headers: { "content-type": "application/problem+json" } });
       return reply(calendar);
     }
@@ -258,6 +261,18 @@ describe("workspace schedule", () => {
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => expect(screen.getByRole("region", { name: /Thursday, Oct 29/u })).toHaveAttribute("data-today", "true"));
     expect(screen.getByRole("region", { name: /Wednesday, Oct 28/u })).not.toHaveAttribute("data-today");
+  });
+
+  it("falls back to UTC with a note when the server does not know the browser zone", async () => {
+    mockApi();
+    rejectZone = true;
+    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({ timeZone: "Pacific/Kanton" } as Intl.ResolvedDateTimeFormatOptions);
+    renderPage();
+    expect(await screen.findByText("Founder stand-up")).toBeInTheDocument();
+    expect(screen.getByText(/not known to the server, so the week is shown in UTC/u)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(calendarCalls().at(-1)).toMatch(/&tz=UTC$/u);
+    vi.restoreAllMocks();
   });
 
   it("offers a New event button for the event dialog to wire", async () => {

@@ -312,6 +312,9 @@ export function formValuesOf(item: CalendarEvent, activeIds: ReadonlySet<string>
   };
 }
 
+/** The most people one event can invite (the organizer attends on top). */
+export const MAX_ATTENDEES = 50;
+
 export type EventField = "title" | "description" | "location" | "time" | "timezone" | "project" | "issue" | "attendees";
 
 /** Client-side checks; the instants are null when they cannot be built. */
@@ -321,6 +324,7 @@ export function validateEventForm(values: EventFormValues): { errors: Partial<Re
   else if (values.title.trim().length > 200) errors.title = "Use 200 characters or fewer.";
   if (values.location.trim().length > 200) errors.location = "Use 200 characters or fewer.";
   if (values.description.length > 2000) errors.description = "Use 2000 characters or fewer.";
+  if (values.attendeeIds.length > MAX_ATTENDEES) errors.attendees = `Invite at most ${MAX_ATTENDEES} people.`;
   let startsAt: string | null = null;
   let endsAt: string | null = null;
   if (!isValidZone(values.timezone)) {

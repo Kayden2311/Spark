@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations, localConnection } from "../../scripts/database-support.js";
 import { withDatabaseContext } from "../../src/infrastructure/database/context.js";
 import { hashPassword } from "../../src/infrastructure/database/password.js";
+import { DEADLINES_SQL } from "../../src/routes/workspace/schedule.js";
 
 const namespace = `spark_test_${randomUUID().replaceAll("-", "")}`;
 const journal = `${namespace}_journal`;
@@ -4479,5 +4480,41 @@ describe("Schedule writes", () => {
     // Timezone names must exist in the server's zone list.
     expect((await owner.query(`SELECT ${fn("valid_timezone")}('Europe/Berlin') AS ok, ${fn("valid_timezone")}('Mars/Base') AS bad, ${fn("valid_timezone")}(NULL) AS missing, ${fn("valid_timezone")}('') AS blank`)).rows[0])
       .toEqual({ ok: true, bad: false, missing: false, blank: false });
+  });
+});
+
+describe("Calendar deadlines", () => {
+  // The route's own deadline query, with its schema rewritten to the throwaway one.
+  const deadlineSql = DEADLINES_SQL.replace(/\bspark\./gu, `"${namespace}".`);
+  async function deadlinesIn(workspace: string, from: string, to: string, tz: string) {
+    await owner.query("SET ROLE spark_owner");
+    return (await owner.query(deadlineSql, [workspace, from, to, tz])).rows.map((row) => `${row.deadline_kind}:${row.due}:${row.title}`);
+  }
+  it("selects task, sprint and milestone dates by calendar date in the viewer's zone", async () => {
+    const fx = await insightProject(await account("Deadlines"));
+    const at = "2026-10-20T10:00:00Z";
+    const task = (due: string, category: Category) => issueHistory(fx, [{ at, after: { category } }], { due });
+    await task("2026-11-08", "todo");
+    await task("2026-11-09", "todo");
+    await task("2026-11-02", "in_progress");
+    await task("2026-11-01", "todo");
+    await task("2026-11-04", "done");
+    await owner.query("SET ROLE spark_owner");
+    // Sprint days are stored as midnight UTC.
+    await owner.query(`INSERT INTO ${table("sprints")} (tenant_id,project_id,name,starts_at,ends_at,status) VALUES ($1,$2,'Sprint ends',$3,$4,'planned')`,
+      [fx.workspace, fx.project, "2026-10-26T00:00:00Z", "2026-11-05T00:00:00Z"]);
+    await owner.query(`INSERT INTO ${table("project_milestones")} (tenant_id,project_id,name,due_date) VALUES ($1,$2,'Beta',$3)`, [fx.workspace, fx.project, "2026-11-04"]);
+    const expected = [
+      "task_due:2026-11-02:Insight",
+      "milestone_due:2026-11-04:Beta",
+      "sprint_end:2026-11-05:Sprint ends",
+      "task_due:2026-11-08:Insight",
+    ];
+    // The viewer's local week of Mon Nov 2 to Sun Nov 8 in each zone; every deadline keeps its stored date.
+    expect(await deadlinesIn(fx.workspace, "2026-11-02T05:00:00.000Z", "2026-11-09T05:00:00.000Z", "America/New_York")).toEqual(expected);
+    expect(await deadlinesIn(fx.workspace, "2026-11-01T17:00:00.000Z", "2026-11-08T17:00:00.000Z", "Asia/Ho_Chi_Minh")).toEqual(expected);
+    expect(await deadlinesIn(fx.workspace, "2026-11-02T00:00:00.000Z", "2026-11-09T00:00:00.000Z", "UTC")).toEqual(expected);
+    // The next local week starts at the next day.
+    expect(await deadlinesIn(fx.workspace, "2026-11-09T05:00:00.000Z", "2026-11-16T05:00:00.000Z", "America/New_York")).toEqual(["task_due:2026-11-09:Insight"]);
   });
 });
