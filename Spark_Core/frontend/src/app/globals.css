@@ -5063,3 +5063,6 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 @media (prefers-reduced-motion: reduce) {
   .settingsSwitch, .settingsSwitchKnob { transition: none; }
 }
+.settingsFields { display: grid; gap: 1.5rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+.settingsFields:disabled { opacity: .7; }
+.sidebarFoot .settingsLink[aria-current="page"] { color: #fff; background: #17437e; }

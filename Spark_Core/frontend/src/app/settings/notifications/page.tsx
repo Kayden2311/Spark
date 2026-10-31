@@ -20,6 +20,10 @@ const SWITCHES: Array<[keyof EmailPreferences, string]> = [
   ["weeklyDigest", "Weekly digest — Mondays at 8:00"],
 ];
 
+const sameValues = (a: NotificationPreferences, b: NotificationPreferences) =>
+  a.timezone === b.timezone && SWITCHES.every(([key]) => a.email[key] === b.email[key]);
+const isZoneProblem = (error: ApiError) => error.status === 400 && error.code === "invalid_input" && /time ?zone/i.test(error.message);
+
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready" };
 
 function Settings() {
@@ -37,6 +41,7 @@ function Settings() {
   const [browserZone] = useState(viewerZone);
   const alive = useRef(true);
   const busy = useRef(false);
+  const latest = useRef<NotificationPreferences | null>(null);
 
   useEffect(() => {
     alive.current = true;
@@ -65,11 +70,15 @@ function Settings() {
         setLoad({ status: "ready" });
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || (error instanceof ApiError && error.status === 401)) return;
         setLoad({ status: "error", message: messageOf(error) });
       });
     return () => controller.abort();
   }, [reloadKey]);
+
+  useEffect(() => {
+    latest.current = draft;
+  }, [draft]);
 
   const zones = useMemo(() => zoneChoices(saved?.timezone ?? "", browserZone), [saved, browserZone]);
 
@@ -78,6 +87,7 @@ function Settings() {
   );
 
   const edit = (update: (current: NotificationPreferences) => NotificationPreferences) => {
+    setZoneError(null);
     setDraft((current) => (current ? update(current) : current));
     setDone(false);
     setFailure(null);
@@ -97,14 +107,16 @@ function Settings() {
     setFailure(null);
     setZoneError(null);
     try {
-      const next = await saveNotificationPreferences({ ...draft, timezone: draft.timezone.trim() });
+      const sent = { ...draft, timezone: draft.timezone.trim() };
+      const next = await saveNotificationPreferences(sent);
       if (!alive.current) return;
       setSaved(next);
-      setDraft(next);
-      setDone(true);
+      // An edit made meanwhile stays; "Saved" only shows when nothing newer is pending.
+      setDraft((current) => (current && sameValues(current, draft) ? next : current));
+      setDone(!latest.current || sameValues(latest.current, draft));
     } catch (error) {
       if (!alive.current || (error instanceof ApiError && error.status === 401)) return;
-      if (error instanceof ApiError && error.status === 400) setZoneError(error.message);
+      if (error instanceof ApiError && isZoneProblem(error)) setZoneError(error.message);
       else setFailure(messageOf(error));
     } finally {
       busy.current = false;
@@ -129,6 +141,7 @@ function Settings() {
       )}
       {load.status === "ready" && draft && (
         <form className="wsCard settingsCard" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+          <fieldset className="settingsFields" disabled={saving}>
           <section aria-labelledby="settings-email-heading">
             <h2 id="settings-email-heading">Send me an email when</h2>
             <ul className="settingsSwitches">
@@ -163,6 +176,7 @@ function Settings() {
               <button className="textButton settingsZoneLink" onClick={() => setZone(browserZone)} type="button">Use my browser&apos;s zone ({browserZone})</button>
             )}
           </div>
+          </fieldset>
           <div className="settingsActions">
             <button className="sparkPrimary" disabled={!changed || saving} type="submit">{saving ? "Saving…" : "Save"}</button>
             <p aria-live="polite" className="settingsStatus" role="status">{done ? "Saved" : ""}</p>
