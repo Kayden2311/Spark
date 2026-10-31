@@ -78,7 +78,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 - **Priority**: Must
 - **Status**: Implemented (`POST /api/v1/auth/password/sign-up`, `/signup`)
 - **Story**: As a Visitor, I want to register with an email and password so that I can request membership and join workspaces.
-- **Note**: Sign-up creates the account and signs the user in; since migration `0014` it no longer creates a workspace. A new user creates one explicitly (US-E1) or joins through an invitation (US-E3). Email verification is not implemented yet.
+- **Note**: Sign-up creates the account and signs the user in; since migration `0014` it no longer creates a workspace. A new user creates one explicitly (US-E1) or joins through an invitation (US-E3). Email verification is not implemented yet (Phase 3): the typed address is the primary email, invitations are matched against it, and task-assigned, reminder and digest emails are sent to it without proof that the person owns the inbox.
 - **Acceptance criteria**:
   - Given a new email and a password meeting policy, when I submit, then the account is created with an Argon2id hash and I am signed in or asked to verify the email.
   - Given an email already registered, when I submit, then the response does not disclose that the email exists.
@@ -265,6 +265,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
   - In the task drawer the assignee is chosen from the workspace members or "Unassigned". An assignee who is not an active member of the same workspace is refused with `422 invalid_assignee`.
   - When someone else assigns me, I get one in-app `issue_assigned` notice and one email whose link opens the task's drawer (`/w/<slug>/p/<KEY>?issue=<KEY>-<n>`). Assigning myself sends nothing. Email limits: only the latest assignment per task and recipient is emailed, at most one email per task and recipient within 10 minutes, and at most 20 task-assigned emails per recipient per hour; the in-app notice is not limited. The `task_assigned` email preference is honoured.
   - Archiving asks for confirmation, removes the card from the board and keeps the history. An unknown or archived task in a link shows "That task no longer exists."; when the board shows only its first 500 tasks, a task outside them shows "That task isn't on the loaded board. Open it from the task list." instead (a lookup by key is not built yet).
+  - Edits to an existing task follow the same conflict rules as moves (US-E5): `If-Match` is required (`428 precondition_required` without it) and a stale version is `412 version_mismatch` with the current task.
   - A member of another workspace cannot read or change the task (`404`).
 
 ### US-E5: Move tasks safely
@@ -425,22 +426,65 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: User
 - **Priority**: Must
-- **Status**: Mockup (`/notifications`)
+- **Status**: Implemented (`GET /api/v1/notifications?unread&cursor&limit`, `GET /api/v1/notifications/unread-count`; migration `0028`; screen `/notifications` and the unread badge in the workspace sidebar)
 - **Story**: As a User, I want to be notified of relevant activity so that I can respond quickly.
 - **Acceptance criteria**:
-  - Given a committed event (membership decision, task assignment, new comment on my post), then a notification is created through the outbox.
-  - Given the MVP, then notifications are retrieved by polling.
-  - Given authorization changes, then a notification for a resource I can no longer access is not delivered.
+  - Given a committed event that concerns me (someone else assigns me a task, `issue_assigned`; a sprint starts with my committed work, `sprint_started`; I am invited to an event, or an event I attend is moved or cancelled, `event_invited`, `event_rescheduled`, `event_cancelled`), then one notification is created in the same transaction as the change, through the outbox. The person who acted is never notified of their own action.
+  - The inbox (`/notifications`, "Notifications" in the sidebar) lists my notifications from every workspace I belong to, newest first, 30 per page with "Load more". The tabs All and Unread (`?filter=unread`) filter it. A row shows the workspace's initials and name, the text, a relative time and a blue dot while unread; unread rows are tinted. An empty inbox says "No notifications yet"; an empty Unread tab says "You're all caught up".
+  - Given I click a row, then it is marked read at once (restored, with a message, if the call fails) and I land on its target: a task opens its drawer on the board, a sprint its backlog, an event its week on the schedule, a workspace notice the members page. A target that is gone or archived leaves the row without a link: the click only marks it read.
+  - The sidebar badge shows my unread count, is hidden at zero and reads "99+" above 99. It refreshes every 30 seconds while the tab is visible, once when the tab regains focus or visibility (at most once a second), and after I read something; it stops asking after a `401`. While the phone menu is collapsed, the Menu button shows a dot instead whenever anything is unread. There is no realtime push; the MVP polls.
+  - Given I left a workspace, then its notifications disappear from the list, the count and mark-all (they are kept, and return if I rejoin); an id from such a workspace, an unknown id or another user's id answers the same `404 notification_not_found`.
+  - A phone (390 px) shows the inbox without horizontal scroll; every motion stops under `prefers-reduced-motion`.
 
 ### US-F2: Mark notifications as read
 
 - **Actor**: User
 - **Priority**: Must
-- **Status**: Mockup
+- **Status**: Implemented (`PATCH /api/v1/notifications/{notificationId}` with `{"read": true}` answering `204`, `PATCH /api/v1/notifications` with `{"read": true, "before": <instant>}` answering `200 {"updated": n}`; migration `0028`)
 - **Story**: As a User, I want to mark notifications read so that I can track what is new.
 - **Acceptance criteria**:
-  - Given unread notifications, when I choose Mark all as read, then only my notifications change.
-  - The operation is idempotent.
+  - Given an unread notification, when I mark it read, then only that row of mine changes; marking it again answers `204` and keeps the first read time (idempotent).
+  - Given unread notifications, when I choose "Mark all as read", then the page sends the creation time of the newest row it shows as `before`, and every unread notification of mine created at or before it is marked read, including rows on pages I did not load. A notification created after that instant stays unread and keeps the badge at its count.
+  - Only my own, visible notifications change. Another user's id, an unknown id and an id in a workspace I left answer `404 notification_not_found` and change nothing. `"read": false` is not supported (`400`), and unknown body fields are rejected.
+  - Limits: marking one row is 120 requests a minute (it is clicked per row); mark-all and preference writes are 30 a minute.
+
+### US-F3: Choose which emails I get
+
+- **Actor**: User
+- **Priority**: Must
+- **Status**: Implemented (`GET`/`PUT /api/v1/me/notification-preferences`; migration `0028`; screen `/settings/notifications`, the gear in the sidebar footer)
+- **Story**: As a User, I want to choose which emails Spark sends me and in which time zone, so that email helps instead of nagging.
+- **Acceptance criteria**:
+  - The page "Email notifications" has three switches, all on by default: "Task assigned to me", "Due-soon and overdue reminders — daily at 8:00" and "Weekly digest — Mondays at 8:00", and a Time zone field (IANA names suggested, "Use my browser's zone"). Invitations and account emails are always sent and are not listed.
+  - Given I change something and choose Save, then the whole document is stored, the page says "Saved", and a reload shows the same values. A zone that does not exist is refused (`400`), nothing is saved and the field says "That time zone is not recognized. Pick one from the list, for example Europe/London." Double clicks send one request and the fields are disabled while saving.
+  - Given "Task assigned to me" is off, then someone assigning me a task still creates the in-app notification but sends no email (the delivery is recorded as suppressed).
+  - Given a reminder or digest switch is off, then no row is created for me for that job, and one already waiting is closed unsent when its email would be built.
+
+### US-F4: Get a daily reminder of work that is due
+
+- **Actor**: User
+- **Priority**: Should
+- **Status**: Implemented (background worker job `due_reminders`; migration `0029`; each task in the email links to its drawer)
+- **Story**: As a User, I want one daily email about my tasks that are due soon or overdue so that nothing slips.
+- **Acceptance criteria**:
+  - Given I have at least one open task assigned to me (status not done, non-archived project and task, active membership and workspace) that is due today or tomorrow in my time zone, or is already overdue, then I get exactly one email per local day, at or after 08:00 in my zone, listing those tasks across all my workspaces: at most 20 rows (due date, then key) followed by "and N more". The subject reads, for example, "You have 3 tasks due soon (1 overdue)".
+  - Given the worker was down at 08:00, then the email is sent later the same local day; a run never sends for a past day, and changing my zone cannot create a second email for a date that already has one.
+  - Given I have no such task, the preference is off, or the work was finished, archived or unassigned before the email was built, then nothing is sent.
+  - Running the worker again sends nothing more for that day. The footer links to `/settings/notifications`.
+  - Limits: delivery is at least once (a worker that dies between sending and recording repeats the email once after five minutes), and each job sends five emails a minute, so a very large population is delivered more slowly than 08:00 and rows still unsent at the next local midnight are dropped. Addresses are unverified until Phase 3.
+
+### US-F5: Get a weekly digest of each workspace
+
+- **Actor**: User
+- **Priority**: Should
+- **Status**: Implemented (background worker job `weekly_digest`; migration `0029`)
+- **Story**: As a User, I want a Monday summary of how each of my workspaces is doing so that I start the week with the picture.
+- **Acceptance criteria**:
+  - Given it is Monday at or after 08:00 in my zone and I am an active member of a workspace with at least one non-archived project, then I get one email for that workspace and week. For each project it shows the completion toward the plan (the Insights rule: a Scrum project is scored over the active sprint's dates, Kanban and Waterfall over the project's start and target dates) with its status (On track, At risk, Behind), then "Completed last week" by member, "Due in the next 3 days" and "Overdue", at most 10 items each followed by "and N more", each linking to the task.
+  - Given I belong to two workspaces, then I get two emails; a workspace without projects, a switched-off preference, a deactivated membership or a missing primary email sends nothing.
+  - "Completed last week" counts the seven local days before that Monday and credits the person assigned to the task when it was completed (the completing actor is not recorded), listing only members who are still active. The at-risk and overdue lists cover the whole workspace, not only my own tasks.
+  - A digest missed on Monday is sent later the same day; it never goes out for a past week. Running the worker again sends nothing more.
+  - Limits as in US-F4: at-least-once delivery, five emails a minute per job, unverified addresses.
 
 ## Epic G: Reporting and moderation (US-07)
 
@@ -548,7 +592,7 @@ Mentor matching, file uploads, rich realtime collaboration, AI summaries, and bi
 | US-03 | US-D1, US-D2, US-D3, US-D4 | Journey 2 |
 | US-04 | US-E1, US-E2, US-E3 | Journey 3 |
 | US-05 | US-E4 to US-E15 | Journey 3 |
-| US-06 | US-F1, US-F2 | Journey 3 |
+| US-06 | US-F1 to US-F5 | Journey 3 |
 | US-07 | US-G1, US-G2, US-G3 | Journey 4 |
 | Auth and governance | US-A1 to US-A5, US-H1 to US-H4, US-I1 | Journeys 5 and 6 |
 

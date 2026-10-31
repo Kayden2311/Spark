@@ -2,9 +2,25 @@
 
 ## Current state
 
-The database entity model is defined in `Spark_Core/backend/src/infrastructure/database/schema.ts` and managed via Drizzle ORM migrations (`0000_product_tables.sql` through `0011_campaign_review_lock.sql`). It mirrors the `spark` schema and exposes `DatabaseRow<TTable>` and `DatabaseInsert<TTable>` for infrastructure adapters.
+The database entity model is defined in `Spark_Core/backend/src/infrastructure/database/schema.ts` and managed via Drizzle ORM migrations (`0000_product_tables.sql` through `0029_scheduled_emails.sql`). It mirrors the `spark` schema and exposes `DatabaseRow<TTable>` and `DatabaseInsert<TTable>` for infrastructure adapters.
 
-The backend currently exposes process health (`GET /health`), clean REST authentication (`POST /api/v1/auth/password/sign-in`, `GET /api/v1/me`, `POST /api/v1/auth/sign-out`), session lookup with Argon2id password verification, SHA-256 bytea session tokens, and the platform governance API under `/api/v1/admin` (reports, communities, users and roles, campaigns, audit log) for the platform roles `super_admin`, `platform_admin`, `community_moderator`, `content_moderator` and `campaign_moderator`. Product routes (workspaces, communities, Kanban, notifications, billing, promotions) are in the delivery backlog below.
+The backend currently exposes process health (`GET /health`), clean REST authentication (`POST /api/v1/auth/password/sign-in`, `GET /api/v1/me`, `POST /api/v1/auth/sign-out`), session lookup with Argon2id password verification, SHA-256 bytea session tokens, and the platform governance API under `/api/v1/admin` (reports, communities, users and roles, campaigns, audit log) for the platform roles `super_admin`, `platform_admin`, `community_moderator`, `content_moderator` and `campaign_moderator`. The Phase 1 workspace core (below) adds workspaces, projects, tasks, planning, insights, the schedule, notifications and email on top of that baseline. Communities, billing and promotions are still in the delivery backlog below.
+
+## Phase 1 workspace core status
+
+| Milestone | Scope | Migrations | Status |
+| --- | --- | --- | --- |
+| M1 | Workspace access, create, invite, accept; email worker | `0014`-`0016` | Implemented |
+| M2 | Projects and methodology catalog | `0017`-`0018` | Implemented |
+| M3 | Tasks: create, assign, move; task-assigned email | `0019`-`0021` | Implemented |
+| M4 | Sprints, phases, milestones, board columns, methodology switch | `0023`-`0025` | Implemented |
+| M5 | Insights (computed on read) | `0026` | Implemented |
+| M6 | Schedule: events, attendees, derived deadlines | `0027` | Implemented |
+| M7 | Notification inbox, read state, email preferences, daily due reminder, Monday digest | `0028`-`0029` | Implemented |
+
+Phase 1 is complete (US-E1 to US-E15 and US-F1 to US-F5 are Implemented). Platform admin dashboards (`0022`) are separate. Remaining in later phases: communities, membership and posts (Phase 2); password reset, email verification and OAuth (Phase 3); billing and promotions.
+
+Known limits carried out of Phase 1: recipients of task-assigned, reminder and digest email are the unverified primary email addresses until Phase 3; scheduled and outbox delivery is at least once; each scheduled job sends five emails a minute (about 300 an hour) per worker pass; `scheduled_emails` has no retention job yet; notification delivery to the inbox is by polling, not push.
 
 ## Delivery rules
 
@@ -18,11 +34,11 @@ The backend currently exposes process health (`GET /health`), clean REST authent
 
 ## 1. Runtime foundation
 
-1. [Implemented] PostgreSQL Drizzle client, connection pool, and migrations (0000–0011).
+1. [Implemented] PostgreSQL Drizzle client, connection pool, and migrations (0000–0029).
 2. [Implemented] Request authentication context and session resolution with platform role query.
 3. [Implemented for admin collections] Reusable keyset cursor codec (`src/routes/pagination.ts`); invalid cursors return `400 invalid_cursor` and page limits are clamped to 1–100. Reuse it for public collections.
 4. Add an idempotency store adapter over `idempotency_requests` for mutation flows that can be retried.
-5. Add an outbox dispatcher with leasing, bounded retries, and idempotent delivery handlers. It must run only after committed database writes.
+5. [Implemented] Outbox dispatcher with leasing, bounded retries, and idempotent delivery handlers in the `spark_worker` process (`src/worker.ts`, invitation and task-assigned email, plus the scheduled reminder and digest jobs over the `scheduled_emails` ledger). It runs only on committed rows.
 6. Add structured audit-event writing for privileged and state-changing actions.
 
 Security and operations: rotate opaque session tokens, hash every bearer token before storage, reject suspended/deleted users, redact credentials and cookies, use a trusted-proxy allowlist, and preserve request IDs in errors and audit events. Keep the existing health endpoint process-only; add readiness only if the deployment platform needs it.
@@ -34,7 +50,7 @@ Resources and commands:
 - `POST /api/v1/auth/password/sign-in` (Implemented — Argon2id verification, SHA-256 bytea session creation, cookie emission)
 - `GET /api/v1/me` (Implemented — session token authentication, user profile, platform roles resolution)
 - `POST /api/v1/auth/sign-out` (Implemented — session revocation, cookie clearing)
-- `POST /api/v1/auth/password/sign-up` (Backlog)
+- `POST /api/v1/auth/password/sign-up` (Implemented)
 - `POST /api/v1/auth/oauth/{provider}/start` and callback handling (Backlog)
 - `POST /api/v1/auth/sessions/{sessionId}/revoke` (Backlog)
 - `POST /api/v1/auth/password-reset-requests` and reset completion (Backlog)
@@ -76,8 +92,7 @@ Resources and commands:
 - `POST/GET/PATCH /api/v1/workspaces/{workspaceId}/projects`
 - boards, statuses, workflow transitions, sprints, issue labels, issue links, and issue comments as nested resources
 - `POST/GET/PATCH /api/v1/projects/{projectId}/issues`
-- `GET/POST/PATCH /api/v1/workspaces/{workspaceId}/calendar-events`
-- attendee and reminder subresources
+- `GET /api/v1/workspaces/{workspaceId}/calendar`, `POST /api/v1/workspaces/{workspaceId}/calendar-events`, `GET`/`PATCH /api/v1/calendar-events/{eventId}`, `POST /api/v1/calendar-events/{eventId}/cancel` and `PUT /api/v1/calendar-events/{eventId}/attendees/me` (Implemented, M6); per-event reminder subresources are not built (the due-task reminder email of section 6 is separate)
 
 An issue create or update transaction must atomically update `issues`, insert `issue_events`, and insert the matching `outbox_events` record. Require `If-Match` for changes to existing issues, boards, and events. Validate workflow transitions, WIP limits, ordering positions, parent issue constraints, and time intervals in the use case before database constraints defend them. Do not cache private boards or calendars. Rate-limit bulk movement and event/reminder creation.
 
@@ -85,9 +100,14 @@ An issue create or update transaction must atomically update `issues`, insert `i
 
 Resources and commands:
 
-- `GET /api/v1/notifications`
-- `PATCH /api/v1/notifications/{notificationId}` for read state
-- `GET/PATCH /api/v1/me/notification-preferences`
+- `GET /api/v1/notifications?unread&cursor&limit` (Implemented, M7)
+- `GET /api/v1/notifications/unread-count` (Implemented, M7)
+- `PATCH /api/v1/notifications/{notificationId}` with `{"read": true}` for read state (Implemented, M7, `204`, idempotent)
+- `PATCH /api/v1/notifications` with `{"read": true, "before"}` to mark all read up to an instant (Implemented, M7)
+- `GET/PUT /api/v1/me/notification-preferences` (Implemented, M7; the whole document is replaced, so `PUT` rather than `PATCH`)
+- Worker jobs `due_reminders` and `weekly_digest` (Implemented, M7, migration `0029`)
+
+Still backlog: an in-app channel preference, a retention job for `scheduled_emails` and delivered notifications, provider idempotency keys for email, and real-time push.
 
 The outbox dispatcher creates notifications and delivery records only after the originating transaction commits. Delivery workers lease rows with a deadline, bound retries, and provider idempotency keys. A polling endpoint is sufficient initially; real-time delivery requires a separate authorization check for every connection and event. Notification lists are private and never cached. Rate-limit notification mutation routes lightly; delivery limits belong in the provider adapter.
 
