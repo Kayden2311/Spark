@@ -1,8 +1,17 @@
+export interface EmailList {
+  title: string;
+  items: Array<{ text: string; url?: string | undefined }>;
+  /** A closing line under the list, for example "and 3 more". */
+  note?: string | undefined;
+}
+
 export interface EmailLayoutInput {
   /** Inbox preview text, hidden in the body. */
   preheader: string;
   heading: string;
   paragraphs: string[];
+  /** Titled bullet lists rendered after the paragraphs; an item with a url links its text. */
+  lists?: EmailList[];
   action?: { label: string; url: string };
   footerNote: string;
   /**
@@ -43,6 +52,20 @@ export function renderEmail(input: EmailLayoutInput): { html: string; text: stri
   const paragraphs = input.paragraphs
     .map((paragraph) => `<p style="margin:0 0 16px;font-size:16px;line-height:24px;color:${INK};">${escapeHtml(paragraph)}</p>`)
     .join("");
+  const lists = (input.lists ?? []).map((list) => ({
+    title: list.title,
+    note: list.note,
+    items: list.items.map((item) => ({ text: item.text, url: item.url === undefined ? undefined : linkUrl(item.url) })),
+  }));
+  const listHtml = lists
+    .map((list) => {
+      const rows = list.items
+        .map((item) => `<li style="margin:0 0 8px;">${item.url ? `<a href="${escapeHtml(item.url)}" style="color:${BLUE};text-decoration:none;">${escapeHtml(item.text)}</a>` : escapeHtml(item.text)}</li>`)
+        .join("");
+      const note = list.note ? `<p style="margin:0 0 16px;font-size:14px;line-height:20px;color:${MUTED};">${escapeHtml(list.note)}</p>` : "";
+      return `<h2 style="margin:8px 0 8px;font-size:16px;line-height:24px;font-weight:700;color:${INK};">${escapeHtml(list.title)}</h2><ul style="margin:0 0 12px;padding:0 0 0 20px;font-size:15px;line-height:22px;color:${INK};">${rows}</ul>${note}`;
+    })
+    .join("");
   const button = action
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;"><tr>
 <td style="border-radius:8px;background:${BLUE};"><a href="${escapeHtml(action.url)}" style="display:inline-block;padding:12px 22px;font-family:${FONT};font-size:16px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:8px;">${escapeHtml(action.label)}</a></td>
@@ -61,7 +84,7 @@ export function renderEmail(input: EmailLayoutInput): { html: string; text: stri
 <tr><td style="background:${NAVY};padding:18px 28px;font-family:${FONT};font-size:20px;font-weight:700;letter-spacing:0.2px;color:#ffffff;">Spark</td></tr>
 <tr><td style="padding:28px 28px 12px;font-family:${FONT};">
 <h1 style="margin:0 0 16px;font-size:22px;line-height:30px;font-weight:700;color:${INK};">${escapeHtml(input.heading)}</h1>
-${paragraphs}${button}
+${paragraphs}${listHtml}${button}
 </td></tr>
 <tr><td style="padding:16px 28px 24px;border-top:1px solid ${LINE};font-family:${FONT};font-size:12px;line-height:18px;color:${MUTED};">
 ${escapeHtml(input.footerNote)}${settingsUrl ? `<br>${escapeHtml(settingsLabel)}: <a href="${escapeHtml(settingsUrl)}" style="color:${MUTED};">${escapeHtml(settingsUrl)}</a>` : ""}
@@ -75,6 +98,9 @@ ${escapeHtml(input.footerNote)}${settingsUrl ? `<br>${escapeHtml(settingsLabel)}
   const text = [
     input.heading,
     ...input.paragraphs,
+    ...lists.map((list) =>
+      [list.title, ...list.items.map((item) => `- ${item.text}${item.url ? ` (${item.url})` : ""}`), ...(list.note ? [list.note] : [])].join("\n"),
+    ),
     ...(action ? [`${action.label}: ${action.url}`] : []),
     `--\n${input.footerNote}${settingsUrl ? `\n${settingsLabel}: ${settingsUrl}` : ""}`,
   ].join("\n\n");

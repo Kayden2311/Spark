@@ -3,6 +3,10 @@ import { Pool } from "pg";
 import { loadWorkerConfig } from "./config.js";
 import { assertWorkerRole } from "./infrastructure/database/roles.js";
 import { createSmtpSender } from "./modules/email/smtp-sender.js";
+import { dueRemindersJob } from "./modules/jobs/due-reminders.js";
+import { createJobRunner } from "./modules/jobs/runner.js";
+import type { JobContext } from "./modules/jobs/runner.js";
+import { weeklyDigestJob } from "./modules/jobs/weekly-digest.js";
 import { createDispatcher } from "./modules/outbox/dispatcher.js";
 import { outboxHandlers } from "./modules/outbox/handlers.js";
 
@@ -11,6 +15,7 @@ import { outboxHandlers } from "./modules/outbox/handlers.js";
 // delivery. It serves no HTTP traffic. Logs carry counts and error codes only: never addresses, tokens or
 // message text.
 const IDLE_WAIT_MS = 2_000;
+const JOB_INTERVAL_MS = 60_000;
 const once = process.argv.includes("--once");
 const config = loadWorkerConfig();
 const levels = ["debug", "info", "warn", "error", "fatal"];
@@ -41,12 +46,20 @@ const pool = new Pool({
 });
 pool.on("error", (error) => log("error", "PostgreSQL worker pool error", { code: errorCode(error) }));
 
-const dispatcher = createDispatcher({
-  pool,
-  sender: createSmtpSender(config.smtpUrl, config.emailFrom, { requireTls: config.smtpRequireTls }),
-  handlers: outboxHandlers,
-  appBaseUrl: config.appBaseUrl,
+const sender = createSmtpSender(config.smtpUrl, config.emailFrom, { requireTls: config.smtpRequireTls });
+const dispatcher = createDispatcher({ pool, sender, handlers: outboxHandlers, appBaseUrl: config.appBaseUrl });
+
+// Scheduled emails (due-task reminders, Monday digest): each job runs at most once a minute, after the outbox turn.
+let jobFailed = false;
+const runner = createJobRunner([dueRemindersJob, weeklyDigestJob], {
+  intervalMs: JOB_INTERVAL_MS,
+  now: () => new Date(),
+  onError: (name, error) => {
+    jobFailed = true;
+    log("error", "Scheduled job failed", { job: name, code: errorCode(error) });
+  },
 });
+const jobContext: JobContext = { pool, sender, appBaseUrl: config.appBaseUrl, now: () => new Date() };
 
 let stopping = false;
 let wake: (() => void) | null = null;
@@ -80,6 +93,12 @@ try {
     try {
       const result = await dispatcher.runOnce();
       if (result.claimed > 0) log("info", "Outbox batch processed", result);
+      jobFailed = false;
+      const jobs = await runner.runDue(jobContext);
+      for (const [job, outcome] of Object.entries(jobs)) {
+        if (outcome.claimed > 0) log("info", "Scheduled batch processed", { job, ...outcome });
+      }
+      if (jobFailed && once) process.exitCode = 1;
       if (result.claimed === 0) {
         if (once) break;
         await idle(IDLE_WAIT_MS);

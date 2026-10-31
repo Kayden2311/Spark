@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { escapeHtml, renderEmail } from "../src/modules/email/layout.js";
+import { dueReminderEmail } from "../src/modules/email/templates/due-reminder.js";
+import type { DueReminderTask } from "../src/modules/email/templates/due-reminder.js";
 import { invitationEmail } from "../src/modules/email/templates/invitation.js";
 import { taskAssignedEmail } from "../src/modules/email/templates/task-assigned.js";
+import { weeklyDigestEmail } from "../src/modules/email/templates/weekly-digest.js";
+import type { WeeklyDigestEmailInput } from "../src/modules/email/templates/weekly-digest.js";
 
 const acceptUrl = `http://localhost:3000/invitations/accept#token=${"a".repeat(64)}`;
 const input = {
@@ -111,5 +115,85 @@ describe("task-assigned email", () => {
     expect(text).toContain(`Email preferences: ${preferencesUrl}`);
     expect(text).toContain("Fix <script>alert(1)</script> & login");
     expect(text).toContain("Website");
+  });
+});
+
+describe("due reminder email", () => {
+  const task = (overrides: Partial<DueReminderTask> = {}): DueReminderTask => ({
+    workspace: "Acme", key: "WEB-42", title: "Fix <b>login</b> & more", due: "2026-10-31", overdue: false,
+    url: "http://localhost:3000/w/acme/p/WEB?issue=WEB-42", ...overrides,
+  });
+  const base = { recipientName: "Bob <i>Stone</i>", total: 1, tasks: [task()], preferencesUrl: "http://localhost:3000/settings/notifications" };
+
+  it("uses singular and plural subjects and mentions overdue tasks", () => {
+    expect(dueReminderEmail(base).subject).toBe("You have 1 task due soon");
+    expect(dueReminderEmail({ ...base, total: 2, tasks: [task(), task({ key: "WEB-43" })] }).subject).toBe("You have 2 tasks due soon");
+    expect(dueReminderEmail({ ...base, total: 3, tasks: [task({ overdue: true }), task(), task({ overdue: true })] }).subject)
+      .toBe("You have 3 tasks due soon (2 overdue)");
+  });
+
+  it("escapes titles and names, links every task and keeps a text alternative with the preferences link", () => {
+    const { html, text } = dueReminderEmail(base);
+    expect(html).not.toContain("<b>");
+    expect(html).not.toContain("<i>");
+    expect(html).toContain("Fix &lt;b&gt;login&lt;/b&gt; &amp; more");
+    expect(html).toContain('href="http://localhost:3000/w/acme/p/WEB?issue=WEB-42"');
+    expect(html).toContain("http://localhost:3000/settings/notifications");
+    expect(text).toContain("WEB-42 Fix <b>login</b> & more (Acme) - due Oct 31 (http://localhost:3000/w/acme/p/WEB?issue=WEB-42)");
+    expect(text).toContain("Email preferences: http://localhost:3000/settings/notifications");
+  });
+
+  it("marks overdue tasks and says how many more were cut", () => {
+    const { text } = dueReminderEmail({ ...base, total: 25, tasks: [task({ overdue: true, due: "2026-10-28" })] });
+    expect(text).toContain("overdue since Oct 28");
+    expect(text).toContain("and 24 more");
+  });
+
+  it("rejects non-http links", () => {
+    expect(() => dueReminderEmail({ ...base, tasks: [task({ url: "javascript:alert(1)" })] })).toThrow();
+  });
+});
+
+describe("weekly digest email", () => {
+  const base: WeeklyDigestEmailInput = {
+    recipientName: "Bob",
+    workspaceName: "Acme <Co>",
+    workspaceUrl: "http://localhost:3000/w/acme",
+    weekOf: "2026-10-26",
+    projects: [{ key: "WEB", name: "Web & Mobile", methodology: "scrum", donePercent: 25, planPercent: 50, status: "behind", label: "Sprint 4" }],
+    members: [{ name: "Ana <script>", completed: 3 }],
+    atRisk: [{ key: "WEB-1", title: "Ship <it>", due: "2026-10-27", url: "http://localhost:3000/w/acme/p/WEB?issue=WEB-1" }],
+    overdue: [],
+    atRiskTotal: 12,
+    overdueTotal: 0,
+    preferencesUrl: "http://localhost:3000/settings/notifications",
+  };
+
+  it("builds the subject from the workspace and the Monday", () => {
+    expect(weeklyDigestEmail(base).subject).toBe("Acme <Co> weekly digest — week of Oct 26");
+  });
+
+  it("escapes names, shows plan status and the preferences link, and has a text part", () => {
+    const { html, text } = weeklyDigestEmail(base);
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("<it>");
+    expect(html).toContain("Web &amp; Mobile");
+    expect(html).toContain("Ana &lt;script&gt;");
+    expect(html).toContain("http://localhost:3000/settings/notifications");
+    expect(text).toContain("WEB Web & Mobile - 25% done, 50% of the plan elapsed (Sprint 4): Behind");
+    expect(text).toContain("Ana <script> - 3");
+    expect(text).toContain("and 11 more");
+    expect(text).toContain("Open workspace: http://localhost:3000/w/acme");
+    expect(text).toContain("Email preferences: http://localhost:3000/settings/notifications");
+    expect(text).not.toContain("Overdue\n");
+  });
+
+  it("states an empty week and a project without a plan", () => {
+    const { text } = weeklyDigestEmail({
+      ...base, members: [], atRisk: [], atRiskTotal: 0,
+      projects: [{ ...base.projects[0]!, planPercent: null, status: "no_plan", label: null }],
+    });
+    expect(text).toContain("Nothing was completed.");
+    expect(text).toContain("no plan window: No plan");
   });
 });
