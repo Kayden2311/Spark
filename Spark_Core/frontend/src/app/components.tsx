@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useUnreadCount } from "./_lib/use-unread-count";
 import { useAuth } from "./auth-context";
 import { SparkLogo as SparkMark } from "./brand/spark-logo";
 import { readLastWorkspace, subscribeLastWorkspace } from "./w/_lib/last-workspace";
@@ -161,6 +162,14 @@ function WorkspaceSwitcher({ active }: { active: ShellWorkspace | null }) {
   );
 }
 
+/** The unread count next to the Notifications link; hidden at zero. */
+function NotificationBadge() {
+  const { count } = useUnreadCount();
+  if (!count || count < 1) return null;
+  const label = count > 99 ? "99+" : String(count);
+  return <b aria-label={`${label} unread ${count === 1 ? "notification" : "notifications"}`} className="navBadge" role="img">{label}</b>;
+}
+
 export function WorkspaceShell({ children, current, workspace, projects = null }: { children: ReactNode; current: string; workspace?: ShellWorkspace | null; projects?: ShellProject[] | null }) {
   const { user, workspaces, platformRoles, logout } = useAuth();
   const router = useRouter();
@@ -237,6 +246,7 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
               >
                 {ICONS[label]}
                 {label}
+                {label === "Notifications" && user && <NotificationBadge />}
               </Link>
             ))}
             {isPlatformStaff && (
