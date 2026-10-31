@@ -498,7 +498,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(28);
+    expect(result.rows[0].count).toBe(29);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -1092,8 +1092,9 @@ describe("Local PostgreSQL schema", () => {
       "staff_report_context", "staff_report_daily", "staff_report_preview", "staff_report_reasons", "staff_report_stats", "staff_report_top_communities", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign", "staff_revoke_role",
       "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count",
       "staff_user_sessions", "ws_accept_invitation", "ws_cancel_event", "ws_complete_sprint", "ws_create_event", "ws_create_invitation", "ws_create_issue", "ws_create_milestone", "ws_create_project", "ws_create_sprint",
-      "ws_create_workspace", "ws_invitation_preview", "ws_list_members", "ws_rebaseline_project", "ws_remove_member", "ws_resend_invitation", "ws_respond_event", "ws_revoke_invitation", "ws_save_phases", "ws_set_member_role",
-      "ws_start_sprint", "ws_switch_methodology", "ws_update_event", "ws_update_issue", "ws_update_milestone", "ws_update_project", "ws_update_sprint", "ws_update_status", "ws_update_workspace",
+      "ws_create_workspace", "ws_get_notification_preferences", "ws_invitation_preview", "ws_list_members", "ws_list_notifications", "ws_mark_notification_read", "ws_mark_notifications_read", "ws_rebaseline_project", "ws_remove_member",
+      "ws_resend_invitation", "ws_respond_event", "ws_revoke_invitation", "ws_save_phases", "ws_set_member_role", "ws_set_notification_preferences",
+      "ws_start_sprint", "ws_switch_methodology", "ws_unread_notification_count", "ws_update_event", "ws_update_issue", "ws_update_milestone", "ws_update_project", "ws_update_sprint", "ws_update_status", "ws_update_workspace",
     ]);
   });
   it("protects admin-tier accounts, drops revoked roles at once and guards promotions of closed communities", async () => {
@@ -4516,5 +4517,252 @@ describe("Calendar deadlines", () => {
     expect(await deadlinesIn(fx.workspace, "2026-11-02T00:00:00.000Z", "2026-11-09T00:00:00.000Z", "UTC")).toEqual(expected);
     // The next local week starts at the next day.
     expect(await deadlinesIn(fx.workspace, "2026-11-09T05:00:00.000Z", "2026-11-16T05:00:00.000Z", "America/New_York")).toEqual(["task_due:2026-11-09:Insight"]);
+  });
+});
+
+type InboxRow = { id: string; tenant_id: string; workspace_slug: string; workspace_name: string; kind: string; title: string; body: string | null;
+  resource_type: string; resource_id: string; link: string | null; created_at: Date; read_at: Date | null };
+const inboxBase = Date.parse("2026-10-01T10:00:00Z");
+const inboxAt = (minutes: number) => new Date(inboxBase + minutes * 60_000);
+// Plants one notification (with the outbox row it references) as the table owner and returns its id.
+async function plantNotice(workspace: string, recipient: Account, kind: string, resourceType: string, resource: string, minutes: number, title = "Notice") {
+  await owner.query("SET ROLE spark_owner");
+  const event = (await owner.query(`INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload,processed_at)
+    VALUES ($1,'test','workspace',$2,1,'{}',now()) RETURNING id`, [workspace, randomUUID()])).rows[0].id as string;
+  return (await owner.query(`INSERT INTO ${table("notifications")} (tenant_id,recipient_user_id,outbox_event_id,kind,title,body,resource_type,resource_id,created_at)
+    VALUES ($1,$2,$3,$4,$5,'Body',$6,$7,$8) RETURNING id`, [workspace, recipient.id, event, kind, title, resourceType, resource, inboxAt(minutes)])).rows[0].id as string;
+}
+const listCall = `SELECT * FROM ${fn("ws_list_notifications")}($1,$2,$3,$4)`;
+async function listNotices(who: Account | null, unread = false, before: [Date, string] | null = null, limit = 100) {
+  return (await asSession(who?.token ?? null, listCall, [unread, before?.[0] ?? null, before?.[1] ?? null, limit])).rows as InboxRow[];
+}
+const unreadCount = async (who: Account) => (await asSession(who.token, `SELECT ${fn("ws_unread_notification_count")}() AS total`)).rows[0].total as number;
+const markOne = async (who: Account, id: string | null) => (await asSession(who.token, `SELECT * FROM ${fn("ws_mark_notification_read")}($1)`, [id])).rows[0].outcome as string;
+const markAll = async (who: Account, before: Date | null) => (await asSession(who.token, `SELECT * FROM ${fn("ws_mark_notifications_read")}($1)`, [before])).rows[0].updated as number;
+const readAtOf = async (id: string) => {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT read_at FROM ${table("notifications")} WHERE id=$1`, [id])).rows[0].read_at as Date | null;
+};
+const preferences = async (who: Account) => (await asSession(who.token, `SELECT * FROM ${fn("ws_get_notification_preferences")}()`)).rows[0];
+const setPreferences = async (token: Buffer | null, assigned: boolean | null, reminders: boolean | null, digest: boolean | null, zone: string | null) =>
+  (await asSession(token, `SELECT * FROM ${fn("ws_set_notification_preferences")}($1,$2,$3,$4)`, [assigned, reminders, digest, zone])).rows[0].outcome as string;
+const slugOf = async (workspace: string) => {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT slug FROM ${table("workspaces")} WHERE id=$1`, [workspace])).rows[0].slug as string;
+};
+
+describe("Notification inbox", () => {
+  it("lists only the actor's visible notifications", async () => {
+    const alice = await account("Inbox Alice"), bob = await account("Inbox Bob"), carol = await account("Inbox Carol");
+    const kanban = await kanbanProject(alice), workspace = kanban.workspace;
+    await addMember(workspace, bob, "member");
+    const elsewhere = (await createWorkspace(carol)).workspace_id!;
+    await addMember(elsewhere, bob, "member");
+    const slug = await slugOf(workspace), otherSlug = await slugOf(elsewhere);
+    const scrum = await scrumProject(alice, workspace);
+    const issue = (await createIssue(alice, kanban.project, { title: "Linked" })).issue_id!;
+    const sprint = (await createSprint(alice, scrum.project, "Launch")).sprint_id!;
+    const event = (await createEvent(alice, workspace, { starts: "2026-12-06T23:30:00Z", ends: "2026-12-07T00:30:00Z" })).event_id!;
+    const forIssue = await plantNotice(workspace, bob, "issue_assigned", "issue", issue, 1, "Issue");
+    const forSprint = await plantNotice(workspace, bob, "sprint_started", "sprint", sprint, 2, "Sprint");
+    const forEvent = await plantNotice(workspace, bob, "event_invited", "calendar_event", event, 3, "Event");
+    const forWorkspace = await plantNotice(workspace, bob, "invitation_accepted", "workspace", workspace, 4, "Workspace");
+    const foreign = await plantNotice(elsewhere, bob, "invitation_accepted", "workspace", elsewhere, 5, "Elsewhere");
+    await plantNotice(workspace, alice, "invitation_accepted", "workspace", workspace, 6, "Alice only");
+    await plantNotice(elsewhere, carol, "invitation_accepted", "workspace", elsewhere, 7, "Carol only");
+
+    const rows = await listNotices(bob);
+    expect(rows.map((row) => row.id)).toEqual([foreign, forWorkspace, forEvent, forSprint, forIssue]);
+    expect(rows[0]).toEqual({ id: foreign, tenant_id: elsewhere, workspace_slug: otherSlug, workspace_name: "Acme", kind: "invitation_accepted", title: "Elsewhere", body: "Body",
+      resource_type: "workspace", resource_id: elsewhere, link: `/w/${otherSlug}/members`, created_at: inboxAt(5), read_at: null });
+    expect(Object.fromEntries(rows.map((row) => [row.id, row.link]))).toEqual({
+      [foreign]: `/w/${otherSlug}/members`, [forWorkspace]: `/w/${slug}/members`,
+      [forEvent]: `/w/${slug}/schedule?week=2026-11-30`, [forSprint]: `/w/${slug}/p/${scrum.key}/backlog`, [forIssue]: `/w/${slug}/p/${kanban.key}?issue=${kanban.key}-1` });
+    expect((await listNotices(alice)).map((row) => row.title)).toEqual(["Alice only"]);
+    await expect(listNotices(null)).rejects.toMatchObject({ code: "28000" });
+
+    // Keyset pages of two cover every row once, newest first.
+    const first = await listNotices(bob, false, null, 2);
+    const second = await listNotices(bob, false, [first[1]!.created_at, first[1]!.id], 2);
+    const third = await listNotices(bob, false, [second[1]!.created_at, second[1]!.id], 2);
+    expect([first, second, third].map((page) => page.length)).toEqual([2, 2, 1]);
+    expect([...first, ...second, ...third].map((row) => row.id)).toEqual(rows.map((row) => row.id));
+    expect(await listNotices(bob, false, [third[0]!.created_at, third[0]!.id], 2)).toEqual([]);
+    // Equal timestamps are ordered and paged by id.
+    const tieA = await plantNotice(workspace, bob, "invitation_accepted", "workspace", workspace, 9, "Tie");
+    const tieB = await plantNotice(workspace, bob, "invitation_accepted", "workspace", workspace, 9, "Tie");
+    const [tieFirst, tieSecond] = [tieA, tieB].sort().reverse() as [string, string];
+    const tied = await listNotices(bob, false, null, 2);
+    expect(tied.map((row) => row.id)).toEqual([tieFirst, tieSecond]);
+    expect((await listNotices(bob, false, [tied[0]!.created_at, tied[0]!.id], 1)).map((row) => row.id)).toEqual([tieSecond]);
+
+    // Unread filter.
+    expect(await markOne(bob, forEvent)).toBe("ok");
+    expect((await listNotices(bob, true)).map((row) => row.id)).not.toContain(forEvent);
+    expect((await listNotices(bob, false)).find((row) => row.id === forEvent)!.read_at).toBeInstanceOf(Date);
+
+    // An archived issue and an archived project have no link.
+    expect(await updateIssue(alice, issue, 1, { archived: true })).toMatchObject({ outcome: "ok" });
+    expect((await listNotices(bob)).find((row) => row.id === forIssue)!.link).toBeNull();
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [scrum.project]);
+    expect((await listNotices(bob)).find((row) => row.id === forSprint)!.link).toBeNull();
+
+    // Leaving hides that workspace's rows; rejoining shows them again.
+    expect(await outcome(bob, "ws_remove_member($1,$2)", [workspace, bob.id])).toBe("ok");
+    expect((await listNotices(bob)).map((row) => row.id)).toEqual([foreign]);
+    const { token } = await inviteWithToken(alice, workspace, bob.email, "member");
+    expect(await accept(bob, token)).toMatchObject({ outcome: "ok" });
+    expect((await listNotices(bob)).map((row) => row.id)).toEqual([tieFirst, tieSecond, foreign, forWorkspace, forEvent, forSprint, forIssue]);
+  });
+
+  it("validates the cursor and the limit", async () => {
+    const bob = await account("Inbox Validation");
+    const at = new Date(), id = randomUUID();
+    for (const [created, before] of [[at, null], [null, id]] as const) {
+      await expect(asSession(bob.token, listCall, [false, created, before, 10])).rejects.toMatchObject({ code: "22023", message: "Invalid notification cursor" });
+    }
+    for (const limit of [0, 101, -1, null]) {
+      await expect(asSession(bob.token, listCall, [false, null, null, limit])).rejects.toMatchObject({ code: "22023", message: "Invalid notification limit" });
+    }
+    expect(await listNotices(bob, false, null, 1)).toEqual([]);
+    expect(await listNotices(bob, false, null, 100)).toEqual([]);
+    expect(await listNotices(bob, false, [at, id], 100)).toEqual([]);
+  });
+
+  it("counts unread up to 100", async () => {
+    const alice = await account("Count Alice"), bob = await account("Count Bob");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    expect(await unreadCount(bob)).toBe(0);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`WITH ev AS (INSERT INTO ${table("outbox_events")} (tenant_id,event_type,aggregate_type,aggregate_id,aggregate_version,payload,processed_at)
+        SELECT $1,'test','workspace',gen_random_uuid(),1,'{}',now() FROM generate_series(1,101) RETURNING id)
+      INSERT INTO ${table("notifications")} (tenant_id,recipient_user_id,outbox_event_id,kind,title,resource_type,resource_id)
+        SELECT $1,$2,id,'invitation_accepted','Bulk','workspace',$1 FROM ev`, [workspace, bob.id]);
+    expect(await unreadCount(bob)).toBe(100);
+    expect(await unreadCount(alice)).toBe(0);
+    expect(await listNotices(bob, true, null, 100)).toHaveLength(100);
+    expect(await markAll(bob, new Date(Date.now() + 60_000))).toBe(101);
+    expect(await unreadCount(bob)).toBe(0);
+    await plantNotice(workspace, bob, "invitation_accepted", "workspace", workspace, 1);
+    expect(await unreadCount(bob)).toBe(1);
+    await expect(asSession(null, `SELECT ${fn("ws_unread_notification_count")}()`)).rejects.toMatchObject({ code: "28000" });
+  });
+
+  it("marks one read idempotently", async () => {
+    const alice = await account("Mark Alice"), bob = await account("Mark Bob"), carol = await account("Mark Carol");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    await addMember(workspace, carol, "member");
+    const mine = await plantNotice(workspace, bob, "invitation_accepted", "workspace", workspace, 1);
+    const hers = await plantNotice(workspace, carol, "invitation_accepted", "workspace", workspace, 2);
+    expect(await readAtOf(mine)).toBeNull();
+    expect(await markOne(bob, mine)).toBe("ok");
+    const firstRead = await readAtOf(mine);
+    expect(firstRead).toBeInstanceOf(Date);
+    expect(await markOne(bob, mine)).toBe("ok");
+    expect(await readAtOf(mine)).toEqual(firstRead);
+    // Another user's id, an unknown id and a missing id are the same not_found and change nothing.
+    expect(await markOne(bob, hers)).toBe("not_found");
+    expect(await markOne(bob, randomUUID())).toBe("not_found");
+    expect(await markOne(bob, null)).toBe("not_found");
+    expect(await readAtOf(hers)).toBeNull();
+    // A workspace the actor left is indistinguishable from an unknown id until they rejoin.
+    expect(await outcome(carol, "ws_remove_member($1,$2)", [workspace, carol.id])).toBe("ok");
+    expect(await markOne(carol, hers)).toBe("not_found");
+    expect(await readAtOf(hers)).toBeNull();
+    const { token } = await inviteWithToken(alice, workspace, carol.email, "member");
+    expect(await accept(carol, token)).toMatchObject({ outcome: "ok" });
+    expect(await markOne(carol, hers)).toBe("ok");
+    expect(await readAtOf(hers)).toBeInstanceOf(Date);
+    await expect(asSession(null, `SELECT * FROM ${fn("ws_mark_notification_read")}($1)`, [mine])).rejects.toMatchObject({ code: "28000" });
+  });
+
+  it("marks all read before an instant", async () => {
+    const alice = await account("All Alice"), bob = await account("All Bob");
+    const workspace = (await createWorkspace(alice)).workspace_id!;
+    await addMember(workspace, bob, "member");
+    const elsewhere = (await createWorkspace(await account("All Carol"))).workspace_id!;
+    await addMember(elsewhere, bob, "member");
+    const old = await plantNotice(workspace, bob, "invitation_accepted", "workspace", workspace, 1);
+    const edge = await plantNotice(workspace, bob, "invitation_accepted", "workspace", workspace, 2);
+    const later = await plantNotice(workspace, bob, "invitation_accepted", "workspace", workspace, 3);
+    const others = await plantNotice(workspace, alice, "invitation_accepted", "workspace", workspace, 1);
+    const hidden = await plantNotice(elsewhere, bob, "invitation_accepted", "workspace", elsewhere, 1);
+    expect(await outcome(bob, "ws_remove_member($1,$2)", [elsewhere, bob.id])).toBe("ok");
+    // Already read rows are not counted and keep their time.
+    expect(await markOne(bob, old)).toBe("ok");
+    const oldRead = await readAtOf(old);
+    expect(await markAll(bob, inboxAt(2))).toBe(1);
+    expect(await readAtOf(old)).toEqual(oldRead);
+    expect(await readAtOf(edge)).toBeInstanceOf(Date);
+    expect(await readAtOf(later)).toBeNull();
+    expect(await readAtOf(others)).toBeNull();
+    expect(await readAtOf(hidden)).toBeNull();
+    expect(await unreadCount(bob)).toBe(1);
+    expect(await markAll(bob, inboxAt(2))).toBe(0);
+    expect(await markAll(bob, inboxAt(10))).toBe(1);
+    expect(await readAtOf(hidden)).toBeNull();
+    await expect(markAll(bob, null)).rejects.toMatchObject({ code: "22023", message: "Invalid notification before" });
+    await expect(asSession(null, `SELECT * FROM ${fn("ws_mark_notifications_read")}($1)`, [inboxAt(1)])).rejects.toMatchObject({ code: "28000" });
+  });
+
+  it("stores preferences and time zone", async () => {
+    const alice = await account("Pref Alice"), bob = await account("Pref Bob");
+    const { workspace, project } = await kanbanProject(alice);
+    await addMember(workspace, bob, "member");
+    expect(await preferences(alice)).toEqual({ task_assigned: true, due_reminders: true, weekly_digest: true, timezone: "UTC" });
+    expect(await setPreferences(alice.token, false, true, false, "Asia/Ho_Chi_Minh")).toBe("ok");
+    expect(await preferences(alice)).toEqual({ task_assigned: false, due_reminders: true, weekly_digest: false, timezone: "Asia/Ho_Chi_Minh" });
+    expect(await setPreferences(alice.token, false, false, true, "Asia/Ho_Chi_Minh")).toBe("ok");
+    expect(await preferences(alice)).toEqual({ task_assigned: false, due_reminders: false, weekly_digest: true, timezone: "Asia/Ho_Chi_Minh" });
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT kind,channel,enabled FROM ${table("notification_preferences")} WHERE user_id=$1 ORDER BY kind`, [alice.id])).rows)
+      .toEqual([{ kind: "due_reminders", channel: "email", enabled: false }, { kind: "task_assigned", channel: "email", enabled: false }, { kind: "weekly_digest", channel: "email", enabled: true }]);
+    // Another user is untouched.
+    expect(await preferences(bob)).toEqual({ task_assigned: true, due_reminders: true, weekly_digest: true, timezone: "UTC" });
+    expect((await owner.query(`SELECT count(*)::integer AS total FROM ${table("notification_preferences")} WHERE user_id=$1`, [bob.id])).rows[0].total).toBe(0);
+    // Invalid input changes nothing.
+    for (const zone of ["Mars/Base", "", "utc-ish"]) {
+      await expect(setPreferences(alice.token, true, true, true, zone)).rejects.toMatchObject({ code: "22023", message: "Invalid timezone" });
+    }
+    for (const args of [[null, true, true, "UTC"], [true, null, true, "UTC"], [true, true, null, "UTC"], [true, true, true, null]] as const) {
+      await expect(setPreferences(alice.token, ...args)).rejects.toMatchObject({ code: "22023", message: "Invalid notification preferences" });
+    }
+    expect(await preferences(alice)).toEqual({ task_assigned: false, due_reminders: false, weekly_digest: true, timezone: "Asia/Ho_Chi_Minh" });
+    await expect(asSession(null, `SELECT * FROM ${fn("ws_get_notification_preferences")}()`)).rejects.toMatchObject({ code: "28000" });
+    await expect(setPreferences(null, true, true, true, "UTC")).rejects.toMatchObject({ code: "28000" });
+
+    // The assignment email honours the switch.
+    const view = async (id: string) => (await workerRuntime.query(`SELECT status FROM ${fn("worker_task_assigned_email")}($1)`, [id])).rows[0]?.status as string;
+    const assigned = (await createIssue(alice, project, { title: "Mail me", assignee: bob.id })).issue_id!;
+    await owner.query("SET ROLE spark_owner");
+    const notice = (await owner.query(`SELECT id FROM ${table("notifications")} WHERE resource_id=$1 AND recipient_user_id=$2`, [assigned, bob.id])).rows[0].id as string;
+    expect(await view(notice)).toBe("pending");
+    expect(await setPreferences(bob.token, false, true, true, "UTC")).toBe("ok");
+    expect(await view(notice)).toBe("skipped");
+    expect(await setPreferences(bob.token, true, false, false, "UTC")).toBe("ok");
+    expect(await view(notice)).toBe("pending");
+  });
+
+  it("keeps the inbox functions definers with an empty search_path, granted to the runtime role only", async () => {
+    await owner.query("SET ROLE spark_owner");
+    const names = ["ws_get_notification_preferences", "ws_list_notifications", "ws_mark_notification_read", "ws_mark_notifications_read", "ws_set_notification_preferences", "ws_unread_notification_count"];
+    const rows = (await owner.query(`SELECT p.proname, p.prosecdef, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth,
+      EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE') AS public
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname`, [namespace, names])).rows;
+    expect(rows.map((row) => row.proname)).toEqual(names);
+    for (const row of rows) {
+      expect({ name: row.proname, definer: row.prosecdef, config: row.proconfig, runtime: row.runtime, worker: row.worker, auth: row.auth, public: row.public })
+        .toEqual({ name: row.proname, definer: true, config: ['search_path=""'], runtime: true, worker: false, auth: false, public: false });
+    }
+    // The runtime role has no write access to either table.
+    for (const name of ["notifications", "notification_preferences"]) {
+      for (const privilege of ["INSERT", "UPDATE", "DELETE"]) {
+        expect((await owner.query("SELECT has_table_privilege('spark_app',$1,$2) AS allowed", [`"${namespace}"."${name}"`, privilege])).rows[0].allowed).toBe(false);
+      }
+    }
   });
 });
