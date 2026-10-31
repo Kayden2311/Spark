@@ -5041,3 +5041,25 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 @media (prefers-reduced-motion: reduce) {
   .notificationRow, .notificationTab { transition: none; }
 }
+
+/* Email notification settings */
+.sidebarFoot .settingsLink { margin-left: auto; color: inherit; }
+.sidebarFoot .settingsLink + button { margin-left: 0; }
+.settingsLink:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.settingsCard { display: grid; gap: 1.5rem; max-width: 38rem; }
+.settingsCard h2 { margin: 0 0 .5rem; font-size: 1rem; }
+.settingsSwitches { margin: 0; padding: 0; list-style: none; }
+.settingsSwitches li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .85rem 0; border-top: 1px solid var(--line); font-size: .92rem; font-weight: 600; }
+.settingsSwitches li:first-child { border-top: 0; }
+.settingsSwitch { position: relative; flex: none; width: 2.9rem; min-width: 2.9rem; height: 1.7rem; padding: 0; border: 0; border-radius: 999px; background: #cbd5e1; cursor: pointer; transition: background .18s ease; }
+.settingsSwitch[aria-checked="true"] { background: var(--blue); }
+.settingsSwitch:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.settingsSwitchKnob { position: absolute; top: .2rem; left: .2rem; width: 1.3rem; height: 1.3rem; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .3); transition: transform .18s ease; }
+.settingsSwitch[aria-checked="true"] .settingsSwitchKnob { transform: translateX(1.2rem); }
+.settingsZoneLink { justify-self: start; padding-left: 0; }
+.settingsActions { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; }
+.settingsActions .sparkPrimary:disabled { opacity: .55; cursor: not-allowed; }
+.settingsStatus { margin: 0; color: #15803d; font-size: .88rem; font-weight: 700; }
+@media (prefers-reduced-motion: reduce) {
+  .settingsSwitch, .settingsSwitchKnob { transition: none; }
+}
