@@ -4770,8 +4770,14 @@ describe("Notification inbox", () => {
 });
 
 // ---------- Scheduled reminder and digest ledger (0029) ----------
-type Claimed = { id: string; user_id: string; tenant_id: string | null; period: string };
-const claimSql = `SELECT id,user_id,tenant_id,period::text AS period FROM ${fn("worker_claim_scheduled_emails")}($1,$2,$3,$4,$5)`;
+type Claimed = { id: string; user_id: string; tenant_id: string | null; period: string; token?: string };
+const claimSql = `SELECT id,user_id,tenant_id,period::text AS period FROM ${fn("scheduled_emails_claim_at")}($1,$2,$3,$4,$5)`;
+const wrapperSql = `SELECT id,user_id,tenant_id,period::text AS period FROM ${fn("worker_claim_scheduled_emails")}($1,$2,$3,$4)`;
+// The instant-taking claim is owner-only (the worker's wrapper uses the database clock), so fixed times run as the owner.
+const ownerRows = async (sql: string, args: unknown[]) => {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(sql, args)).rows;
+};
 const settleSql = `SELECT ${fn("worker_settle_scheduled_email")}($1,$2,$3,$4,$5) AS settled`;
 const settle = async (id: string, token: string | null, status: string, code: string | null = null, retryAt: string | null = null) =>
   (await workerRuntime.query(settleSql, [id, token, status, code, retryAt])).rows[0].settled as boolean;
@@ -4780,8 +4786,8 @@ const settle = async (id: string, token: string | null, status: string, code: st
 async function claimFor(job: string, now: string, who: Account[], settled = true) {
   const mine = new Set(who.map((person) => person.id)), found: Claimed[] = [], token = randomUUID();
   for (let round = 0; round < 40; round++) {
-    const rows = (await workerRuntime.query(claimSql, [job, now, token, 50, 60])).rows as Claimed[];
-    found.push(...rows.filter((row) => mine.has(row.user_id)));
+    const rows = (await ownerRows(claimSql, [job, now, token, 50, 60])) as Claimed[];
+    found.push(...rows.filter((row) => mine.has(row.user_id)).map((row) => ({ ...row, token })));
     if (rows.length < 50) break;
   }
   if (settled) for (const row of found) expect(await settle(row.id, token, "sent")).toBe(true);
@@ -4799,10 +4805,10 @@ async function setZone(who: Account, zone: string) {
 }
 const task = async (who: Account, project: string, assignee: Account | null, due: string | null, title = "Task") =>
   (await createIssue(who, project, { title, assignee: assignee?.id ?? null, due })).issue_id!;
-const reminderCall = `SELECT status,email,recipient_name,total,task_workspace,task_workspace_slug,task_key,task_title,task_due::text AS task_due,task_overdue FROM ${fn("worker_due_reminder_email")}($1)`;
-const digestCall = `SELECT status,email,recipient_name,workspace_name,workspace_slug,section,project_key,project_name,methodology,label,value::float8 AS value,extra FROM ${fn("worker_weekly_digest_email")}($1)`;
-const reminderOf = async (id: string) => (await workerRuntime.query(reminderCall, [id])).rows;
-const digestOf = async (id: string) => (await workerRuntime.query(digestCall, [id])).rows;
+const reminderCall = `SELECT status,email,recipient_name,total,task_workspace,task_workspace_slug,task_key,task_title,task_due::text AS task_due,task_overdue FROM ${fn("worker_due_reminder_email")}($1,$2)`;
+const digestCall = `SELECT status,email,recipient_name,workspace_name,workspace_slug,section,project_key,project_name,methodology,label,value::float8 AS value,extra FROM ${fn("worker_weekly_digest_email")}($1,$2)`;
+const reminderOf = async (id: string, token: string | null) => (await workerRuntime.query(reminderCall, [id, token])).rows;
+const digestOf = async (id: string, token: string | null) => (await workerRuntime.query(digestCall, [id, token])).rows;
 const finishIssue = async (who: Account, project: string, issue: string, version = 1) =>
   expect(await updateIssue(who, issue, version, { statusId: await statusNamed(project, "Done") })).toMatchObject({ outcome: "ok" });
 const leave = async (workspace: string, who: Account) => {
@@ -4900,23 +4906,60 @@ describe("Scheduled emails", () => {
     expect((await claimFor("weekly_digest", "2026-11-09T08:00:00Z", [p.utc])).map((row) => row.period)).toEqual(["2026-11-09", "2026-11-09"]);
   });
 
-  it("lets only one enumerator hold the job lock", async () => {
+  it("lets only one enumerator hold the job lock but still claims pending rows", async () => {
     const boss = await account("Lock Boss"), { workspace, project } = await kanbanProject(boss);
-    const a = await account("Lock A"), b = await account("Lock B");
-    for (const person of [a, b]) { await addMember(workspace, person, "member"); await task(boss, project, person, "2026-11-03"); }
-    const first = await workerRuntime.connect(), second = await workerRuntime.connect();
+    const a = await account("Lock A"), b = await account("Lock B"), c = await account("Lock C");
+    for (const person of [a, b, c]) { await addMember(workspace, person, "member"); await task(boss, project, person, "2026-11-03"); }
+    // C already has a pending row; A and B have none yet.
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("scheduled_emails")} (user_id,job,period) VALUES ($1,'due_reminders','2026-11-03')`, [c.id]);
+    const connect = async () => {
+      const client = new pg.Client({ connectionString: localConnection("MIGRATION_DATABASE_URL"), connectionTimeoutMillis: 5000 });
+      await client.connect();
+      await client.query("SET ROLE spark_owner");
+      return client;
+    };
+    const first = await connect(), second = await connect();
     try {
       await first.query("BEGIN");
-      const held = (await first.query(claimSql, ["due_reminders", "2026-11-03T08:00:00Z", randomUUID(), 50, 60])).rows as Claimed[];
-      expect(held.map((row) => row.user_id)).toEqual(expect.arrayContaining([a.id, b.id]));
-      // While the first transaction holds the lock, the other enumerator gets nothing, whatever is pending.
-      expect((await second.query(claimSql, ["due_reminders", "2026-11-03T08:00:00Z", randomUUID(), 50, 60])).rows).toEqual([]);
-      await first.query("COMMIT");
-      // Released with the transaction; the committed leases keep the rows away from the second worker.
+      expect((await first.query("SELECT pg_try_advisory_xact_lock(7301, hashtext('due_reminders')) AS held")).rows[0].held).toBe(true);
+      // The lock is held elsewhere: no enumeration (A and B get no row), but the pending row is still claimed.
+      const during = (await second.query(claimSql, ["due_reminders", "2026-11-03T08:00:00Z", randomUUID(), 50, 60])).rows as Claimed[];
+      expect(during.filter((row) => [a.id, b.id, c.id].includes(row.user_id)).map((row) => row.user_id)).toEqual([c.id]);
+      expect(await ledger([a, b], "due_reminders")).toEqual([]);
+      // Another job is not blocked by this lock.
+      expect((await second.query("SELECT pg_try_advisory_xact_lock(7301, hashtext('weekly_digest')) AS free")).rows[0].free).toBe(true);
+      await first.query("ROLLBACK");
+      // Released with the transaction: the next claim enumerates.
       const after = (await second.query(claimSql, ["due_reminders", "2026-11-03T08:00:10Z", randomUUID(), 50, 60])).rows as Claimed[];
-      expect(after.filter((row) => [a.id, b.id].includes(row.user_id))).toEqual([]);
-    } finally { first.release(); second.release(); }
-    expect(await ledger([a, b], "due_reminders")).toHaveLength(2);
+      expect(after.filter((row) => [a.id, b.id, c.id].includes(row.user_id)).map((row) => row.user_id).sort()).toEqual([a.id, b.id].sort());
+    } finally { await first.end(); await second.end(); }
+    expect(await ledger([a, b, c], "due_reminders")).toHaveLength(3);
+  });
+
+  it("claims with the database clock through the worker entry point", async () => {
+    const boss = await account("Clock Boss"), { workspace, project } = await kanbanProject(boss);
+    const user = await account("Clock User");
+    await addMember(workspace, user, "member");
+    // A zone where it is 08:00 or later right now (at least one of these always is).
+    await owner.query("SET ROLE spark_owner");
+    const zones = ["UTC", "Asia/Ho_Chi_Minh", "America/Los_Angeles", "Pacific/Kiritimati", "Etc/GMT+12", "Pacific/Auckland"];
+    const pick = (await owner.query(`SELECT z, (now() AT TIME ZONE z)::date::text AS local_date FROM unnest($1::text[]) AS z WHERE (now() AT TIME ZONE z)::time >= time '08:00' LIMIT 1`, [zones])).rows[0];
+    expect(pick).toBeDefined();
+    await setZone(user, pick.z);
+    await task(boss, project, user, pick.local_date);
+    const token = randomUUID(), claimed: Claimed[] = [];
+    for (let round = 0; round < 40; round++) {
+      const rows = (await workerRuntime.query(wrapperSql, ["due_reminders", token, 50, 60])).rows as Claimed[];
+      claimed.push(...rows.filter((row) => row.user_id === user.id));
+      if (rows.length < 50) break;
+    }
+    expect(claimed.map((row) => [row.tenant_id, row.period])).toEqual([[null, pick.local_date]]);
+    expect(await settle(claimed[0]!.id, token, "sent")).toBe(true);
+    // The worker cannot choose the instant: the internal function is out of its reach, and so is the helper.
+    await expect(workerRuntime.query(claimSql, ["due_reminders", "2030-01-07T08:00:00Z", randomUUID(), 5, 60])).rejects.toMatchObject({ code: "42501" });
+    await expect(workerRuntime.query(`SELECT * FROM ${fn("scheduled_open_tasks")}($1,$2)`, [user.id, "2030-01-07"])).rejects.toMatchObject({ code: "42501" });
+    await expect(workerRuntime.query(wrapperSql, ["nope", randomUUID(), 5, 60])).rejects.toMatchObject({ code: "22023" });
   });
 
   it("claims a lease and settles", async () => {
@@ -4926,7 +4969,7 @@ describe("Scheduled emails", () => {
     await task(boss, project, user, "2026-11-03");
     const at = (seconds: number) => new Date(Date.parse("2026-11-03T08:00:00Z") + seconds * 1000).toISOString();
     const claim = async (seconds: number, token: string, lease = 30) =>
-      ((await workerRuntime.query(claimSql, ["due_reminders", at(seconds), token, 50, lease])).rows as Claimed[]).filter((row) => row.user_id === user.id);
+      ((await ownerRows(claimSql, ["due_reminders", at(seconds), token, 50, lease])) as Claimed[]).filter((row) => row.user_id === user.id);
     const t1 = randomUUID(), t2 = randomUUID(), t3 = randomUUID();
     const [row] = await claim(0, t1);
     expect(row).toBeDefined();
@@ -4941,14 +4984,29 @@ describe("Scheduled emails", () => {
     expect(await settle(row!.id, null, "sent")).toBe(false);
     expect(await settle(randomUUID(), t2, "sent")).toBe(false);
     // A retry keeps the row pending, clears the token and holds it back until the retry time.
-    expect(await settle(row!.id, t2, "retry", "smtp_unavailable", at(120))).toBe(true);
+    // The retry time is clamped to between now() and one day ahead (a time further out is capped).
+    const before = Date.now();
+    expect(await settle(row!.id, t2, "retry", "smtp_error", at(120))).toBe(true);
     state = (await ledger([user], "due_reminders"))[0];
-    expect(state).toMatchObject({ status: "pending", lock_token: null, last_error_code: "smtp_unavailable", attempts: 2 });
+    expect(state).toMatchObject({ status: "pending", lock_token: null, last_error_code: "smtp_error", attempts: 2 });
+    expect(new Date(state.locked_until).getTime()).toBeGreaterThanOrEqual(before - 2000);
+    expect(new Date(state.locked_until).getTime()).toBeLessThanOrEqual(Date.now() + 24 * 3600 * 1000 + 2000);
+    // Pin the hold-back for the fixed test clock, then it is honoured.
+    const hold = async (instant: string | null) => { await owner.query("SET ROLE spark_owner"); await owner.query(`UPDATE ${table("scheduled_emails")} SET locked_until=$2 WHERE id=$1`, [row!.id, instant]); };
+    await hold(at(120));
     expect(await claim(100, t3)).toEqual([]);
     expect((await claim(120, t3)).map((claimed) => claimed.id)).toEqual([row!.id]);
-    expect(await settle(row!.id, t3, "sent")).toBe(true);
+    // A far-future retry is capped at one day from now.
+    expect(await settle(row!.id, t3, "retry", "smtp_error", "2099-01-01T00:00:00Z")).toBe(true);
     state = (await ledger([user], "due_reminders"))[0];
-    expect(state).toMatchObject({ status: "sent", attempts: 3, lock_token: null });
+    expect(new Date(state.locked_until).getTime()).toBeLessThanOrEqual(Date.now() + 24 * 3600 * 1000 + 2000);
+    expect(new Date(state.locked_until).getTime()).toBeGreaterThan(Date.now() + 23 * 3600 * 1000);
+    await hold(null);
+    const t4 = randomUUID();
+    expect((await claim(130, t4)).map((claimed) => claimed.id)).toEqual([row!.id]);
+    expect(await settle(row!.id, t4, "sent")).toBe(true);
+    state = (await ledger([user], "due_reminders"))[0];
+    expect(state).toMatchObject({ status: "sent", attempts: 4, lock_token: null });
     expect(state.sent_at).toBeInstanceOf(Date);
     expect(await settle(row!.id, t3, "sent")).toBe(false);
     expect(await claim(1000, randomUUID())).toEqual([]);
@@ -4970,11 +5028,13 @@ describe("Scheduled emails", () => {
     let id = "";
     for (let attempt = 1; attempt <= 5; attempt++) {
       const token = randomUUID();
-      const rows = ((await workerRuntime.query(claimSql, ["due_reminders", at(attempt * 10), token, 50, 30])).rows as Claimed[]).filter((row) => row.user_id === user.id);
+      const rows = ((await ownerRows(claimSql, ["due_reminders", at(attempt * 10), token, 50, 30])) as Claimed[]).filter((row) => row.user_id === user.id);
       expect(rows).toHaveLength(1);
       id = rows[0]!.id;
-      expect(await settle(id, token, "retry", "smtp_unavailable", at(attempt * 10 + 5))).toBe(true);
-      expect((await ledger([user], "due_reminders"))[0]).toMatchObject({ status: attempt < 5 ? "pending" : "failed", attempts: attempt, last_error_code: "smtp_unavailable" });
+      expect(await settle(id, token, "retry", "smtp_error", at(attempt * 10 + 5))).toBe(true);
+      await owner.query("SET ROLE spark_owner");
+      await owner.query(`UPDATE ${table("scheduled_emails")} SET locked_until=NULL WHERE id=$1`, [id]);
+      expect((await ledger([user], "due_reminders"))[0]).toMatchObject({ status: attempt < 5 ? "pending" : "failed", attempts: attempt, last_error_code: "smtp_error" });
     }
     // The same five claims reached the other user's row without ever settling it (a worker that keeps dying mid-send):
     // the next claim marks it failed instead of leasing it again.
@@ -4985,11 +5045,12 @@ describe("Scheduled emails", () => {
     // Input checks.
     await expect(settle(id, randomUUID(), "bogus")).rejects.toMatchObject({ code: "22023" });
     await expect(settle(id, randomUUID(), "retry", "Bad Code!", at(1))).rejects.toMatchObject({ code: "22023" });
-    await expect(settle(id, randomUUID(), "retry", "ok_code", null)).rejects.toMatchObject({ code: "22023" });
+    await expect(settle(id, randomUUID(), "retry", "unlisted_code", at(1))).rejects.toMatchObject({ code: "22023" });
+    await expect(settle(id, randomUUID(), "retry", "smtp_error", null)).rejects.toMatchObject({ code: "22023" });
     const now = "2026-11-03T08:00:00Z";
     for (const args of [["nope", now, randomUUID(), 5, 60], ["due_reminders", now, randomUUID(), 0, 60], ["due_reminders", now, randomUUID(), 51, 60],
       ["due_reminders", now, randomUUID(), 5, 9], ["due_reminders", now, null, 5, 60], ["due_reminders", null, randomUUID(), 5, 60]]) {
-      await expect(workerRuntime.query(claimSql, args)).rejects.toMatchObject({ code: "22023" });
+      await expect(ownerRows(claimSql, args)).rejects.toMatchObject({ code: "22023" });
     }
   });
 
@@ -5006,46 +5067,49 @@ describe("Scheduled emails", () => {
     await task(boss, one.project, user, "2026-11-05", "Too far");
     const [claimed] = await claimFor("due_reminders", "2026-11-03T08:00:00Z", [user], false);
     const common = { status: "pending", email: user.email.toLowerCase(), recipient_name: "Reread User", total: 3 };
-    expect(await reminderOf(claimed!.id)).toEqual([
+    expect(await reminderOf(claimed!.id, claimed!.token!)).toEqual([
       { ...common, task_workspace: "Acme", task_workspace_slug: await slugOf(one.workspace), task_key: `${one.key}-1`, task_title: "Overdue one", task_due: "2026-11-02", task_overdue: true },
       { ...common, task_workspace: "Acme", task_workspace_slug: await slugOf(one.workspace), task_key: `${one.key}-2`, task_title: "Today one", task_due: "2026-11-03", task_overdue: false },
       { ...common, task_workspace: "Beta", task_workspace_slug: await slugOf(two.workspace), task_key: `${two.key}-1`, task_title: "Tomorrow two", task_due: "2026-11-04", task_overdue: false },
     ]);
     // A task finished after the claim drops out; the total follows.
     await finishIssue(boss, one.project, first);
-    expect((await reminderOf(claimed!.id)).map((row) => [row.task_title, row.total])).toEqual([["Today one", 2], ["Tomorrow two", 2]]);
+    expect((await reminderOf(claimed!.id, claimed!.token!)).map((row) => [row.task_title, row.total])).toEqual([["Today one", 2], ["Tomorrow two", 2]]);
     // Reassigned, project archived: each removes the task; nothing left means a skipped row with no details.
     expect(await updateIssue(boss, second, 1, { assigneeUserId: boss.id })).toMatchObject({ outcome: "ok" });
-    expect((await reminderOf(claimed!.id)).map((row) => row.task_title)).toEqual(["Today one"]);
+    expect((await reminderOf(claimed!.id, claimed!.token!)).map((row) => row.task_title)).toEqual(["Today one"]);
     await owner.query("SET ROLE spark_owner");
     await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [one.project]);
-    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    expect(await reminderOf(claimed!.id, claimed!.token!)).toEqual([skippedReminder]);
     await owner.query(`UPDATE ${table("projects")} SET archived_at=NULL WHERE id=$1`, [one.project]);
-    expect((await reminderOf(claimed!.id)).map((row) => row.status)).toEqual(["pending"]);
+    expect((await reminderOf(claimed!.id, claimed!.token!)).map((row) => row.status)).toEqual(["pending"]);
+    // Only the lease holder may read the details: a wrong, missing or lost token gets a skipped row.
+    expect(await reminderOf(claimed!.id, randomUUID())).toEqual([skippedReminder]);
+    expect(await reminderOf(claimed!.id, null)).toEqual([skippedReminder]);
     // Preference off, then on again.
     expect(await setPreferences(user.token, true, false, true, "UTC")).toBe("ok");
-    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    expect(await reminderOf(claimed!.id, claimed!.token!)).toEqual([skippedReminder]);
     expect(await setPreferences(user.token, true, true, true, "UTC")).toBe("ok");
-    expect((await reminderOf(claimed!.id)).map((row) => row.status)).toEqual(["pending"]);
+    expect((await reminderOf(claimed!.id, claimed!.token!)).map((row) => row.status)).toEqual(["pending"]);
     // A user who left the workspace, a suspended user, an archived workspace.
     await leave(one.workspace, user);
-    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    expect(await reminderOf(claimed!.id, claimed!.token!)).toEqual([skippedReminder]);
     await owner.query(`UPDATE ${table("workspace_memberships")} SET status='active',left_at=NULL WHERE tenant_id=$1 AND user_id=$2`, [one.workspace, user.id]);
     await owner.query(`UPDATE ${table("users")} SET status='suspended' WHERE id=$1`, [user.id]);
-    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    expect(await reminderOf(claimed!.id, claimed!.token!)).toEqual([skippedReminder]);
     await owner.query(`UPDATE ${table("users")} SET status='active' WHERE id=$1`, [user.id]);
     await owner.query(`UPDATE ${table("workspaces")} SET archived_at=now(),version=version+1 WHERE id=$1`, [one.workspace]);
-    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    expect(await reminderOf(claimed!.id, claimed!.token!)).toEqual([skippedReminder]);
     await owner.query(`UPDATE ${table("workspaces")} SET archived_at=NULL,version=version+1 WHERE id=$1`, [one.workspace]);
-    // A settled row sends nothing more; unknown ids and a digest row are skipped too.
+    // A settled row sends nothing more (its token is gone); unknown ids and a digest row are skipped too.
     expect(await settle(claimed!.id, (await ledger([user], "due_reminders"))[0].lock_token, "sent")).toBe(true);
-    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
-    expect(await reminderOf(randomUUID())).toEqual([skippedReminder]);
+    expect(await reminderOf(claimed!.id, claimed!.token!)).toEqual([skippedReminder]);
+    expect(await reminderOf(randomUUID(), randomUUID())).toEqual([skippedReminder]);
     const digestUser = await account("Reread Digest");
     await addMember(one.workspace, digestUser, "member");
     const [digest] = await claimFor("weekly_digest", "2026-11-02T08:00:00Z", [digestUser], false);
-    expect(await reminderOf(digest!.id)).toEqual([skippedReminder]);
-    expect((await digestOf(claimed!.id)).map((row) => row.status)).toEqual(["skipped"]);
+    expect(await reminderOf(digest!.id, digest!.token!)).toEqual([skippedReminder]);
+    expect((await digestOf(claimed!.id, claimed!.token!)).map((row) => row.status)).toEqual(["skipped"]);
   });
 
   it("caps the reminder list at 20 rows and reports the full count", async () => {
@@ -5054,7 +5118,7 @@ describe("Scheduled emails", () => {
     await addMember(workspace, user, "member");
     for (let index = 0; index < 23; index++) await task(boss, project, user, index % 2 === 0 ? "2026-11-03" : "2026-11-02", `Cap ${index}`);
     const [claimed] = await claimFor("due_reminders", "2026-11-03T08:00:00Z", [user], false);
-    const rows = await reminderOf(claimed!.id);
+    const rows = await reminderOf(claimed!.id, claimed!.token!);
     expect(rows).toHaveLength(20);
     expect(new Set(rows.map((row) => row.total))).toEqual(new Set([23]));
     // Due date first, then the issue number within the project: the 11 early ones, then the first 9 of the 12 later ones.
@@ -5096,9 +5160,9 @@ describe("Scheduled emails", () => {
 
   it("builds the digest content", async () => {
     const boss = await account("Content Boss"), reader = await account("Content Reader", `reader-${randomUUID()}@example.com`);
-    const ada = await account("Ada Member"), ben = await account("Ben Member");
+    const ada = await account("Ada Member"), ben = await account("Ben Member"), cy = await account("Cy Gone");
     const scrum = await scrumProject(boss), workspace = scrum.workspace;
-    for (const person of [reader, ada, ben]) await addMember(workspace, person, "member");
+    for (const person of [reader, ada, ben, cy]) await addMember(workspace, person, "member");
     const waterfall = await waterfallProject(boss, workspace), kanban = await kanbanProject(boss, workspace);
     const archived = await kanbanProject(boss, workspace);
     // Scrum scores the active sprint only; the issue outside the sprint is ignored.
@@ -5128,6 +5192,8 @@ describe("Scheduled emails", () => {
     await issueHistory(fx, [{ at: "2026-11-02T00:00:00Z", after: done(ben) }]);
     await issueHistory(fx, [{ at: "2026-10-28T10:00:00Z", after: { category: "done", assignee: ben.id, archived: true } }]);
     await issueHistory(fx, [{ at: "2026-10-28T11:00:00Z", after: done(null) }]);
+    await issueHistory(fx, [{ at: "2026-10-29T11:00:00Z", after: done(cy) }]);
+    await leave(workspace, cy);
 
     // Open work across the workspace: 12 overdue (cap 10), at-risk from the Monday through three days on.
     for (let index = 0; index < 12; index++) await task(boss, kanban.project, ada, shiftDay("2026-10-20", index), `Late ${index}`);
@@ -5137,7 +5203,7 @@ describe("Scheduled emails", () => {
     await finishIssue(boss, kanban.project, await task(boss, kanban.project, null, "2026-11-03", "Finished risk"));
 
     const [claimed] = await claimFor("weekly_digest", "2026-11-02T08:00:00Z", [reader], false);
-    const rows = await digestOf(claimed!.id);
+    const rows = await digestOf(claimed!.id, claimed!.token!);
     expect(new Set(rows.map((row) => `${row.status}|${row.email}|${row.recipient_name}|${row.workspace_name}|${row.workspace_slug}`)))
       .toEqual(new Set([`pending|${reader.email.toLowerCase()}|Content Reader|Acme|${await slugOf(workspace)}`]));
     const projects = Object.fromEntries(rows.filter((row) => row.section === "project").map((row) => [row.project_key, row]));
@@ -5146,7 +5212,7 @@ describe("Scheduled emails", () => {
     expect(projects[scrum.key]).toMatchObject({ project_name: "Rocket", methodology: "scrum", extra: { done: 1, total: 2, unit: "count", windowStart: "2026-11-02", windowEnd: "2026-11-15", activeSprintName: "Launch" } });
     expect(projects[waterfall.key]).toMatchObject({ methodology: "waterfall", extra: { done: 2, total: 10, unit: "points", windowStart: "2026-11-02", windowEnd: "2026-12-11", activeSprintName: null } });
     expect(projects[kanban.key]!.extra).toMatchObject({ unit: "count", windowStart: null, windowEnd: null, activeSprintName: null });
-    // Members: the seven days before the Monday, by the snapshot's assignee; a re-completion counts again, archived and unassigned do not.
+    // Members: the seven days before the Monday, by the snapshot's assignee; a re-completion counts again; archived, unassigned and departed members do not.
     expect(rows.filter((row) => row.section === "member").map((row) => [row.label, row.value])).toEqual([["Ada Member", 4], ["Ben Member", 1]]);
     const overdue = rows.filter((row) => row.section === "overdue");
     expect(overdue.map((row) => row.label)).toEqual(Array.from({ length: 10 }, (_, index) => `${kanban.key}-${index + 2} Late ${index}`));
@@ -5156,16 +5222,16 @@ describe("Scheduled emails", () => {
     expect(atRisk.map((row) => [row.label.replace(/^\S+ /, ""), row.extra])).toEqual([["Today", { due: "2026-11-02", total: 2 }], ["Third day", { due: "2026-11-05", total: 2 }]]);
     // Preference off, no project left, or no membership: a single skipped row.
     expect(await setPreferences(reader.token, true, true, false, "UTC")).toBe("ok");
-    expect(await digestOf(claimed!.id)).toEqual([expect.objectContaining({ status: "skipped", email: null, workspace_name: null, section: null, extra: null })]);
+    expect(await digestOf(claimed!.id, claimed!.token!)).toEqual([expect.objectContaining({ status: "skipped", email: null, workspace_name: null, section: null, extra: null })]);
     expect(await setPreferences(reader.token, true, true, true, "UTC")).toBe("ok");
-    expect((await digestOf(claimed!.id)).length).toBeGreaterThan(1);
+    expect((await digestOf(claimed!.id, claimed!.token!)).length).toBeGreaterThan(1);
     await owner.query("SET ROLE spark_owner");
     await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE tenant_id=$1`, [workspace]);
-    expect((await digestOf(claimed!.id)).map((row) => row.status)).toEqual(["skipped"]);
+    expect((await digestOf(claimed!.id, claimed!.token!)).map((row) => row.status)).toEqual(["skipped"]);
     await owner.query(`UPDATE ${table("projects")} SET archived_at=NULL WHERE tenant_id=$1 AND id<>$2`, [workspace, archived.project]);
-    expect((await digestOf(claimed!.id)).length).toBeGreaterThan(1);
+    expect((await digestOf(claimed!.id, claimed!.token!)).length).toBeGreaterThan(1);
     await leave(workspace, reader);
-    expect((await digestOf(claimed!.id)).map((row) => row.status)).toEqual(["skipped"]);
+    expect((await digestOf(claimed!.id, claimed!.token!)).map((row) => row.status)).toEqual(["skipped"]);
   });
 
   it("keeps the ledger closed and the functions granted to the worker only", async () => {
@@ -5181,9 +5247,10 @@ describe("Scheduled emails", () => {
       expect({ name: row.proname, definer: row.prosecdef, config: row.proconfig, worker: row.worker, runtime: row.runtime, auth: row.auth, public: row.public })
         .toEqual({ name: row.proname, definer: true, config: ['search_path=""'], worker: true, runtime: false, auth: false, public: false });
     }
-    // The shared open-task query is an internal helper: nobody but the owner can call it.
-    const helper = (await owner.query(grants, [namespace, ["scheduled_open_tasks"]])).rows[0];
-    expect(helper).toMatchObject({ proconfig: ['search_path=""'], worker: false, runtime: false, auth: false, public: false });
+    // The shared open-task query and the instant-taking claim are internal: nobody but the owner can call them.
+    const internal = (await owner.query(grants, [namespace, ["scheduled_emails_claim_at", "scheduled_open_tasks"]])).rows;
+    expect(internal.map((row) => row.proname)).toEqual(["scheduled_emails_claim_at", "scheduled_open_tasks"]);
+    for (const row of internal) expect(row).toMatchObject({ proconfig: ['search_path=""'], worker: false, runtime: false, auth: false, public: false });
     // The table: forced row security, owner-only policy, no runtime or worker grants.
     const security = (await owner.query("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = $1::regclass", [table("scheduled_emails")])).rows[0];
     expect(security).toEqual({ relrowsecurity: true, relforcerowsecurity: true });
@@ -5194,7 +5261,7 @@ describe("Scheduled emails", () => {
       }
     }
     await expect(workerRuntime.query(`SELECT * FROM ${table("scheduled_emails")}`)).rejects.toMatchObject({ code: "42501" });
-    await expect(runtime.query(`SELECT * FROM ${fn("worker_due_reminder_email")}($1)`, [randomUUID()])).rejects.toMatchObject({ code: "42501" });
+    await expect(runtime.query(`SELECT * FROM ${fn("worker_due_reminder_email")}($1,$2)`, [randomUUID(), randomUUID()])).rejects.toMatchObject({ code: "42501" });
 
     // Shape rules: a reminder has no workspace, a digest needs one, one row per user, job, workspace and period.
     const boss = await account("Shape Boss"), { workspace } = await kanbanProject(boss);
@@ -5203,6 +5270,7 @@ describe("Scheduled emails", () => {
     await reject(insert("due_reminders", workspace), [], "23514");
     await reject(insert("weekly_digest", null), [], "23514");
     await reject(insert("other", null), [], "23514");
+    await reject(`${insert("due_reminders", null)}`.replace("status)", "status,last_error_code)").replace("'pending')", "'pending','weird')"), [], "23514");
     await reject(insert("due_reminders", null, "2026-11-03", "queued"), [], "23514");
     await rollback(async () => {
       await owner.query(insert("due_reminders", null));
