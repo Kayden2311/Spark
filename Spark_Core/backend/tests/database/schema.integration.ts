@@ -484,9 +484,9 @@ afterAll(async () => {
 });
 
 describe("Local PostgreSQL schema", () => {
-  it("migrates 65 tables with FORCE RLS and a non-login owner", async () => {
+  it("migrates 66 tables with FORCE RLS and a non-login owner", async () => {
     const result = await owner.query("SELECT count(*)::integer AS count,bool_and(c.relrowsecurity AND c.relforcerowsecurity AND pg_get_userbyid(c.relowner)='spark_owner') AS secured FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relkind='r'", [namespace]);
-    expect(result.rows[0]).toEqual({ count:65, secured:true });
+    expect(result.rows[0]).toEqual({ count:66, secured:true });
     const roles = await owner.query("SELECT rolname,rolsuper,rolbypassrls,rolcanlogin FROM pg_roles WHERE rolname IN ('spark_owner','spark_app') ORDER BY rolname");
     expect(roles.rows).toEqual([{rolname:"spark_app",rolsuper:false,rolbypassrls:false,rolcanlogin:true},{rolname:"spark_owner",rolsuper:false,rolbypassrls:false,rolcanlogin:false}]);
   });
@@ -498,7 +498,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(29);
+    expect(result.rows[0].count).toBe(30);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -1800,6 +1800,8 @@ describe("Local PostgreSQL schema", () => {
       WHERE n.nspname=$1 AND has_function_privilege('spark_worker',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     const expected = ["worker_claim_outbox", "worker_complete_outbox", "worker_fail_outbox", "worker_invitation_email", "worker_issue_invitation_token",
       "worker_record_email_delivery", "worker_task_assigned_email"];
+    expected.push("worker_claim_scheduled_emails", "worker_due_reminder_email", "worker_settle_scheduled_email", "worker_weekly_digest_email");
+    expected.sort();
     expect(workerFunctions.rows.map((row) => row.proname)).toEqual(expected);
     for (const role of ["spark_app", "spark_auth"]) {
       const reachable = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
@@ -4764,5 +4766,452 @@ describe("Notification inbox", () => {
         expect((await owner.query("SELECT has_table_privilege('spark_app',$1,$2) AS allowed", [`"${namespace}"."${name}"`, privilege])).rows[0].allowed).toBe(false);
       }
     }
+  });
+});
+
+// ---------- Scheduled reminder and digest ledger (0029) ----------
+type Claimed = { id: string; user_id: string; tenant_id: string | null; period: string };
+const claimSql = `SELECT id,user_id,tenant_id,period::text AS period FROM ${fn("worker_claim_scheduled_emails")}($1,$2,$3,$4,$5)`;
+const settleSql = `SELECT ${fn("worker_settle_scheduled_email")}($1,$2,$3,$4,$5) AS settled`;
+const settle = async (id: string, token: string | null, status: string, code: string | null = null, retryAt: string | null = null) =>
+  (await workerRuntime.query(settleSql, [id, token, status, code, retryAt])).rows[0].settled as boolean;
+// Claims every due row of the job at `now` (leases of 60 s) and returns the ones that belong to `who`. By default the
+// returned rows are settled as sent, so a later claim at another instant starts from a clean ledger.
+async function claimFor(job: string, now: string, who: Account[], settled = true) {
+  const mine = new Set(who.map((person) => person.id)), found: Claimed[] = [], token = randomUUID();
+  for (let round = 0; round < 40; round++) {
+    const rows = (await workerRuntime.query(claimSql, [job, now, token, 50, 60])).rows as Claimed[];
+    found.push(...rows.filter((row) => mine.has(row.user_id)));
+    if (rows.length < 50) break;
+  }
+  if (settled) for (const row of found) expect(await settle(row.id, token, "sent")).toBe(true);
+  return found.sort((a, b) => (a.user_id + (a.tenant_id ?? "")).localeCompare(b.user_id + (b.tenant_id ?? "")));
+}
+const idsOf = (rows: Claimed[]) => rows.map((row) => row.user_id).sort();
+async function ledger(who: Account[], job: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id,user_id,tenant_id,period::text AS period,status,attempts,locked_until,lock_token,last_error_code,sent_at
+    FROM ${table("scheduled_emails")} WHERE user_id = ANY($1) AND job=$2 ORDER BY period,user_id,tenant_id`, [who.map((person) => person.id), job])).rows;
+}
+async function setZone(who: Account, zone: string) {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`UPDATE ${table("users")} SET timezone=$2 WHERE id=$1`, [who.id, zone]);
+}
+const task = async (who: Account, project: string, assignee: Account | null, due: string | null, title = "Task") =>
+  (await createIssue(who, project, { title, assignee: assignee?.id ?? null, due })).issue_id!;
+const reminderCall = `SELECT status,email,recipient_name,total,task_workspace,task_workspace_slug,task_key,task_title,task_due::text AS task_due,task_overdue FROM ${fn("worker_due_reminder_email")}($1)`;
+const digestCall = `SELECT status,email,recipient_name,workspace_name,workspace_slug,section,project_key,project_name,methodology,label,value::float8 AS value,extra FROM ${fn("worker_weekly_digest_email")}($1)`;
+const reminderOf = async (id: string) => (await workerRuntime.query(reminderCall, [id])).rows;
+const digestOf = async (id: string) => (await workerRuntime.query(digestCall, [id])).rows;
+const finishIssue = async (who: Account, project: string, issue: string, version = 1) =>
+  expect(await updateIssue(who, issue, version, { statusId: await statusNamed(project, "Done") })).toMatchObject({ outcome: "ok" });
+const leave = async (workspace: string, who: Account) => {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`UPDATE ${table("workspace_memberships")} SET status='left',left_at=now() WHERE tenant_id=$1 AND user_id=$2`, [workspace, who.id]);
+};
+const skippedReminder = { status: "skipped", email: null, recipient_name: null, total: null, task_workspace: null, task_workspace_slug: null, task_key: null, task_title: null, task_due: null, task_overdue: null };
+
+describe("Scheduled emails", () => {
+  it("enumerates due reminders in each user's local morning", async () => {
+    const boss = await account("Sched Boss"), { workspace, project } = await kanbanProject(boss);
+    const names = ["vn", "la", "utc", "late", "far", "done", "archived", "left", "off", "none"] as const;
+    const p = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await account(`Sched ${name}`)]))) as Record<(typeof names)[number], Account>;
+    for (const person of Object.values(p)) await addMember(workspace, person, "member");
+    await setZone(p.vn, "Asia/Ho_Chi_Minh"); await setZone(p.la, "America/Los_Angeles");
+    for (const name of ["vn", "la", "utc"] as const) await task(boss, project, p[name], "2026-11-04");
+    await task(boss, project, p.late, "2026-10-01");
+    await task(boss, project, p.far, "2026-11-05");
+    await finishIssue(boss, project, await task(boss, project, p.done, "2026-11-03"));
+    expect(await updateIssue(boss, await task(boss, project, p.archived, "2026-11-03"), 1, { archived: true })).toMatchObject({ outcome: "ok" });
+    await task(boss, project, p.left, "2026-11-03");
+    await leave(workspace, p.left);
+    await task(boss, project, p.off, "2026-11-03");
+    expect(await setPreferences(p.off.token, true, false, true, "UTC")).toBe("ok");
+    await task(boss, project, null, "2026-11-03");
+    const everyone = Object.values(p);
+
+    // 07:59 local in Ho Chi Minh, 07:59 in UTC and the Los Angeles day before: nobody is due yet.
+    expect(await claimFor("due_reminders", "2026-11-03T00:59:00Z", everyone)).toEqual([]);
+    expect(idsOf(await claimFor("due_reminders", "2026-11-03T01:00:00Z", everyone))).toEqual([p.vn.id]);
+    expect(await claimFor("due_reminders", "2026-11-03T07:59:00Z", everyone)).toEqual([]);
+    const morning = await claimFor("due_reminders", "2026-11-03T08:00:00Z", everyone);
+    expect(idsOf(morning)).toEqual([p.utc.id, p.late.id].sort());
+    expect(morning.every((row) => row.tenant_id === null && row.period === "2026-11-03")).toBe(true);
+    expect(await claimFor("due_reminders", "2026-11-03T15:59:00Z", everyone)).toEqual([]);
+    expect(idsOf(await claimFor("due_reminders", "2026-11-03T16:00:00Z", everyone))).toEqual([p.la.id]);
+    // A second run (and a late one the same day) never repeats a user's row.
+    expect(await claimFor("due_reminders", "2026-11-03T16:00:00Z", everyone)).toEqual([]);
+    expect(await claimFor("due_reminders", "2026-11-03T23:00:00Z", everyone)).toEqual([]);
+    const rows = await ledger(everyone, "due_reminders");
+    expect(rows.map((row) => [row.user_id, row.period, row.status]).sort()).toEqual(
+      [p.vn, p.la, p.utc, p.late].map((person) => [person.id, "2026-11-03", "sent"]).sort());
+    // These jobs only email: nothing is written to the inbox.
+    expect(await countRows(`${table("notifications")} WHERE recipient_user_id = ANY($1) AND kind <> 'issue_assigned'`, [everyone.map((person) => person.id)])).toBe(0);
+    // The next local morning in Ho Chi Minh is a new period.
+    expect(idsOf(await claimFor("due_reminders", "2026-11-04T01:00:00Z", everyone))).toEqual([p.vn.id]);
+    expect(await ledger([p.vn], "due_reminders")).toHaveLength(2);
+  });
+
+  it("catches up later the same local day and never sends for a past day", async () => {
+    const boss = await account("Catch Boss"), { workspace, project } = await kanbanProject(boss);
+    const user = await account("Catch User");
+    await addMember(workspace, user, "member");
+    await task(boss, project, user, "2026-11-03");
+    // The first run of the day happens at 20:00 UTC.
+    const [late] = await claimFor("due_reminders", "2026-11-03T20:00:00Z", [user], false);
+    expect(late).toMatchObject({ user_id: user.id, period: "2026-11-03" });
+    // Unsettled, the lease runs out and the next local day arrives: the old period is suppressed, not sent.
+    expect(await claimFor("due_reminders", "2026-11-04T07:00:00Z", [user])).toEqual([]);
+    expect((await ledger([user], "due_reminders")).map((row) => [row.period, row.status, row.last_error_code])).toEqual([["2026-11-03", "suppressed", "expired"]]);
+    expect(idsOf(await claimFor("due_reminders", "2026-11-04T08:00:00Z", [user]))).toEqual([user.id]);
+    expect((await ledger([user], "due_reminders")).map((row) => [row.period, row.status])).toEqual([["2026-11-03", "suppressed"], ["2026-11-04", "sent"]]);
+  });
+
+  it("enumerates the weekly digest on local Monday only", async () => {
+    const boss = await account("Digest Boss");
+    const one = await kanbanProject(boss), two = await kanbanProject(boss);
+    const empty = (await createWorkspace(boss, "Empty")).workspace_id!;
+    const archivedWorkspace = await kanbanProject(boss);
+    const names = ["utc", "vn", "off", "left", "outsider"] as const;
+    const p = Object.fromEntries(await Promise.all(names.map(async (name) => [name, await account(`Digest ${name}`)]))) as Record<(typeof names)[number], Account>;
+    for (const person of [p.utc, p.vn, p.off, p.left]) for (const space of [one.workspace, two.workspace, empty, archivedWorkspace.workspace]) await addMember(space, person, "member");
+    await setZone(p.vn, "Asia/Ho_Chi_Minh");
+    expect(await setPreferences(p.off.token, true, true, false, "UTC")).toBe("ok");
+    await leave(one.workspace, p.left);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("workspaces")} SET archived_at=now(),version=version+1 WHERE id=$1`, [archivedWorkspace.workspace]);
+    const everyone = Object.values(p);
+
+    // Sunday 23:00 UTC is Monday 06:00 in Ho Chi Minh: not yet. Monday 01:00 UTC is 08:00 there.
+    expect(await claimFor("weekly_digest", "2026-11-01T23:00:00Z", everyone)).toEqual([]);
+    const vn = await claimFor("weekly_digest", "2026-11-02T01:00:00Z", everyone);
+    expect(vn.map((row) => [row.user_id, row.tenant_id, row.period]).sort()).toEqual(
+      [one.workspace, two.workspace].map((space) => [p.vn.id, space, "2026-11-02"]).sort());
+    expect(await claimFor("weekly_digest", "2026-11-02T07:59:00Z", everyone)).toEqual([]);
+    const monday = await claimFor("weekly_digest", "2026-11-02T08:00:00Z", everyone);
+    expect(monday.map((row) => [row.user_id, row.tenant_id]).sort()).toEqual(
+      [[p.utc.id, one.workspace], [p.utc.id, two.workspace], [p.left.id, two.workspace]].sort());
+    // Later the same day and the next day: no repeat, and Tuesday is not a digest day.
+    expect(await claimFor("weekly_digest", "2026-11-02T20:00:00Z", everyone)).toEqual([]);
+    expect(await claimFor("weekly_digest", "2026-11-03T08:00:00Z", everyone)).toEqual([]);
+    expect(await ledger(everyone, "weekly_digest")).toHaveLength(5);
+    expect(await countRows(`${table("scheduled_emails")} WHERE tenant_id = ANY($1)`, [[empty, archivedWorkspace.workspace]])).toBe(0);
+    // The next Monday is a new period.
+    expect((await claimFor("weekly_digest", "2026-11-09T08:00:00Z", [p.utc])).map((row) => row.period)).toEqual(["2026-11-09", "2026-11-09"]);
+  });
+
+  it("lets only one enumerator hold the job lock", async () => {
+    const boss = await account("Lock Boss"), { workspace, project } = await kanbanProject(boss);
+    const a = await account("Lock A"), b = await account("Lock B");
+    for (const person of [a, b]) { await addMember(workspace, person, "member"); await task(boss, project, person, "2026-11-03"); }
+    const first = await workerRuntime.connect(), second = await workerRuntime.connect();
+    try {
+      await first.query("BEGIN");
+      const held = (await first.query(claimSql, ["due_reminders", "2026-11-03T08:00:00Z", randomUUID(), 50, 60])).rows as Claimed[];
+      expect(held.map((row) => row.user_id)).toEqual(expect.arrayContaining([a.id, b.id]));
+      // While the first transaction holds the lock, the other enumerator gets nothing, whatever is pending.
+      expect((await second.query(claimSql, ["due_reminders", "2026-11-03T08:00:00Z", randomUUID(), 50, 60])).rows).toEqual([]);
+      await first.query("COMMIT");
+      // Released with the transaction; the committed leases keep the rows away from the second worker.
+      const after = (await second.query(claimSql, ["due_reminders", "2026-11-03T08:00:10Z", randomUUID(), 50, 60])).rows as Claimed[];
+      expect(after.filter((row) => [a.id, b.id].includes(row.user_id))).toEqual([]);
+    } finally { first.release(); second.release(); }
+    expect(await ledger([a, b], "due_reminders")).toHaveLength(2);
+  });
+
+  it("claims a lease and settles", async () => {
+    const boss = await account("Lease Boss"), { workspace, project } = await kanbanProject(boss);
+    const user = await account("Lease User");
+    await addMember(workspace, user, "member");
+    await task(boss, project, user, "2026-11-03");
+    const at = (seconds: number) => new Date(Date.parse("2026-11-03T08:00:00Z") + seconds * 1000).toISOString();
+    const claim = async (seconds: number, token: string, lease = 30) =>
+      ((await workerRuntime.query(claimSql, ["due_reminders", at(seconds), token, 50, lease])).rows as Claimed[]).filter((row) => row.user_id === user.id);
+    const t1 = randomUUID(), t2 = randomUUID(), t3 = randomUUID();
+    const [row] = await claim(0, t1);
+    expect(row).toBeDefined();
+    let state = (await ledger([user], "due_reminders"))[0];
+    expect(state).toMatchObject({ status: "pending", attempts: 1, lock_token: t1, sent_at: null });
+    expect(new Date(state.locked_until).toISOString()).toBe(at(30));
+    expect(await claim(10, t2)).toEqual([]);
+    // Lease expired: the row is claimed again, the first holder lost it.
+    expect((await claim(31, t2)).map((claimed) => claimed.id)).toEqual([row!.id]);
+    expect((await ledger([user], "due_reminders"))[0]).toMatchObject({ attempts: 2, lock_token: t2 });
+    expect(await settle(row!.id, t1, "sent")).toBe(false);
+    expect(await settle(row!.id, null, "sent")).toBe(false);
+    expect(await settle(randomUUID(), t2, "sent")).toBe(false);
+    // A retry keeps the row pending, clears the token and holds it back until the retry time.
+    expect(await settle(row!.id, t2, "retry", "smtp_unavailable", at(120))).toBe(true);
+    state = (await ledger([user], "due_reminders"))[0];
+    expect(state).toMatchObject({ status: "pending", lock_token: null, last_error_code: "smtp_unavailable", attempts: 2 });
+    expect(await claim(100, t3)).toEqual([]);
+    expect((await claim(120, t3)).map((claimed) => claimed.id)).toEqual([row!.id]);
+    expect(await settle(row!.id, t3, "sent")).toBe(true);
+    state = (await ledger([user], "due_reminders"))[0];
+    expect(state).toMatchObject({ status: "sent", attempts: 3, lock_token: null });
+    expect(state.sent_at).toBeInstanceOf(Date);
+    expect(await settle(row!.id, t3, "sent")).toBe(false);
+    expect(await claim(1000, randomUUID())).toEqual([]);
+    // Suppressed with a reason closes a claimed row too.
+    const other = await account("Lease Other");
+    await addMember(workspace, other, "member");
+    await task(boss, project, other, "2026-11-03");
+    const [second] = await claimFor("due_reminders", "2026-11-03T09:00:00Z", [other], false);
+    const token = (await ledger([other], "due_reminders"))[0].lock_token as string;
+    expect(await settle(second!.id, token, "suppressed", "nothing_due")).toBe(true);
+    expect((await ledger([other], "due_reminders"))[0]).toMatchObject({ status: "suppressed", last_error_code: "nothing_due", sent_at: null });
+  });
+
+  it("gives up after five attempts and bounds crashed claims", async () => {
+    const boss = await account("Give Boss"), { workspace, project } = await kanbanProject(boss);
+    const user = await account("Give User"), crashed = await account("Give Crash");
+    for (const person of [user, crashed]) { await addMember(workspace, person, "member"); await task(boss, project, person, "2026-11-03"); }
+    const at = (minutes: number) => new Date(Date.parse("2026-11-03T08:00:00Z") + minutes * 60_000).toISOString();
+    let id = "";
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const token = randomUUID();
+      const rows = ((await workerRuntime.query(claimSql, ["due_reminders", at(attempt * 10), token, 50, 30])).rows as Claimed[]).filter((row) => row.user_id === user.id);
+      expect(rows).toHaveLength(1);
+      id = rows[0]!.id;
+      expect(await settle(id, token, "retry", "smtp_unavailable", at(attempt * 10 + 5))).toBe(true);
+      expect((await ledger([user], "due_reminders"))[0]).toMatchObject({ status: attempt < 5 ? "pending" : "failed", attempts: attempt, last_error_code: "smtp_unavailable" });
+    }
+    // The same five claims reached the other user's row without ever settling it (a worker that keeps dying mid-send):
+    // the next claim marks it failed instead of leasing it again.
+    expect((await ledger([crashed], "due_reminders"))[0]).toMatchObject({ status: "pending", attempts: 5 });
+    expect(await claimFor("due_reminders", at(200), [user])).toEqual([]);
+    expect(await claimFor("due_reminders", at(100), [crashed], false)).toEqual([]);
+    expect((await ledger([crashed], "due_reminders"))[0]).toMatchObject({ status: "failed", attempts: 5, last_error_code: "lease_expired" });
+    // Input checks.
+    await expect(settle(id, randomUUID(), "bogus")).rejects.toMatchObject({ code: "22023" });
+    await expect(settle(id, randomUUID(), "retry", "Bad Code!", at(1))).rejects.toMatchObject({ code: "22023" });
+    await expect(settle(id, randomUUID(), "retry", "ok_code", null)).rejects.toMatchObject({ code: "22023" });
+    const now = "2026-11-03T08:00:00Z";
+    for (const args of [["nope", now, randomUUID(), 5, 60], ["due_reminders", now, randomUUID(), 0, 60], ["due_reminders", now, randomUUID(), 51, 60],
+      ["due_reminders", now, randomUUID(), 5, 9], ["due_reminders", now, null, 5, 60], ["due_reminders", null, randomUUID(), 5, 60]]) {
+      await expect(workerRuntime.query(claimSql, args)).rejects.toMatchObject({ code: "22023" });
+    }
+  });
+
+  it("re-reads the work at send time", async () => {
+    const boss = await account("Reread Boss");
+    const one = await kanbanProject(boss), two = await kanbanProject(boss);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("workspaces")} SET name='Beta',version=version+1 WHERE id=$1`, [two.workspace]);
+    const user = await account("Reread User", `reread-${randomUUID()}@example.com`);
+    await addMember(one.workspace, user, "member"); await addMember(two.workspace, user, "member");
+    const first = await task(boss, one.project, user, "2026-11-02", "Overdue one");
+    const second = await task(boss, two.project, user, "2026-11-04", "Tomorrow two");
+    await task(boss, one.project, user, "2026-11-03", "Today one");
+    await task(boss, one.project, user, "2026-11-05", "Too far");
+    const [claimed] = await claimFor("due_reminders", "2026-11-03T08:00:00Z", [user], false);
+    const common = { status: "pending", email: user.email.toLowerCase(), recipient_name: "Reread User", total: 3 };
+    expect(await reminderOf(claimed!.id)).toEqual([
+      { ...common, task_workspace: "Acme", task_workspace_slug: await slugOf(one.workspace), task_key: `${one.key}-1`, task_title: "Overdue one", task_due: "2026-11-02", task_overdue: true },
+      { ...common, task_workspace: "Acme", task_workspace_slug: await slugOf(one.workspace), task_key: `${one.key}-2`, task_title: "Today one", task_due: "2026-11-03", task_overdue: false },
+      { ...common, task_workspace: "Beta", task_workspace_slug: await slugOf(two.workspace), task_key: `${two.key}-1`, task_title: "Tomorrow two", task_due: "2026-11-04", task_overdue: false },
+    ]);
+    // A task finished after the claim drops out; the total follows.
+    await finishIssue(boss, one.project, first);
+    expect((await reminderOf(claimed!.id)).map((row) => [row.task_title, row.total])).toEqual([["Today one", 2], ["Tomorrow two", 2]]);
+    // Reassigned, project archived: each removes the task; nothing left means a skipped row with no details.
+    expect(await updateIssue(boss, second, 1, { assigneeUserId: boss.id })).toMatchObject({ outcome: "ok" });
+    expect((await reminderOf(claimed!.id)).map((row) => row.task_title)).toEqual(["Today one"]);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [one.project]);
+    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=NULL WHERE id=$1`, [one.project]);
+    expect((await reminderOf(claimed!.id)).map((row) => row.status)).toEqual(["pending"]);
+    // Preference off, then on again.
+    expect(await setPreferences(user.token, true, false, true, "UTC")).toBe("ok");
+    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    expect(await setPreferences(user.token, true, true, true, "UTC")).toBe("ok");
+    expect((await reminderOf(claimed!.id)).map((row) => row.status)).toEqual(["pending"]);
+    // A user who left the workspace, a suspended user, an archived workspace.
+    await leave(one.workspace, user);
+    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    await owner.query(`UPDATE ${table("workspace_memberships")} SET status='active',left_at=NULL WHERE tenant_id=$1 AND user_id=$2`, [one.workspace, user.id]);
+    await owner.query(`UPDATE ${table("users")} SET status='suspended' WHERE id=$1`, [user.id]);
+    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    await owner.query(`UPDATE ${table("users")} SET status='active' WHERE id=$1`, [user.id]);
+    await owner.query(`UPDATE ${table("workspaces")} SET archived_at=now(),version=version+1 WHERE id=$1`, [one.workspace]);
+    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    await owner.query(`UPDATE ${table("workspaces")} SET archived_at=NULL,version=version+1 WHERE id=$1`, [one.workspace]);
+    // A settled row sends nothing more; unknown ids and a digest row are skipped too.
+    expect(await settle(claimed!.id, (await ledger([user], "due_reminders"))[0].lock_token, "sent")).toBe(true);
+    expect(await reminderOf(claimed!.id)).toEqual([skippedReminder]);
+    expect(await reminderOf(randomUUID())).toEqual([skippedReminder]);
+    const digestUser = await account("Reread Digest");
+    await addMember(one.workspace, digestUser, "member");
+    const [digest] = await claimFor("weekly_digest", "2026-11-02T08:00:00Z", [digestUser], false);
+    expect(await reminderOf(digest!.id)).toEqual([skippedReminder]);
+    expect((await digestOf(claimed!.id)).map((row) => row.status)).toEqual(["skipped"]);
+  });
+
+  it("caps the reminder list at 20 rows and reports the full count", async () => {
+    const boss = await account("Cap Boss"), { workspace, project } = await kanbanProject(boss);
+    const user = await account("Cap User");
+    await addMember(workspace, user, "member");
+    for (let index = 0; index < 23; index++) await task(boss, project, user, index % 2 === 0 ? "2026-11-03" : "2026-11-02", `Cap ${index}`);
+    const [claimed] = await claimFor("due_reminders", "2026-11-03T08:00:00Z", [user], false);
+    const rows = await reminderOf(claimed!.id);
+    expect(rows).toHaveLength(20);
+    expect(new Set(rows.map((row) => row.total))).toEqual(new Set([23]));
+    // Due date first, then the issue number within the project: the 11 early ones, then the first 9 of the 12 later ones.
+    const number = (row: { task_key: string }) => Number(row.task_key.split("-")[1]);
+    expect(rows.slice(0, 11).every((row) => row.task_due === "2026-11-02")).toBe(true);
+    expect(rows.slice(11).every((row) => row.task_due === "2026-11-03")).toBe(true);
+    expect(rows.slice(0, 11).map(number)).toEqual(rows.slice(0, 11).map(number).sort((x, y) => x - y));
+    expect(rows.slice(11).map(number)).toEqual(rows.slice(11).map(number).sort((x, y) => x - y));
+  });
+
+  it("does not repeat a period when the time zone changes", async () => {
+    const boss = await account("Zone Boss"), { workspace, project } = await kanbanProject(boss);
+    const user = await account("Zone User");
+    await addMember(workspace, user, "member");
+    await task(boss, project, user, "2026-11-03");
+    await setZone(user, "Asia/Ho_Chi_Minh");
+    // 16:30 UTC is 23:30 on 3 November in Ho Chi Minh (a catch-up run), and 08:30 on 3 November in Los Angeles.
+    expect((await claimFor("due_reminders", "2026-11-03T16:30:00Z", [user])).map((row) => row.period)).toEqual(["2026-11-03"]);
+    await setZone(user, "America/Los_Angeles");
+    expect(await claimFor("due_reminders", "2026-11-03T16:30:00Z", [user])).toEqual([]);
+    expect(await claimFor("due_reminders", "2026-11-03T20:00:00Z", [user])).toEqual([]);
+    expect((await ledger([user], "due_reminders")).map((row) => [row.period, row.status])).toEqual([["2026-11-03", "sent"]]);
+    // A zone where the same instant is already the next date is a different local day and gets its own row, once.
+    await setZone(user, "Pacific/Kiritimati");
+    expect(await claimFor("due_reminders", "2026-11-03T17:59:00Z", [user])).toEqual([]);
+    expect((await claimFor("due_reminders", "2026-11-03T18:00:00Z", [user])).map((row) => row.period)).toEqual(["2026-11-04"]);
+    // Back in Los Angeles at 07:00 on 4 November: 3 November is over and 4 November has not started there.
+    await setZone(user, "America/Los_Angeles");
+    expect(await claimFor("due_reminders", "2026-11-04T15:00:00Z", [user])).toEqual([]);
+    expect(await ledger([user], "due_reminders")).toHaveLength(2);
+
+    // The digest has the same guard: sent on Monday in Ho Chi Minh, the user moves to Los Angeles where it is still Monday.
+    await setZone(user, "Asia/Ho_Chi_Minh");
+    expect(await claimFor("weekly_digest", "2026-11-02T16:30:00Z", [user])).toHaveLength(1);
+    await setZone(user, "America/Los_Angeles");
+    expect(await claimFor("weekly_digest", "2026-11-02T16:30:00Z", [user])).toEqual([]);
+    expect(await ledger([user], "weekly_digest")).toHaveLength(1);
+  });
+
+  it("builds the digest content", async () => {
+    const boss = await account("Content Boss"), reader = await account("Content Reader", `reader-${randomUUID()}@example.com`);
+    const ada = await account("Ada Member"), ben = await account("Ben Member");
+    const scrum = await scrumProject(boss), workspace = scrum.workspace;
+    for (const person of [reader, ada, ben]) await addMember(workspace, person, "member");
+    const waterfall = await waterfallProject(boss, workspace), kanban = await kanbanProject(boss, workspace);
+    const archived = await kanbanProject(boss, workspace);
+    // Scrum scores the active sprint only; the issue outside the sprint is ignored.
+    const created = await createSprint(boss, scrum.project, "Launch", null, "2026-11-02", "2026-11-15");
+    const inSprintDone = await sprintIssue(boss, scrum.project, created.sprint_id!, { title: "S1" });
+    await sprintIssue(boss, scrum.project, created.sprint_id!, { title: "S2" });
+    await task(boss, scrum.project, null, null, "Outside");
+    expect(await startSprint(boss, created.sprint_id!, created.sprint_version!)).toMatchObject({ outcome: "ok" });
+    await finishIssue(boss, scrum.project, inSprintDone, 2);
+    // Waterfall uses the project window; points are the unit when at least 80% of the issues are estimated.
+    for (const points of ["3", "5"]) expect((await createIssue(boss, waterfall.project, { title: "W", points })).outcome).toBe("ok");
+    await finishIssue(boss, waterfall.project, (await createIssue(boss, waterfall.project, { title: "W done", points: "2" })).issue_id!);
+    // Kanban without dates has no window; an archived project is left out.
+    await task(boss, kanban.project, null, null, "K1");
+    await task(boss, archived.project, null, null, "Gone");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE id=$1`, [archived.project]);
+
+    // Done transitions per assignee around the week 26 October to 1 November (the user's zone is UTC).
+    const fx = await insightProject(boss, workspace);
+    const done = (assignee: Account | null) => ({ category: "done" as Category, assignee: assignee?.id ?? null });
+    await issueHistory(fx, [{ at: "2026-10-27T10:00:00Z", after: { category: "todo", assignee: ada.id } }, { at: "2026-10-28T10:00:00Z", after: done(ada) }]);
+    await issueHistory(fx, [{ at: "2026-10-26T00:00:00Z", after: done(ada) }]);
+    await issueHistory(fx, [{ at: "2026-10-29T10:00:00Z", after: done(ada) }, { at: "2026-10-30T10:00:00Z", after: { category: "todo", assignee: ada.id } }, { at: "2026-10-31T10:00:00Z", after: done(ada) }]);
+    await issueHistory(fx, [{ at: "2026-11-01T23:59:59Z", after: done(ben) }]);
+    await issueHistory(fx, [{ at: "2026-10-25T23:59:59Z", after: done(ben) }]);
+    await issueHistory(fx, [{ at: "2026-11-02T00:00:00Z", after: done(ben) }]);
+    await issueHistory(fx, [{ at: "2026-10-28T10:00:00Z", after: { category: "done", assignee: ben.id, archived: true } }]);
+    await issueHistory(fx, [{ at: "2026-10-28T11:00:00Z", after: done(null) }]);
+
+    // Open work across the workspace: 12 overdue (cap 10), at-risk from the Monday through three days on.
+    for (let index = 0; index < 12; index++) await task(boss, kanban.project, ada, shiftDay("2026-10-20", index), `Late ${index}`);
+    await task(boss, kanban.project, null, "2026-11-02", "Today");
+    await task(boss, kanban.project, ben, "2026-11-05", "Third day");
+    await task(boss, kanban.project, ben, "2026-11-06", "Fourth day");
+    await finishIssue(boss, kanban.project, await task(boss, kanban.project, null, "2026-11-03", "Finished risk"));
+
+    const [claimed] = await claimFor("weekly_digest", "2026-11-02T08:00:00Z", [reader], false);
+    const rows = await digestOf(claimed!.id);
+    expect(new Set(rows.map((row) => `${row.status}|${row.email}|${row.recipient_name}|${row.workspace_name}|${row.workspace_slug}`)))
+      .toEqual(new Set([`pending|${reader.email.toLowerCase()}|Content Reader|Acme|${await slugOf(workspace)}`]));
+    const projects = Object.fromEntries(rows.filter((row) => row.section === "project").map((row) => [row.project_key, row]));
+    expect(Object.keys(projects)).toHaveLength(4);
+    expect(projects[archived.key]).toBeUndefined();
+    expect(projects[scrum.key]).toMatchObject({ project_name: "Rocket", methodology: "scrum", extra: { done: 1, total: 2, unit: "count", windowStart: "2026-11-02", windowEnd: "2026-11-15", activeSprintName: "Launch" } });
+    expect(projects[waterfall.key]).toMatchObject({ methodology: "waterfall", extra: { done: 2, total: 10, unit: "points", windowStart: "2026-11-02", windowEnd: "2026-12-11", activeSprintName: null } });
+    expect(projects[kanban.key]!.extra).toMatchObject({ unit: "count", windowStart: null, windowEnd: null, activeSprintName: null });
+    // Members: the seven days before the Monday, by the snapshot's assignee; a re-completion counts again, archived and unassigned do not.
+    expect(rows.filter((row) => row.section === "member").map((row) => [row.label, row.value])).toEqual([["Ada Member", 4], ["Ben Member", 1]]);
+    const overdue = rows.filter((row) => row.section === "overdue");
+    expect(overdue.map((row) => row.label)).toEqual(Array.from({ length: 10 }, (_, index) => `${kanban.key}-${index + 2} Late ${index}`));
+    expect(overdue[0]!.extra).toEqual({ due: "2026-10-20", total: 12 });
+    expect(overdue.every((row) => row.extra.total === 12)).toBe(true);
+    const atRisk = rows.filter((row) => row.section === "at_risk");
+    expect(atRisk.map((row) => [row.label.replace(/^\S+ /, ""), row.extra])).toEqual([["Today", { due: "2026-11-02", total: 2 }], ["Third day", { due: "2026-11-05", total: 2 }]]);
+    // Preference off, no project left, or no membership: a single skipped row.
+    expect(await setPreferences(reader.token, true, true, false, "UTC")).toBe("ok");
+    expect(await digestOf(claimed!.id)).toEqual([expect.objectContaining({ status: "skipped", email: null, workspace_name: null, section: null, extra: null })]);
+    expect(await setPreferences(reader.token, true, true, true, "UTC")).toBe("ok");
+    expect((await digestOf(claimed!.id)).length).toBeGreaterThan(1);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=now() WHERE tenant_id=$1`, [workspace]);
+    expect((await digestOf(claimed!.id)).map((row) => row.status)).toEqual(["skipped"]);
+    await owner.query(`UPDATE ${table("projects")} SET archived_at=NULL WHERE tenant_id=$1 AND id<>$2`, [workspace, archived.project]);
+    expect((await digestOf(claimed!.id)).length).toBeGreaterThan(1);
+    await leave(workspace, reader);
+    expect((await digestOf(claimed!.id)).map((row) => row.status)).toEqual(["skipped"]);
+  });
+
+  it("keeps the ledger closed and the functions granted to the worker only", async () => {
+    await owner.query("SET ROLE spark_owner");
+    const names = ["worker_claim_scheduled_emails", "worker_due_reminder_email", "worker_settle_scheduled_email", "worker_weekly_digest_email"];
+    const grants = `SELECT p.proname, p.prosecdef, p.proconfig, has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth,
+      EXISTS (SELECT 1 FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE') AS public
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname`;
+    const rows = (await owner.query(grants, [namespace, names])).rows;
+    expect(rows.map((row) => row.proname)).toEqual(names);
+    for (const row of rows) {
+      expect({ name: row.proname, definer: row.prosecdef, config: row.proconfig, worker: row.worker, runtime: row.runtime, auth: row.auth, public: row.public })
+        .toEqual({ name: row.proname, definer: true, config: ['search_path=""'], worker: true, runtime: false, auth: false, public: false });
+    }
+    // The shared open-task query is an internal helper: nobody but the owner can call it.
+    const helper = (await owner.query(grants, [namespace, ["scheduled_open_tasks"]])).rows[0];
+    expect(helper).toMatchObject({ proconfig: ['search_path=""'], worker: false, runtime: false, auth: false, public: false });
+    // The table: forced row security, owner-only policy, no runtime or worker grants.
+    const security = (await owner.query("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = $1::regclass", [table("scheduled_emails")])).rows[0];
+    expect(security).toEqual({ relrowsecurity: true, relforcerowsecurity: true });
+    expect((await owner.query("SELECT roles::text AS roles FROM pg_policies WHERE schemaname=$1 AND tablename='scheduled_emails'", [namespace])).rows).toEqual([{ roles: "{spark_owner}" }]);
+    for (const role of ["spark_app", "spark_worker", "spark_auth"]) {
+      for (const privilege of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
+        expect((await owner.query("SELECT has_table_privilege($1,$2,$3) AS allowed", [role, table("scheduled_emails"), privilege])).rows[0].allowed).toBe(false);
+      }
+    }
+    await expect(workerRuntime.query(`SELECT * FROM ${table("scheduled_emails")}`)).rejects.toMatchObject({ code: "42501" });
+    await expect(runtime.query(`SELECT * FROM ${fn("worker_due_reminder_email")}($1)`, [randomUUID()])).rejects.toMatchObject({ code: "42501" });
+
+    // Shape rules: a reminder has no workspace, a digest needs one, one row per user, job, workspace and period.
+    const boss = await account("Shape Boss"), { workspace } = await kanbanProject(boss);
+    const insert = (job: string, tenant: string | null, period = "2026-11-03", status = "pending") =>
+      `INSERT INTO ${table("scheduled_emails")} (user_id,tenant_id,job,period,status) VALUES ('${boss.id}',${tenant ? `'${tenant}'` : "NULL"},'${job}','${period}','${status}')`;
+    await reject(insert("due_reminders", workspace), [], "23514");
+    await reject(insert("weekly_digest", null), [], "23514");
+    await reject(insert("other", null), [], "23514");
+    await reject(insert("due_reminders", null, "2026-11-03", "queued"), [], "23514");
+    await rollback(async () => {
+      await owner.query(insert("due_reminders", null));
+      await expect(owner.query(insert("due_reminders", null))).rejects.toMatchObject({ code: "23505" });
+    });
+    await rollback(async () => {
+      await owner.query(insert("weekly_digest", workspace));
+      await owner.query(insert("weekly_digest", workspace, "2026-11-09"));
+      await expect(owner.query(insert("weekly_digest", workspace))).rejects.toMatchObject({ code: "23505" });
+    });
   });
 });
