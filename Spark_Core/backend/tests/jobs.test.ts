@@ -198,7 +198,7 @@ describe("weekly digest job", () => {
     expect(message.subject).toBe("Acme weekly digest — week of Oct 26");
     // Scrum sprint 26 Oct - 8 Nov viewed on 26 Oct: 1/14 elapsed = 7.1%, 25% done: on track, points unit.
     expect(message.text).toContain("WEB Website - 25% done, 7.1% of the plan elapsed (Sprint 4): On track");
-    expect(message.text).toContain("API Backend - 90% done, no plan window: No plan");
+    expect(message.text).toContain("API Backend - 90% done, no plan window");
     const text = message.text;
     expect(text.indexOf("Bea - 5")).toBeLessThan(text.indexOf("Ana - 2"));
     expect(text.indexOf("Ana - 2")).toBeLessThan(text.indexOf("Zed - 2"));

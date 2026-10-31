@@ -194,6 +194,7 @@ describe("weekly digest email", () => {
       projects: [{ ...base.projects[0]!, planPercent: null, status: "no_plan", label: null }],
     });
     expect(text).toContain("Nothing was completed.");
-    expect(text).toContain("no plan window: No plan");
+    expect(text).toContain("no plan window");
+    expect(text).not.toContain("No plan");
   });
 });

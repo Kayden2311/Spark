@@ -67,7 +67,9 @@ export function weeklyDigestEmail(input: WeeklyDigestEmailInput): Omit<EmailMess
       title: "Projects",
       items: input.projects.map((project) => {
         const plan = project.planPercent === null ? "no plan window" : `${percent(project.planPercent)} of the plan elapsed${project.label ? ` (${plain(project.label)})` : ""}`;
-        return { text: `${plain(project.key)} ${plain(project.name)} - ${percent(project.donePercent)} done, ${plan}: ${STATUS_LABELS[project.status]}` };
+        // Without a plan window there is nothing to score against, so no status follows.
+        const status = project.planPercent === null ? "" : `: ${STATUS_LABELS[project.status]}`;
+        return { text: `${plain(project.key)} ${plain(project.name)} - ${percent(project.donePercent)} done, ${plan}${status}` };
       }),
     },
     {
