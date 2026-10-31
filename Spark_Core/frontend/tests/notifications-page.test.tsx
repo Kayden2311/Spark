@@ -288,4 +288,14 @@ describe("notifications inbox", () => {
     render(<NotificationsPage />);
     expect(await screen.findByLabelText("7 unread notifications")).toHaveTextContent("7");
   });
+
+  it("marks the collapsed mobile menu button while there are unread notifications", async () => {
+    unread = 4;
+    render(<NotificationsPage />);
+    const toggle = screen.getByRole("button", { name: /^Menu/u });
+    await waitFor(() => expect(within(toggle).getByText("4 unread")).toBeInTheDocument());
+    expect(toggle.querySelector(".sidebarMenuDot")).not.toBeNull();
+    await userEvent.setup().click(toggle);
+    expect(screen.getByRole("button", { name: "Close" }).querySelector(".sidebarMenuDot")).toBeNull();
+  });
 });

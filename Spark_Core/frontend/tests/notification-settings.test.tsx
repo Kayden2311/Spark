@@ -30,6 +30,8 @@ let getStatus = 200;
 let putGate: Promise<void> | null = null;
 let stored = { email: { taskAssigned: true, dueReminders: true, weeklyDigest: false }, timezone: "Europe/Berlin" };
 
+const ZONE_COPY = "That time zone is not recognized. Pick one from the list, for example Europe/London.";
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -91,7 +93,7 @@ describe("email notification settings", () => {
     expect(save).toBeDisabled();
   });
 
-  it("shows the API's invalid zone message inline", async () => {
+  it("explains an invalid zone inline", async () => {
     putStatus = 400;
     const user = userEvent.setup();
     render(<NotificationSettingsPage />);
@@ -99,7 +101,7 @@ describe("email notification settings", () => {
     await user.clear(zone);
     await user.type(zone, "Mars/Base");
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("Unknown time zone.")).toBeInTheDocument();
+    expect(await screen.findByText(ZONE_COPY)).toBeInTheDocument();
     expect(zone).toHaveAttribute("aria-invalid", "true");
     expect(screen.queryByText("Saved")).toBeNull();
   });
@@ -208,9 +210,9 @@ describe("email notification settings", () => {
     const zone = await screen.findByLabelText("Time zone");
     await user.type(zone, "x");
     await user.click(screen.getByRole("button", { name: "Save" }));
-    await screen.findByText("Unknown time zone.");
+    await screen.findByText(ZONE_COPY);
     await user.click(screen.getByRole("switch", { name: "Task assigned to me" }));
-    expect(screen.queryByText("Unknown time zone.")).toBeNull();
+    expect(screen.queryByText(ZONE_COPY)).toBeNull();
   });
 
   it("redirects to login on a session expiry during save without an error alert", async () => {

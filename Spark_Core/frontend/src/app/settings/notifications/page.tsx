@@ -22,6 +22,8 @@ const SWITCHES: Array<[keyof EmailPreferences, string]> = [
 
 const sameValues = (a: NotificationPreferences, b: NotificationPreferences) =>
   a.timezone === b.timezone && SWITCHES.every(([key]) => a.email[key] === b.email[key]);
+// The API answers "Invalid timezone."; the field says what to do about it.
+const ZONE_PROBLEM = "That time zone is not recognized. Pick one from the list, for example Europe/London.";
 const isZoneProblem = (error: ApiError) => error.status === 400 && error.code === "invalid_input" && /time ?zone/i.test(error.message);
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready" };
@@ -116,7 +118,7 @@ function Settings() {
       setDone(!latest.current || sameValues(latest.current, draft));
     } catch (error) {
       if (!alive.current || (error instanceof ApiError && error.status === 401)) return;
-      if (error instanceof ApiError && isZoneProblem(error)) setZoneError(error.message);
+      if (error instanceof ApiError && isZoneProblem(error)) setZoneError(ZONE_PROBLEM);
       else setFailure(messageOf(error));
     } finally {
       busy.current = false;

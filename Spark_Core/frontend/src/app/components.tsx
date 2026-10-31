@@ -170,6 +170,13 @@ function NotificationBadge() {
   return <b aria-label={`${label} unread ${count === 1 ? "notification" : "notifications"}`} className="navBadge" role="img">{label}</b>;
 }
 
+/** A dot on the collapsed mobile menu button: the Notifications link is hidden until the menu opens. */
+function MenuUnreadDot() {
+  const { count } = useUnreadCount();
+  if (!count || count < 1) return null;
+  return <span className="sidebarMenuDot"><span className="wsSrOnly">{count > 99 ? "99+" : count} unread</span></span>;
+}
+
 export function WorkspaceShell({ children, current, workspace, projects = null }: { children: ReactNode; current: string; workspace?: ShellWorkspace | null; projects?: ShellProject[] | null }) {
   const { user, workspaces, platformRoles, logout } = useAuth();
   const router = useRouter();
@@ -232,6 +239,7 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
           >
             <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 24 24">{menuOpen ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}</svg>
             <span>{menuOpen ? "Close" : "Menu"}</span>
+            {user && !menuOpen && <MenuUnreadDot />}
           </button>
         </div>
         <WorkspaceSwitcher active={active} />
