@@ -54,6 +54,7 @@ beforeEach(() => {
       if (putStatus === 500) return json({ code: "boom" }, 500);
       if (putStatus === 401) return json({ code: "unauthorized" }, 401);
       if (putStatus === 422) return json({ code: "invalid_input", detail: "Invalid notification preferences" }, 400);
+      if (putStatus === 403) return json({ code: "bad_request", detail: 'body/timezone must match pattern "^[A-Za-z0-9_+\-/]+$"' }, 400);
       if (putStatus === 400) return json({ code: "invalid_input", detail: "Unknown time zone." }, 400);
       return json(puts.at(-1));
     }
@@ -104,6 +105,18 @@ describe("email notification settings", () => {
     expect(await screen.findByText(ZONE_COPY)).toBeInTheDocument();
     expect(zone).toHaveAttribute("aria-invalid", "true");
     expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("explains a schema rejection of the zone inline", async () => {
+    putStatus = 403;
+    const user = userEvent.setup();
+    render(<NotificationSettingsPage />);
+    const zone = await screen.findByLabelText("Time zone");
+    await user.clear(zone);
+    await user.type(zone, "Mars Base");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(ZONE_COPY)).toBeInTheDocument();
+    expect(zone).toHaveAttribute("aria-invalid", "true");
   });
 
   it("fills the field with the browser's zone", async () => {

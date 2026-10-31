@@ -22,9 +22,9 @@ const SWITCHES: Array<[keyof EmailPreferences, string]> = [
 
 const sameValues = (a: NotificationPreferences, b: NotificationPreferences) =>
   a.timezone === b.timezone && SWITCHES.every(([key]) => a.email[key] === b.email[key]);
-// The API answers "Invalid timezone."; the field says what to do about it.
+// The API answers "Invalid timezone." (or a schema 400 naming body/timezone); the field says what to do about it.
 const ZONE_PROBLEM = "That time zone is not recognized. Pick one from the list, for example Europe/London.";
-const isZoneProblem = (error: ApiError) => error.status === 400 && error.code === "invalid_input" && /time ?zone/i.test(error.message);
+const isZoneProblem = (error: ApiError) => error.status === 400 && (error.code === "invalid_input" || error.code === "bad_request") && /time ?zone/i.test(error.message);
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready" };
 

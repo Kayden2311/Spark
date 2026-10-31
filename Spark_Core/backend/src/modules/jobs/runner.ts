@@ -108,12 +108,18 @@ export function createScheduledJob(
       );
       const result: JobResult = { claimed: claimed.rows.length, sent: 0, skipped: 0, failed: 0, leaseLost: 0 };
 
+      // A settlement that throws (connection loss) is treated like a lost lease: the row comes back after the
+      // lease ends and the rest of the batch still runs. The error text is never kept.
       const settle = async (id: string, status: "sent" | "suppressed" | "retry", code: string | null, retryAt: Date | null) => {
-        const settled = await pool.query<{ done: boolean }>(
-          "SELECT spark.worker_settle_scheduled_email($1, $2, $3, $4, $5) AS done",
-          [id, lockToken, status, code, retryAt],
-        );
-        return settled.rows[0]?.done === true;
+        try {
+          const settled = await pool.query<{ done: boolean }>(
+            "SELECT spark.worker_settle_scheduled_email($1, $2, $3, $4, $5) AS done",
+            [id, lockToken, status, code, retryAt],
+          );
+          return settled.rows[0]?.done === true;
+        } catch {
+          return false;
+        }
       };
 
       for (const claimedRow of claimed.rows) {

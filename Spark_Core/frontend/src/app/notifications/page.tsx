@@ -174,6 +174,12 @@ function Inbox() {
     try {
       const updated = await markAllNotificationsRead(before);
       if (!alive.current) return;
+      if (updated === 0 && (count ?? 0) > 0) {
+        // Newer notifications arrived since the list loaded: show them so the next click covers them.
+        refresh();
+        setReloadKey((value) => value + 1);
+        return;
+      }
       setSettled((current) => {
         if (!current || current.status !== "ready") return current;
         const marked = current.items.map((entry) => (entry.createdAt <= before && entry.readAt === null ? { ...entry, readAt: stamp } : entry));

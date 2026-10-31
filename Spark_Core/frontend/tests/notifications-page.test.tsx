@@ -38,6 +38,7 @@ let unread = 2;
 let listFail = false;
 let patchStatus = 204;
 let patchHangs = false;
+let markAllUpdated = 2;
 let pages: Array<{ items: unknown[]; nextCursor: string | null }> = [];
 
 function json(body: unknown, status = 200) {
@@ -52,6 +53,7 @@ beforeEach(() => {
   listFail = false;
   patchStatus = 204;
   patchHangs = false;
+  markAllUpdated = 2;
   window.history.replaceState(null, "", "/notifications");
   router.push.mockClear();
   router.replace.mockClear();
@@ -61,7 +63,7 @@ beforeEach(() => {
       patches.push({ url, body: JSON.parse(String(init.body)) });
       if (patchHangs) return new Promise<Response>(() => undefined);
       if (patchStatus !== 204) return json({ code: "boom" }, patchStatus);
-      return url === "/api/v1/notifications" ? json({ updated: 2 }) : new Response(null, { status: 204 });
+      return url === "/api/v1/notifications" ? json({ updated: markAllUpdated }) : new Response(null, { status: 204 });
     }
     if (url === "/api/v1/notifications/unread-count") return json({ count: unread });
     urls.push(url);
@@ -214,6 +216,20 @@ describe("notifications inbox", () => {
     expect(patches[0]).toEqual({ url: "/api/v1/notifications", body: { read: true, before: stamp(3) } });
     await waitFor(() => expect(screen.queryAllByLabelText("Unread")).toHaveLength(0));
     expect(screen.getByText("Marked 2 as read")).toBeInTheDocument();
+  });
+
+  it("reloads the list when Mark all marked nothing but unread notifications remain", async () => {
+    markAllUpdated = 0;
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await screen.findByRole("list", { name: "Notifications" });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Mark all as read/ })).toBeEnabled());
+    pages = [{ items: [item(4), item(3), item(2)], nextCursor: null }];
+    await user.click(screen.getByRole("button", { name: "Mark all as read" }));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(await screen.findByText("Task 4 assigned")).toBeInTheDocument();
+    expect(urls).toHaveLength(2);
+    expect(screen.queryAllByLabelText("Unread").length).toBeGreaterThan(0);
   });
 
   it("ignores a second Mark all click while one is running", async () => {

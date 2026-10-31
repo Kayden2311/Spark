@@ -195,9 +195,18 @@ describe("notification routes", () => {
       expect(find(calls, "spark.ws_mark_notifications_read")?.params).toEqual([before]);
     });
 
+    it("accepts offsets below 16 hours and Z", async () => {
+      for (const stamp of ["2026-10-31T08:00:00+15:59", "2026-10-31T08:00:00-1500", "2026-10-31T08:00:00Z", "2026-10-31T08:00:00+00:00"]) {
+        const { response } = await call({ method: "PATCH", url: base, payload: { read: true, before: stamp } }, [["spark.ws_mark_notifications_read", () => [{ updated: 0 }]]]);
+        expect(response.statusCode, stamp).toBe(200);
+      }
+    });
+
     it("requires before and read:true, rejects bad instants and unknown keys", async () => {
       for (const payload of [{ read: true }, { before }, { read: false, before }, { read: true, before: "yesterday" }, { read: true, before, extra: 1 },
-        { read: true, before: "2026-10-31T23:59:60Z" }, { read: true, before: "0000-01-01T00:00:00Z" }]) {
+        { read: true, before: "2026-10-31T23:59:60Z" }, { read: true, before: "0000-01-01T00:00:00Z" },
+        { read: true, before: "2026-10-31T08:00:00+16:00" }, { read: true, before: "2026-10-31T08:00:00-23:59" }, { read: true, before: "2026-10-31T08:00:00+1600" },
+        { read: true, before: "2026-10-31T08:00:00-2359" }, { read: true, before: "2026-10-31T08:00:00+99:00" }]) {
         const { response, calls } = await call({ method: "PATCH", url: base, payload });
         expect(response.statusCode, JSON.stringify(payload)).toBe(400);
         expect(called(calls, "spark.ws_")).toBe(false);
@@ -235,6 +244,15 @@ describe("notification routes", () => {
       for (const payload of bad) {
         const { response, calls } = await call({ method: "PUT", url: prefsUrl, payload });
         expect(response.statusCode, JSON.stringify(payload)).toBe(400);
+        expect(called(calls, "spark.ws_")).toBe(false);
+      }
+    });
+
+    it("rejects a timezone with a NUL or other junk before the database", async () => {
+      for (const timezone of ["Europe/Berlin\u0000", "Europe Berlin", "Europe/Berlin;--", "Europe,Berlin", "\u0000"]) {
+        const { response, calls } = await call({ method: "PUT", url: prefsUrl, payload: { ...prefsBody, timezone } });
+        expect(response.statusCode, JSON.stringify(timezone)).toBe(400);
+        expect(response.json()).toMatchObject({ code: "bad_request" });
         expect(called(calls, "spark.ws_")).toBe(false);
       }
     });

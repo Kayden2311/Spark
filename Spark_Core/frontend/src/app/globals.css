@@ -55,6 +55,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .textButton { padding: .45rem .6rem; color: var(--blue); background: transparent; }
 .textButton:hover { color: var(--blue-dark); background: rgba(37, 99, 235, 0.08); }
+.textButton:disabled, .textButton:disabled:hover { opacity: .45; cursor: default; color: var(--blue); background: transparent; }
 .muted { color: var(--muted); }
 .eyebrow { color: var(--blue); font-size: .75rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .avatar { display: inline-grid; place-items: center; width: 2rem; height: 2rem; flex: 0 0 auto; border-radius: 50%; color: #1753bd; background: #dce9ff; font-size: .7rem; font-weight: 800; }

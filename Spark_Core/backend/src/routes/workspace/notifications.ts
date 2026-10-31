@@ -88,7 +88,7 @@ const preferencesBody = {
       properties: { taskAssigned: { type: "boolean" }, dueReminders: { type: "boolean" }, weeklyDigest: { type: "boolean" } },
       additionalProperties: false,
     },
-    timezone: { type: "string", minLength: 1, maxLength: 64 },
+    timezone: { type: "string", minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_+\\-/]+$" },
   },
   additionalProperties: false,
 } as const;
@@ -145,9 +145,14 @@ const toPreferences = (row: PreferencesRow) => ({
   timezone: row.timezone,
 });
 
-/** True for an instant the calendar and PostgreSQL both accept (not a leap second, not year 0000). */
+const OFFSET_PATTERN = /\d([+-])(\d{2})(?::?(\d{2}))?$/;
+
+/** True for an instant the calendar and PostgreSQL both accept (not a leap second, not year 0000, offset under 16 hours). */
 function acceptableInstant(value: string): boolean {
-  return !Number.isNaN(new Date(value).getTime()) && !value.startsWith("0000");
+  if (Number.isNaN(new Date(value).getTime()) || value.startsWith("0000")) return false;
+  // PostgreSQL refuses a displacement of 16 hours or more (22009), which JavaScript accepts.
+  const offset = OFFSET_PATTERN.exec(value);
+  return !offset || Number(offset[2]) < 16;
 }
 
 export function registerNotificationRoutes(app: FastifyInstance, guard: MemberGuard): void {

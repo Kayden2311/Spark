@@ -148,6 +148,17 @@ describe("due reminder job", () => {
     expect(await dueRemindersJob.run(context)).toEqual({ claimed: 1, sent: 0, skipped: 0, failed: 0, leaseLost: 1 });
   });
 
+  it("counts a settle that throws as a lost lease and continues with the remaining rows", async () => {
+    let settles = 0;
+    const { context, memory } = setup({
+      claimed: [claimRow(jobId), claimRow(otherId)],
+      settle: () => (++settles === 1 ? Object.assign(new Error("connection reset"), { code: "08006" }) : [{ done: true }]),
+    });
+    expect(await dueRemindersJob.run(context)).toEqual({ claimed: 2, sent: 1, skipped: 0, failed: 0, leaseLost: 1 });
+    expect(settles).toBe(2);
+    expect(memory.sent).toHaveLength(2);
+  });
+
   it("stops starting rows when less than 30 s of lease remain", async () => {
     let time = Date.parse("2026-10-31T10:00:00Z");
     const { context, calls, memory } = setup({
