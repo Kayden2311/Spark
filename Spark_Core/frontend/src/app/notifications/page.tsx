@@ -21,6 +21,12 @@ import { ApiError, SESSION_EXPIRED_EVENT, messageOf } from "../w/_lib/api";
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; items: AppNotification[]; nextCursor: string | null };
 type Settled = Exclude<Load, { status: "loading" }> & { key: string };
 
+const NAVIGATE_AFTER_MS = 1000;
+/** A double click must not act twice, so a guard stays up for a moment after the work is done. */
+function releaseSoon(guard: { current: string | null }) {
+  setTimeout(() => { guard.current = null; }, 800);
+}
+
 const FILTERS: Array<[NotificationFilter, string]> = [["all", "All"], ["unread", "Unread"]];
 
 function Row({ item, now, onOpen }: { item: AppNotification; now: number; onOpen(item: AppNotification): void }) {
@@ -45,7 +51,14 @@ function Inbox() {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
-  const [filter, setFilter] = useState<NotificationFilter>(() => (params.get("filter") === "unread" ? "unread" : "all"));
+  const urlFilter: NotificationFilter = params.get("filter") === "unread" ? "unread" : "all";
+  const [filter, setFilter] = useState<NotificationFilter>(urlFilter);
+  // Back and forward change the URL parameter; the tab follows it.
+  const [seenUrlFilter, setSeenUrlFilter] = useState(urlFilter);
+  if (urlFilter !== seenUrlFilter) {
+    setSeenUrlFilter(urlFilter);
+    setFilter(urlFilter);
+  }
   const [reloadKey, setReloadKey] = useState(0);
   const [settled, setSettled] = useState<Settled | null>(null);
   const key = `${filter}:${reloadKey}`;
@@ -55,6 +68,10 @@ function Inbox() {
   const [now, setNow] = useState(() => Date.now());
   const { count, refresh } = useUnreadCount();
   const alive = useRef(true);
+  const opening = useRef<string | null>(null);
+  const markAllGuard = useRef<string | null>(null);
+  const [markingAll, setMarkingAll] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
     alive.current = true;
@@ -102,25 +119,33 @@ function Inbox() {
     setSettled((current) => (current && current.status === "ready" ? { ...current, items: current.items.map(update) } : current));
 
   const open = async (item: AppNotification) => {
+    if (opening.current) return;
+    opening.current = item.id;
     const link = internalLink(item.link);
     if (item.readAt !== null) {
       if (link) router.push(link);
+      releaseSoon(opening);
       return;
     }
     const stamp = new Date().toISOString();
     patchItems((entry) => (entry.id === item.id ? { ...entry, readAt: stamp } : entry));
-    try {
-      // Waited for so the next page's badge poll sees the new count.
-      await markNotificationRead(item.id);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) return;
-      if (alive.current) {
+    const settle = markNotificationRead(item.id).then(
+      () => {
+        if (alive.current) refresh();
+      },
+      (error: unknown) => {
+        if (error instanceof ApiError && error.status === 401) return;
+        if (!alive.current) return;
         patchItems((entry) => (entry.id === item.id ? { ...entry, readAt: null } : entry));
         setNotice(link ? "That notification could not be marked as read." : messageOf(error));
-      }
-    }
-    if (alive.current) refresh();
-    if (link) router.push(link);
+      },
+    );
+    // A slow request must not make the click look dead: after a moment the link is followed anyway.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([settle, new Promise<void>((resolve) => { timer = setTimeout(resolve, NAVIGATE_AFTER_MS); })]);
+    clearTimeout(timer);
+    releaseSoon(opening);
+    if (link && alive.current) router.push(link);
   };
 
   const items = load.status === "ready" ? load.items : [];
@@ -128,15 +153,27 @@ function Inbox() {
 
   const markAll = async () => {
     const before = newestCreatedAt(items);
-    if (before === null) return;
+    if (before === null || markAllGuard.current) return;
+    markAllGuard.current = "busy";
+    setMarkingAll(true);
     const stamp = new Date().toISOString();
     setNotice(null);
     try {
-      await markAllNotificationsRead(before);
-      patchItems((entry) => (entry.createdAt <= before && entry.readAt === null ? { ...entry, readAt: stamp } : entry));
+      const updated = await markAllNotificationsRead(before);
+      if (!alive.current) return;
+      setSettled((current) => {
+        if (!current || current.status !== "ready") return current;
+        const marked = current.items.map((entry) => (entry.createdAt <= before && entry.readAt === null ? { ...entry, readAt: stamp } : entry));
+        // Everything older than the newest loaded row is read now, so the unread list has no further page.
+        return { ...current, items: marked, nextCursor: filter === "unread" ? null : current.nextCursor };
+      });
+      setAnnouncement(`Marked ${updated} as read`);
       refresh();
     } catch (error) {
-      if (!(error instanceof ApiError && error.status === 401)) setNotice(messageOf(error));
+      if (!(error instanceof ApiError && error.status === 401) && alive.current) setNotice(messageOf(error));
+    } finally {
+      if (alive.current) setMarkingAll(false);
+      releaseSoon(markAllGuard);
     }
   };
 
@@ -162,13 +199,14 @@ function Inbox() {
   return (
     <>
       <PageTitle eyebrow="Inbox" title="Notifications">
-        <button className="textButton" disabled={load.status !== "ready" || !hasUnread} onClick={() => void markAll()} type="button">Mark all as read</button>
+        <button className="textButton" disabled={load.status !== "ready" || !hasUnread || markingAll} onClick={() => void markAll()} type="button">Mark all as read</button>
       </PageTitle>
-      <div aria-label="Filter notifications" className="notificationTabs" role="tablist">
+      <div aria-label="Filter notifications" className="notificationTabs" role="group">
         {FILTERS.map(([value, label]) => (
-          <button aria-selected={filter === value} className="notificationTab" key={value} onClick={() => chooseFilter(value)} role="tab" tabIndex={filter === value ? 0 : -1} type="button">{label}</button>
+          <button aria-pressed={filter === value} className="notificationTab" key={value} onClick={() => chooseFilter(value)} type="button">{label}</button>
         ))}
       </div>
+      <p aria-live="polite" className="wsSrOnly" role="status">{announcement}</p>
       {notice && <p className="notificationNotice" role="status">{notice}</p>}
       {load.status === "loading" && (
         <div aria-busy="true" className="notificationLoading" role="status">

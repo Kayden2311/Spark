@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +22,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 
 import NotificationsPage from "../src/app/notifications/page";
+import { resetUnreadCountForTests } from "../src/app/_lib/use-unread-count";
 
 const northstar = { id: "w1", slug: "northstar-labs", name: "Northstar Labs" };
 const orbit = { id: "w2", slug: "orbit-studio", name: "Orbit Studio" };
@@ -35,6 +36,8 @@ let urls: string[] = [];
 let patches: Array<{ url: string; body: unknown }> = [];
 let unread = 2;
 let listFail = false;
+let patchStatus = 204;
+let patchHangs = false;
 let pages: Array<{ items: unknown[]; nextCursor: string | null }> = [];
 
 function json(body: unknown, status = 200) {
@@ -42,10 +45,13 @@ function json(body: unknown, status = 200) {
 }
 
 beforeEach(() => {
+  resetUnreadCountForTests();
   urls = [];
   patches = [];
   unread = 2;
   listFail = false;
+  patchStatus = 204;
+  patchHangs = false;
   window.history.replaceState(null, "", "/notifications");
   router.push.mockClear();
   router.replace.mockClear();
@@ -53,6 +59,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "PATCH") {
       patches.push({ url, body: JSON.parse(String(init.body)) });
+      if (patchHangs) return new Promise<Response>(() => undefined);
+      if (patchStatus !== 204) return json({ code: "boom" }, patchStatus);
       return url === "/api/v1/notifications" ? json({ updated: 2 }) : new Response(null, { status: 204 });
     }
     if (url === "/api/v1/notifications/unread-count") return json({ count: unread });
@@ -63,6 +71,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetUnreadCountForTests();
   vi.unstubAllGlobals();
 });
 
@@ -84,10 +93,23 @@ describe("notifications inbox", () => {
     const user = userEvent.setup();
     render(<NotificationsPage />);
     await screen.findByRole("list", { name: "Notifications" });
-    await user.click(screen.getByRole("tab", { name: "Unread" }));
+    await user.click(screen.getByRole("button", { name: "Unread" }));
     await waitFor(() => expect(urls.at(-1)).toBe("/api/v1/notifications?limit=30&unread=true"));
     expect(window.location.search).toBe("?filter=unread");
-    expect(screen.getByRole("tab", { name: "Unread" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Unread" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("reaches and selects the Unread filter from the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await screen.findByRole("list", { name: "Notifications" });
+    const unreadTab = screen.getByRole("button", { name: "Unread" });
+    for (let step = 0; step < 30 && document.activeElement !== unreadTab; step += 1) await user.tab();
+    expect(unreadTab).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(urls.at(-1)).toBe("/api/v1/notifications?limit=30&unread=true"));
+    await user.keyboard("[Space]");
+    expect(unreadTab).toHaveAttribute("aria-pressed", "true");
   });
 
   it("opens on the Unread tab for ?filter=unread", async () => {
@@ -103,6 +125,55 @@ describe("notifications inbox", () => {
     await user.click(await screen.findByRole("button", { name: /Task 2 assigned/u }));
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/w/northstar-labs/p/ATLAS?issue=i2"));
     expect(patches).toEqual([{ url: "/api/v1/notifications/n2", body: { read: true } }]);
+  });
+
+  it("marks the row read before it navigates", async () => {
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    const order: string[] = [];
+    router.push.mockImplementationOnce(() => { order.push(`push after ${patches.length} patch`); });
+    await user.click(await screen.findByRole("button", { name: /Task 2 assigned/u }));
+    await waitFor(() => expect(order).toEqual(["push after 1 patch"]));
+  });
+
+  it("reverts, shows a notice and still navigates when marking read fails", async () => {
+    patchStatus = 500;
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    const row = await screen.findByRole("button", { name: /Task 2 assigned/u });
+    await user.click(row);
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/w/northstar-labs/p/ATLAS?issue=i2"));
+    expect(await screen.findByText("That notification could not be marked as read.")).toBeInTheDocument();
+    expect(within(row).getByLabelText("Unread")).toBeInTheDocument();
+  });
+
+  it("navigates once on a double click", async () => {
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await user.dblClick(await screen.findByRole("button", { name: /Task 2 assigned/u }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(patches).toHaveLength(1);
+  });
+
+  it("follows the link after a moment when the request hangs", async () => {
+    patchHangs = true;
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await user.click(await screen.findByRole("button", { name: /Task 2 assigned/u }));
+    expect(router.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(router.push).toHaveBeenCalledTimes(1), { timeout: 2500 });
+  });
+
+  it("does not follow the link once the page is gone", async () => {
+    patchHangs = true;
+    const user = userEvent.setup();
+    const { unmount } = render(<NotificationsPage />);
+    await user.click(await screen.findByRole("button", { name: /Task 2 assigned/u }));
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    expect(router.push).not.toHaveBeenCalled();
   });
 
   it("marks a row without a link read and stays", async () => {
@@ -123,6 +194,27 @@ describe("notifications inbox", () => {
     await waitFor(() => expect(patches).toHaveLength(1));
     expect(patches[0]).toEqual({ url: "/api/v1/notifications", body: { read: true, before: stamp(3) } });
     await waitFor(() => expect(screen.queryAllByLabelText("Unread")).toHaveLength(0));
+    expect(screen.getByText("Marked 2 as read")).toBeInTheDocument();
+  });
+
+  it("ignores a second Mark all click while one is running", async () => {
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await screen.findByRole("list", { name: "Notifications" });
+    const button = screen.getByRole("button", { name: "Mark all as read" });
+    await user.dblClick(button);
+    await waitFor(() => expect(patches.length).toBeGreaterThan(0));
+    expect(patches).toHaveLength(1);
+  });
+
+  it("drops Load more after Mark all on the Unread tab", async () => {
+    window.history.replaceState(null, "", "/notifications?filter=unread");
+    pages = [{ items: [item(3), item(2)], nextCursor: "CUR" }];
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await screen.findByRole("button", { name: "Load more" });
+    await user.click(screen.getByRole("button", { name: "Mark all as read" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Load more" })).toBeNull());
   });
 
   it("loads more with the cursor and appends", async () => {
@@ -164,11 +256,12 @@ describe("notifications inbox", () => {
   });
 
   it("hides the badge at zero", async () => {
-    unread = 0;
+    unread = 3;
     render(<NotificationsPage />);
-    await screen.findByRole("list", { name: "Notifications" });
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/notifications/unread-count", expect.anything()));
-    expect(screen.queryByLabelText(/unread notification/u)).toBeNull();
+    expect(await screen.findByLabelText("3 unread notifications")).toBeInTheDocument();
+    unread = 0;
+    await act(async () => { fireEvent.focus(window); });
+    await waitFor(() => expect(screen.queryByLabelText(/unread notification/u)).toBeNull());
   });
 
   it("shows a count in the badge", async () => {

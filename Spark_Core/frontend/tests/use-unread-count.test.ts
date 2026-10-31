@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useUnreadCount } from "../src/app/_lib/use-unread-count";
@@ -29,7 +29,11 @@ beforeEach(() => {
   }));
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Let the store tear down (its grace period) before the next test starts from a clean module state.
+  cleanup();
+  await vi.advanceTimersByTimeAsync(3000);
+  delete (document as { visibilityState?: unknown }).visibilityState;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -93,5 +97,24 @@ describe("useUnreadCount", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(120_000); result.current.refresh(); await vi.advanceTimersByTimeAsync(0); });
     expect(requests).toBe(1);
     expect(result.current.count).toBeNull();
+  });
+
+  it("keeps the store and count across a remount within the grace period, then stops", async () => {
+    const first = renderHook(() => useUnreadCount());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(requests).toBe(1);
+    first.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    const second = renderHook(() => useUnreadCount());
+    expect(second.result.current.count).toBe(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(requests).toBe(1);
+    second.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(requests).toBe(1);
+    const third = renderHook(() => useUnreadCount());
+    expect(third.result.current.count).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(requests).toBe(2);
   });
 });

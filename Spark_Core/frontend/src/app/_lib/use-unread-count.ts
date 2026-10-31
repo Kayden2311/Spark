@@ -7,6 +7,8 @@ import { fetchUnreadCount } from "./notifications";
 
 const POLL_MS = 30_000;
 const GUARD_MS = 1000;
+// Every page renders its own shell, so a navigation unmounts one consumer just before the next mounts.
+const GRACE_MS = 2000;
 
 /*
  * One poll serves every mounted consumer: the shell badge and the inbox page share a module-level store that
@@ -17,6 +19,7 @@ let stopped = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 let controller: AbortController | null = null;
 let lastEvent = 0;
+let grace: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -80,10 +83,18 @@ function stop() {
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  if (listeners.size === 1) start();
+  if (grace !== null) {
+    clearTimeout(grace);
+    grace = null;
+  } else if (listeners.size === 1) start();
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0) stop();
+    if (listeners.size === 0) {
+      grace = setTimeout(() => {
+        grace = null;
+        if (listeners.size === 0) stop();
+      }, GRACE_MS);
+    }
   };
 }
 
@@ -98,4 +109,13 @@ const getServerSnapshot = () => null;
 export function useUnreadCount(): { count: number | null; refresh(): void } {
   const value = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   return { count: value, refresh };
+}
+
+/** Tests only: drops the shared store so the next test starts without a previous count or timers. */
+export function resetUnreadCountForTests() {
+  if (grace !== null) clearTimeout(grace);
+  grace = null;
+  listeners.clear();
+  stop();
+  stopped = false;
 }

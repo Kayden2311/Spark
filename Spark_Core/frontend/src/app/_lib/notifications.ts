@@ -60,7 +60,7 @@ export function newestCreatedAt(items: readonly AppNotification[]): string | nul
 
 /** Only in-app paths are followed; anything else just marks the notification read. */
 export function internalLink(link: string | null): string | null {
-  return link && link.startsWith("/") && !link.startsWith("//") && !link.includes("\\") ? link : null;
+  return link && link.startsWith("/") && !link.startsWith("//") && !/[\u0000-\u001f\\]/u.test(link) ? link : null;
 }
 
 const relative = new Intl.RelativeTimeFormat("en", { numeric: "auto" });

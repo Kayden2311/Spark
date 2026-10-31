@@ -3576,17 +3576,17 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .productTabs { display: flex; flex-direction: column; gap: .5rem; padding: .5rem; }
 .productTab { position: relative; display: flex; align-items: flex-start; gap: .85rem; width: 100%; overflow: hidden; padding: 1rem; border: 1px solid rgba(147, 197, 253, .1); border-radius: 1rem; color: #cbd5e1; text-align: left; font: inherit; background: rgba(255, 255, 255, .02); cursor: pointer; transition: background .25s ease, border-color .25s ease, color .25s ease, transform .25s ease; }
 .productTab:hover { border-color: rgba(147, 197, 253, .32); color: #fff; background: rgba(255, 255, 255, .06); transform: translateX(3px); }
-.productTab[aria-selected="true"] { border-color: rgba(147, 197, 253, .4); color: #fff; background: linear-gradient(135deg, rgba(37, 99, 235, .28), rgba(37, 99, 235, .08)); transform: none; }
+.productTab[aria-pressed="true"] { border-color: rgba(147, 197, 253, .4); color: #fff; background: linear-gradient(135deg, rgba(37, 99, 235, .28), rgba(37, 99, 235, .08)); transform: none; }
 .productTab:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
 .productTabIcon { display: grid; flex: none; width: 2.4rem; height: 2.4rem; place-items: center; border: 1px solid rgba(147, 197, 253, .25); border-radius: .7rem; background: rgba(255, 255, 255, .05); }
 .productTabIcon svg { width: 1.2rem; height: 1.2rem; fill: none; stroke: #93c5fd; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.productTab[aria-selected="true"] .productTabIcon { border-color: rgba(147, 197, 253, .55); background: #2563eb; }
-.productTab[aria-selected="true"] .productTabIcon svg { stroke: #fff; }
+.productTab[aria-pressed="true"] .productTabIcon { border-color: rgba(147, 197, 253, .55); background: #2563eb; }
+.productTab[aria-pressed="true"] .productTabIcon svg { stroke: #fff; }
 .productTabText { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
 .productTabLabel { color: #93c5fd; font-size: .68rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .productTabText strong { font-size: 1.02rem; font-weight: 680; line-height: 1.3; letter-spacing: -.01em; }
 .productTabSummary { display: none; color: #b6c6de; font-size: .88rem; line-height: 1.5; }
-.productTab[aria-selected="true"] .productTabSummary { display: block; }
+.productTab[aria-pressed="true"] .productTabSummary { display: block; }
 .productTabTimer { position: absolute; right: 0; bottom: 0; left: 0; height: 3px; background: rgba(255, 255, 255, .08); }
 .productTabTimerFill { display: block; width: 100%; height: 100%; background: linear-gradient(90deg, #60a5fa, #22d3ee); transform: scaleX(0); transform-origin: left; animation: stage-timer linear forwards; }
 .productTabTimerFill[data-running="false"] { animation-play-state: paused; }
@@ -3736,7 +3736,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .productStage { grid-template-columns: 1fr; }
   .productTabs { flex-direction: row; flex-wrap: wrap; gap: .4rem; }
   .productTab { flex: 1 1 10rem; }
-  .productTab[aria-selected="true"] .productTabSummary { display: none; }
+  .productTab[aria-pressed="true"] .productTabSummary { display: none; }
   .productTabsFooter { flex-basis: 100%; margin: .25rem 0 0; padding-top: 0; }
   .productStageView { min-height: 26rem; }
 }
@@ -5017,7 +5017,7 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 .notificationTabs { display: flex; gap: .4rem; margin-bottom: 1rem; }
 .notificationTab { min-height: 2.5rem; padding: .45rem 1rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fff; font-size: .88rem; font-weight: 700; transition: background .18s ease, color .18s ease, border-color .18s ease; }
 .notificationTab:hover { color: var(--ink); }
-.notificationTab[aria-selected="true"] { border-color: var(--blue); color: #fff; background: var(--blue); }
+.notificationTab[aria-pressed="true"] { border-color: var(--blue); color: #fff; background: var(--blue); }
 .notificationItems { margin: 0; padding: 0; list-style: none; }
 .notificationItems > li + li .notificationRow { border-top: 1px solid var(--line); }
 .notificationRow { display: flex; align-items: flex-start; justify-content: flex-start; gap: .9rem; width: 100%; min-height: 3.5rem; border: 0; color: inherit; background: #fff; font: inherit; text-align: left; cursor: pointer; }
