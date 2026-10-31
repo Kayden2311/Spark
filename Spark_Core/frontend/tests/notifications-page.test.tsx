@@ -176,6 +176,25 @@ describe("notifications inbox", () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
+  it("handles a click on another row while the first is still working", async () => {
+    patchHangs = true;
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await user.click(await screen.findByRole("button", { name: /Task 3 assigned/u }));
+    await user.click(screen.getByRole("button", { name: /Task 2 assigned/u }));
+    expect(patches.map((entry) => entry.url)).toEqual(["/api/v1/notifications/n3", "/api/v1/notifications/n2"]);
+  });
+
+  it("does not navigate after the session ended", async () => {
+    patchStatus = 401;
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await user.click(await screen.findByRole("button", { name: /Task 2 assigned/u }));
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/login?redirect=%2Fnotifications"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
   it("marks a row without a link read and stays", async () => {
     const user = userEvent.setup();
     render(<NotificationsPage />);

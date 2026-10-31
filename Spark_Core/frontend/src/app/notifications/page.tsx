@@ -68,10 +68,11 @@ function Inbox() {
   const [now, setNow] = useState(() => Date.now());
   const { count, refresh } = useUnreadCount();
   const alive = useRef(true);
-  const opening = useRef<string | null>(null);
+  const inflight = useRef(new Set<string>());
+  const navigatedId = useRef<string | null>(null);
   const markAllGuard = useRef<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
-  const [announcement, setAnnouncement] = useState("");
+  const [announcement, setAnnouncement] = useState({ id: 0, text: "" });
 
   useEffect(() => {
     alive.current = true;
@@ -119,22 +120,30 @@ function Inbox() {
     setSettled((current) => (current && current.status === "ready" ? { ...current, items: current.items.map(update) } : current));
 
   const open = async (item: AppNotification) => {
-    if (opening.current) return;
-    opening.current = item.id;
+    // One click per row at a time; other rows stay clickable while this one is working.
+    if (inflight.current.has(item.id) || navigatedId.current === item.id) return;
     const link = internalLink(item.link);
     if (item.readAt !== null) {
-      if (link) router.push(link);
-      releaseSoon(opening);
+      if (link) {
+        navigatedId.current = item.id;
+        router.push(link);
+      }
       return;
     }
+    inflight.current.add(item.id);
     const stamp = new Date().toISOString();
     patchItems((entry) => (entry.id === item.id ? { ...entry, readAt: stamp } : entry));
+    let expired = false;
     const settle = markNotificationRead(item.id).then(
       () => {
-        if (alive.current) refresh();
+        // The store is module-level, so the badge refreshes even if this page is already gone.
+        refresh();
       },
       (error: unknown) => {
-        if (error instanceof ApiError && error.status === 401) return;
+        if (error instanceof ApiError && error.status === 401) {
+          expired = true;
+          return;
+        }
         if (!alive.current) return;
         patchItems((entry) => (entry.id === item.id ? { ...entry, readAt: null } : entry));
         setNotice(link ? "That notification could not be marked as read." : messageOf(error));
@@ -144,8 +153,12 @@ function Inbox() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([settle, new Promise<void>((resolve) => { timer = setTimeout(resolve, NAVIGATE_AFTER_MS); })]);
     clearTimeout(timer);
-    releaseSoon(opening);
-    if (link && alive.current) router.push(link);
+    inflight.current.delete(item.id);
+    // After a 401 the session-expired redirect to the login page wins.
+    if (link && alive.current && !expired) {
+      navigatedId.current = item.id;
+      router.push(link);
+    }
   };
 
   const items = load.status === "ready" ? load.items : [];
@@ -167,7 +180,7 @@ function Inbox() {
         // Everything older than the newest loaded row is read now, so the unread list has no further page.
         return { ...current, items: marked, nextCursor: filter === "unread" ? null : current.nextCursor };
       });
-      setAnnouncement(`Marked ${updated} as read`);
+      setAnnouncement((previous) => ({ id: previous.id + 1, text: `Marked ${updated} as read` }));
       refresh();
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 401) && alive.current) setNotice(messageOf(error));
@@ -206,7 +219,7 @@ function Inbox() {
           <button aria-pressed={filter === value} className="notificationTab" key={value} onClick={() => chooseFilter(value)} type="button">{label}</button>
         ))}
       </div>
-      <p aria-live="polite" className="wsSrOnly" role="status">{announcement}</p>
+      <p aria-live="polite" className="wsSrOnly" key={announcement.id} role="status">{announcement.text}</p>
       {notice && <p className="notificationNotice" role="status">{notice}</p>}
       {load.status === "loading" && (
         <div aria-busy="true" className="notificationLoading" role="status">
