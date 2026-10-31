@@ -58,6 +58,11 @@ const KNOWN_INPUT_ERRORS: ReadonlySet<string> = new Set([
   "Invalid event attendees",
   "Invalid event patch",
   "Invalid event response",
+  "Invalid notification cursor",
+  "Invalid notification limit",
+  "Invalid notification before",
+  "Invalid notification preferences",
+  "Invalid timezone",
 ]);
 
 // Raised by the issue trigger when a concurrent writer filled the column first: the race fallback for

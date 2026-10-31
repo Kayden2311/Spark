@@ -7,6 +7,7 @@ import { registerInvitationRoutes } from "./invitations.js";
 import { registerIssueRoutes } from "./issues.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerMethodologyRoutes } from "./methodologies.js";
+import { registerNotificationRoutes } from "./notifications.js";
 import { registerPlanningRoutes } from "./planning.js";
 import { registerProjectRoutes } from "./projects.js";
 import { registerScheduleRoutes } from "./schedule.js";
@@ -28,4 +29,5 @@ export function registerWorkspaceRoutes(app: FastifyInstance, options: Workspace
   registerPlanningRoutes(app, guard);
   registerInsightRoutes(app, guard);
   registerScheduleRoutes(app, guard);
+  registerNotificationRoutes(app, guard);
 }
