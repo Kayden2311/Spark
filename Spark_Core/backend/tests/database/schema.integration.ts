@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations, localConnection } from "../../scripts/database-support.js";
-import { withDatabaseContext } from "../../src/infrastructure/database/context.js";
 import { hashPassword } from "../../src/infrastructure/database/password.js";
 import { DEADLINES_SQL } from "../../src/routes/workspace/schedule.js";
 
@@ -21,9 +20,18 @@ const tenantA = randomUUID(), tenantB = randomUUID(), projectA = randomUUID(), p
 const statusA = randomUUID(), statusB = randomUUID(), statusOther = randomUUID();
 const communityA = randomUUID(), communityB = randomUUID(), publicCommunity = randomUUID(), publicPost = randomUUID(), privatePost = randomUUID();
 const table = (name: string) => `"${namespace}"."${name}"`;
-const actorA = { userId: userA, tenantId: tenantA };
-// Live sessions for the two workspace owners; workspace RLS is bound to these, not to spark.user_id/tenant_id.
-const sessionA = randomBytes(32), sessionB = randomBytes(32);
+// Live sessions for the two workspace owners and the community-only visitor; row access is bound to these,
+// not to spark.user_id/tenant_id.
+const sessionA = randomBytes(32), sessionB = randomBytes(32), sessionVisitor = randomBytes(32);
+// Communities written before 0030 with free-text stages and locations; 0030 normalizes them.
+const legacyCommunities = [
+  { id: randomUUID(), stage: "Seed", country: " vn ", city: "  Hanoi ", description: "  Founders in Hanoi  " },
+  { id: randomUUID(), stage: "Pre-Seed", country: "Vietnam", city: "   ", description: `${"D".repeat(89)} and a tail past ninety characters` },
+  { id: randomUUID(), stage: "Any", country: null, city: null, description: "Description" },
+  { id: randomUUID(), stage: "Series A", country: "SG", city: "Singapore", description: "Description" },
+  { id: randomUUID(), stage: "weird", country: null, city: null, description: "Description" },
+  { id: randomUUID(), stage: null, country: null, city: null, description: "   " },
+];
 
 async function rollback(work: () => Promise<void>) {
   await owner.query("BEGIN");
@@ -43,6 +51,21 @@ async function asSession(tokenHash: Buffer | null, sql: string, values: unknown[
   try {
     await client.query("BEGIN");
     if (tokenHash) await client.query("SELECT set_config('spark.session_token_hash',$1,true)", [tokenHash.toString("hex")]);
+    const result = await client.query(sql, values);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally { client.release(); }
+}
+
+// Runs one statement as spark_app with only the legacy spark.user_id/spark.tenant_id settings and no session.
+async function asSpoofed(userId: string, tenantId: string, sql: string, values: unknown[] = []) {
+  const client = await runtime.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('spark.user_id',$1,true), set_config('spark.tenant_id',$2,true)", [userId, tenantId]);
     const result = await client.query(sql, values);
     await client.query("COMMIT");
     return result;
@@ -387,7 +410,7 @@ async function insightCommunity(fixture: InsightFixture, name: string, createdAt
   await owner.query("SET ROLE spark_owner");
   await owner.query("BEGIN");
   try {
-    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id,created_at) VALUES ($1::uuid,$2,$1::text,$3,'Description','public',$4,$5)`, [id, fixture.tenant, name, fixture.author, createdAt]);
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,tagline,description,visibility,created_by_user_id,created_at) VALUES ($1::uuid,$2,$1::text,$3,'Tagline','Description','public',$4,$5)`, [id, fixture.tenant, name, fixture.author, createdAt]);
     await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role,joined_at) VALUES ($1,$2,$3,'owner',$4)`, [fixture.tenant, id, fixture.author, createdAt]);
     await owner.query("COMMIT");
   } catch (error) { await owner.query("ROLLBACK"); throw error; }
@@ -456,9 +479,14 @@ beforeAll(async () => {
       await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Community','Description',$3,$4)`, [id,tenant,visibility,user]);
       await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenant,id,user]);
     }
+    for (const legacy of legacyCommunities) {
+      await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,stage,country_code,city,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Legacy community',$3,'private',$4,$5,$6,$7)`,
+        [legacy.id, tenantA, legacy.description, legacy.stage, legacy.country, legacy.city, userA]);
+      await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, legacy.id, userA]);
+    }
     await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id) VALUES ($1,$2,$3)`, [tenantA,communityA,visitor]);
     await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body,visibility) VALUES ($1,$2,$3,$4,'Private','Private body','members'),($5,$6,$7,$8,'Public','Public body','public')`, [privatePost,tenantA,communityA,userA,publicPost,tenantB,publicCommunity,userB]);
-    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$5),($3,$4,'password',$5)`, [userA,sessionA,userB,sessionB,new Date(Date.now()+60*60*1000)]);
+    await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$7),($3,$4,'password',$7),($5,$6,'password',$7)`, [userA,sessionA,userB,sessionB,visitor,sessionVisitor,new Date(Date.now()+60*60*1000)]);
     await owner.query("COMMIT");
   } catch (error) { await owner.query("ROLLBACK"); throw error; }
   await writeFile(join(folder, "meta", "_journal.json"), fullJournal);
@@ -498,7 +526,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(30);
+    expect(result.rows[0].count).toBe(31);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -733,14 +761,10 @@ describe("Local PostgreSQL schema", () => {
     });
   });
   it("separates community-only membership from workspace access and public visibility", async () => {
-    await withDatabaseContext(runtime,{userId:visitor,tenantId:tenantA},async client=>{
-      expect((await client.query(`SELECT * FROM ${table("projects")}`)).rows).toHaveLength(0);
-      expect((await client.query(`SELECT id FROM ${table("posts")} WHERE id=$1`,[privatePost])).rows).toEqual([{id:privatePost}]);
-    });
-    await withDatabaseContext(runtime,actorA,async client=>{
-      expect((await client.query(`SELECT id FROM ${table("communities")} WHERE id=$1`,[communityB])).rows).toHaveLength(0);
-      expect((await client.query(`SELECT id FROM ${table("posts")} WHERE id=$1`,[publicPost])).rows).toEqual([]);
-    });
+    expect((await asSession(sessionVisitor, `SELECT * FROM ${table("projects")}`)).rows).toHaveLength(0);
+    expect((await asSession(sessionVisitor, `SELECT id FROM ${table("posts")} WHERE id=$1`, [privatePost])).rows).toEqual([{id:privatePost}]);
+    expect((await asSession(sessionA, `SELECT id FROM ${table("communities")} WHERE id=$1`, [communityB])).rows).toHaveLength(0);
+    expect((await asSession(sessionA, `SELECT id FROM ${table("posts")} WHERE id=$1`, [publicPost])).rows).toEqual([]);
   });
   it("denies runtime writes, role escalation and sensitive table reads", async () => {
     for (const sensitive of ["password_credentials","auth_identities","sessions","account_tokens","content_reports","payment_events","promotion_orders","platform_role_assignments"]) {
@@ -748,7 +772,7 @@ describe("Local PostgreSQL schema", () => {
     }
     // Notifications are readable since 0019, but only the recipient's own rows (none without a session).
     expect((await runtime.query(`SELECT * FROM ${table("notifications")}`)).rows).toEqual([]);
-    await expect(withDatabaseContext(runtime,actorA,c=>c.query(`UPDATE ${table("workspace_memberships")} SET role='owner'`))).rejects.toMatchObject({code:"42501"});
+    await expect(asSession(sessionA, `UPDATE ${table("workspace_memberships")} SET role='owner'`)).rejects.toMatchObject({code:"42501"});
     await expect(runtime.query("SET ROLE spark_owner")).rejects.toMatchObject({code:"42501"});
   });
   it("authenticates only through the login role", async () => {
@@ -799,7 +823,7 @@ describe("Local PostgreSQL schema", () => {
     for (const token of [newTokenHash(), null]) {
       await expect(asSession(token, overview)).rejects.toMatchObject({ code: "28000" });
     }
-    await expect(withDatabaseContext(runtime, actorA, (client) => client.query(overview))).rejects.toMatchObject({ code: "28000" });
+    await expect(asSpoofed(userA, tenantA, overview)).rejects.toMatchObject({ code: "28000" });
     await runtime.query(`SELECT ${fn("auth_revoke_session")}($1)`, [moderatorToken]);
     await expect(asSession(moderatorToken, overview)).rejects.toMatchObject({ code: "28000" });
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$3)`, [visitor, superToken, future()]);
@@ -950,7 +974,7 @@ describe("Local PostgreSQL schema", () => {
     await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'super_admin',$1),($2,'platform_admin',$1),($3,'community_moderator',$1),($4,'content_moderator',$1)`, [superUser, adminUser, communityStaff, contentStaff]);
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$9),($3,$4,'password',$9),($5,$6,'password',$9),($7,$8,'password',$9)`, [superUser, superToken, adminUser, adminToken, communityStaff, communityToken, contentStaff, contentToken, future()]);
     await owner.query("BEGIN");
-    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Audit Circle','Description','public',$3)`, [community, tenantA, userA]);
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,tagline,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Audit Circle','Tagline','Description','public',$3)`, [community, tenantA, userA]);
     await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, community, userA]);
     await owner.query("COMMIT");
     await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,$4,'Reported','Body')`, [reportedPost, tenantA, community, userA]);
@@ -1053,7 +1077,7 @@ describe("Local PostgreSQL schema", () => {
     await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'content_moderator',$1)`, [staff]);
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$3)`, [staff, token, future()]);
     await owner.query("BEGIN");
-    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Queue Circle','Description','public',$3)`, [community, tenantA, userA]);
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,tagline,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Queue Circle','Tagline','Description','public',$3)`, [community, tenantA, userA]);
     await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, community, userA]);
     await owner.query("COMMIT");
     await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,$4,'Queued','Body')`, [queuePost, tenantA, community, userA]);
@@ -1085,7 +1109,7 @@ describe("Local PostgreSQL schema", () => {
     const runtimeFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
-      "auth_revoke_session", "auth_session_principal", "can_read_community", "can_read_post", "has_platform_role", "insight_flow", "insight_issue_states", "insight_members", "insight_sprint_burndown", "insight_sprint_outcomes", "is_community_member",
+      "auth_revoke_session", "auth_session_principal", "can_manage_community", "can_read_community", "can_read_post", "community_by_slug", "community_filter_values", "discover_communities", "has_platform_role", "insight_flow", "insight_issue_states", "insight_members", "insight_sprint_burndown", "insight_sprint_outcomes", "is_community_member",
       "is_coworker", "is_session_user", "is_workspace_member", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts", "staff_billing_mrr_series",
       "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_daily", "staff_community_health", "staff_community_health_counts", "staff_community_series", "staff_engagement_heatmap", "staff_grant_role",
       "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview",
@@ -1122,7 +1146,7 @@ describe("Local PostgreSQL schema", () => {
 
     // Frozen or archived communities cannot be promoted, but pending campaigns can still be rejected.
     await owner.query("BEGIN");
-    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id,frozen_at) VALUES ($1::uuid,$2,$1::text,'Frozen Circle','Description','public',$3,now())`, [community, tenantA, userA]);
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,tagline,description,visibility,created_by_user_id,frozen_at) VALUES ($1::uuid,$2,$1::text,'Frozen Circle','Tagline','Description','public',$3,now())`, [community, tenantA, userA]);
     await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, community, userA]);
     await owner.query("COMMIT");
     await owner.query(`INSERT INTO ${table("promotion_placements")} (id,code,name,description) VALUES ($1,$2,'Placement','Guard placement')`, [placement, `placement-${placement}`]);
@@ -1143,7 +1167,7 @@ describe("Local PostgreSQL schema", () => {
     await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'platform_admin',$1)`, [staff]);
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$3)`, [staff, token, future()]);
     await owner.query("BEGIN");
-    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Race Circle','Description','public',$3)`, [community, tenantA, userA]);
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,tagline,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Race Circle','Tagline','Description','public',$3)`, [community, tenantA, userA]);
     await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenantA, community, userA]);
     await owner.query("COMMIT");
     await owner.query(`INSERT INTO ${table("promotion_placements")} (id,code,name,description) VALUES ($1,$2,'Placement','Race placement')`, [placement, `placement-${placement}`]);
@@ -1195,7 +1219,7 @@ describe("Local PostgreSQL schema", () => {
       await owner.query(`INSERT INTO ${table("workspaces")} (id,slug,name,created_by_user_id) VALUES ($1::uuid,$1::text,'Insight workspace',$2)`, [id, user]);
       await owner.query(`INSERT INTO ${table("workspace_memberships")} (tenant_id,user_id,role) VALUES ($1,$2,'owner')`, [id, user]);
     }
-    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Insight Circle','Description','public',$3)`, [community, tenant, member]);
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,tagline,description,visibility,created_by_user_id) VALUES ($1::uuid,$2,$1::text,'Insight Circle','Tagline','Description','public',$3)`, [community, tenant, member]);
     await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [tenant, community, member]);
     await owner.query("COMMIT");
     await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body,moderation_status) VALUES ($1,$2,$3,$4,'Insight post','Body','hidden')`, [post, tenant, community, member]);
@@ -1769,7 +1793,7 @@ describe("Local PostgreSQL schema", () => {
       expect((await asSession(token, `SELECT id FROM ${table("workspace_memberships")}`)).rows).toEqual([]);
     }
   });
-  it("keeps an exact inventory of workspace row policies", async () => {
+  it("keeps an exact inventory of workspace and community row policies", async () => {
     const tenantTables = ["startup_profiles","teams","team_memberships","projects","boards","issue_statuses","workflow_transitions","sprints","issues","issue_labels","issue_label_links","issue_comments","issue_links","issue_events","calendar_events","event_attendees","project_phases","project_milestones","sprint_commitments","project_methodology_periods"];
     const ownerPolicy = ["owner_maintenance", "ALL", ["spark_owner"], "PERMISSIVE"];
     const appRead = (name: string) => [name, "SELECT", ["spark_app"], "PERMISSIVE"];
@@ -1779,6 +1803,13 @@ describe("Local PostgreSQL schema", () => {
       workspace_memberships: [ownerPolicy, appRead("staff_read"), appRead("workspace_members_read")],
       workspace_invitations: [appRead("invitation_admin_read"), ownerPolicy],
       notifications: [ownerPolicy, appRead("recipient_read")],
+      communities: [appRead("community_read"), ownerPolicy, appRead("staff_read")],
+      community_memberships: [appRead("community_members_read"), ownerPolicy, appRead("staff_read")],
+      community_topics: [appRead("community_topics_read"), ownerPolicy],
+      community_join_requests: [appRead("join_requests_read"), ownerPolicy],
+      topics: [ownerPolicy, appRead("topics_read")],
+      posts: [ownerPolicy, appRead("post_read")],
+      post_comments: [appRead("comment_read"), ownerPolicy],
       ...Object.fromEntries(tenantTables.map((name) => [name, [ownerPolicy, appRead("workspace_read")]])),
     };
     const policies = await owner.query(`SELECT tablename,policyname,cmd,roles::text[] AS roles,permissive FROM pg_policies WHERE schemaname=$1 AND tablename = ANY($2::text[]) ORDER BY tablename,policyname`, [namespace, Object.keys(expected)]);
@@ -3938,6 +3969,300 @@ async function sprintFixture(): Promise<SprintSetup> {
 }
 let sprintSetup: Promise<SprintSetup> | undefined;
 const sharedSprint = () => (sprintSetup ??= sprintFixture());
+
+const topicCodes = ["b2b-saas", "climate-tech", "ai-data", "product", "fintech", "founders"];
+type Host = { owner: Account; workspace: string };
+// A user with a session who owns a fresh active workspace.
+async function hostWorkspace(name: string): Promise<Host> {
+  const who = await account(`${name} owner`);
+  const created = await createWorkspace(who, name);
+  if (created.outcome !== "ok") throw new Error(`Workspace not created: ${created.outcome}`);
+  return { owner: who, workspace: created.workspace_id! };
+}
+type CommunityInput = { name: string; tagline?: string; visibility?: "public" | "private" | "hidden"; stage?: string; country?: string | null; city?: string | null;
+  topics?: string[]; frozen?: boolean; archived?: boolean };
+const communitySlug = (community: string) => `c-${community}`;
+// A community hosted by the workspace and owned by its owner (slug c-<id>), with its topics, written by the table owner.
+async function communityFixture(host: Host, input: CommunityInput) {
+  const id = randomUUID();
+  await owner.query("SET ROLE spark_owner");
+  await owner.query("BEGIN");
+  try {
+    await owner.query(`INSERT INTO ${table("communities")} (id,tenant_id,slug,name,tagline,description,visibility,stage,country_code,city,created_by_user_id,frozen_at,archived_at)
+      VALUES ($1,$2,$3,$4,$5,'Description',$6,$7,$8,$9,$10,CASE WHEN $11::boolean THEN now() END,CASE WHEN $12::boolean THEN now() END)`,
+      [id, host.workspace, communitySlug(id), input.name, input.tagline ?? "A tagline", input.visibility ?? "public", input.stage ?? "any", input.country ?? null, input.city ?? null,
+        host.owner.id, input.frozen ?? false, input.archived ?? false]);
+    await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,'owner')`, [host.workspace, id, host.owner.id]);
+    await owner.query(`INSERT INTO ${table("community_topics")} (tenant_id,community_id,topic_id) SELECT $1,$2,t.id FROM ${table("topics")} t WHERE t.slug = ANY($3::text[])`,
+      [host.workspace, id, input.topics ?? []]);
+    await owner.query("COMMIT");
+  } catch (error) { await owner.query("ROLLBACK"); throw error; }
+  return id;
+}
+async function joinCommunity(host: Host, community: string, who: Account, role = "member") {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("community_memberships")} (tenant_id,community_id,user_id,role) VALUES ($1,$2,$3,$4)`, [host.workspace, community, who.id, role]);
+}
+type Card = { id: string; slug: string; name: string; tagline: string; visibility: string; country_code: string | null; city: string | null; stage: string; topics: string[];
+  member_count: string; weekly_posts: string; featured: boolean; frozen: boolean; host_workspace_name: string; viewer_status: string | null };
+type DiscoverInput = { query?: string | null; topic?: string | null; country?: string | null; stage?: string | null; afterName?: string | null; afterId?: string | null; limit?: number | null };
+const discoverCall = `SELECT * FROM "${namespace}".discover_communities($1,$2,$3,$4,$5,$6,$7)`;
+async function discover(token: Buffer | null, input: DiscoverInput = {}) {
+  return (await asSession(token, discoverCall, [input.query ?? null, input.topic ?? null, input.country ?? null, input.stage ?? null,
+    input.afterName ?? null, input.afterId ?? null, input.limit === undefined ? 50 : input.limit])).rows as Card[];
+}
+const cardIds = (cards: Card[]) => cards.map((card) => card.id);
+const searchTag = () => `q${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+type CommunityPage = Card & { description: string; created_at: Date; settings_version: number; can_manage: boolean };
+async function bySlug(token: Buffer | null, slug: string) {
+  return (await asSession(token, `SELECT * FROM ${fn("community_by_slug")}($1)`, [slug])).rows as CommunityPage[];
+}
+
+describe("Community access and discovery", () => {
+  it("binds community reads to the live session", async () => {
+    const host = await hostWorkspace("Session host");
+    const member = await account("Session member"), requester = await account("Session requester"), admin = await account("Session admin");
+    await addMember(host.workspace, admin, "admin");
+    const community = await communityFixture(host, { name: "Session Circle", visibility: "private" });
+    await joinCommunity(host, community, member);
+    const post = randomUUID();
+    await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body,visibility) VALUES ($1,$2,$3,$4,'Members only','Body','members')`, [post, host.workspace, community, host.owner.id]);
+    await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id,message) VALUES ($1,$2,$3,'Let me in')`, [host.workspace, community, requester.id]);
+    const posts = `SELECT id FROM ${table("posts")} WHERE community_id=$1`;
+    const members = `SELECT user_id FROM ${table("community_memberships")} WHERE community_id=$1 ORDER BY user_id`;
+    const requests = `SELECT user_id FROM ${table("community_join_requests")} WHERE community_id=$1`;
+    const users = (rows: { user_id: string }[]) => rows.map((row) => row.user_id);
+    // The settings the pre-0030 helpers trusted grant nothing on their own.
+    expect((await asSpoofed(member.id, host.workspace, posts, [community])).rows).toEqual([]);
+    expect((await asSpoofed(member.id, host.workspace, members, [community])).rows).toEqual([]);
+    expect((await asSpoofed(host.owner.id, host.workspace, requests, [community])).rows).toEqual([]);
+    // The member's live session reads posts and the member list.
+    expect((await asSession(member.token, posts, [community])).rows).toEqual([{ id: post }]);
+    expect(users((await asSession(member.token, members, [community])).rows)).toEqual([host.owner.id, member.id].sort());
+    // A signed-in non-member sees the private community's row but neither members nor posts.
+    expect((await asSession(requester.token, `SELECT id FROM ${table("communities")} WHERE id=$1`, [community])).rows).toEqual([{ id: community }]);
+    expect((await asSession(requester.token, posts, [community])).rows).toEqual([]);
+    expect((await asSession(requester.token, members, [community])).rows).toEqual([]);
+    // Join requests: the requester's own row, and every row for managers (community owner or host workspace admin).
+    expect(users((await asSession(requester.token, requests, [community])).rows)).toEqual([requester.id]);
+    expect((await asSession(member.token, requests, [community])).rows).toEqual([]);
+    expect(users((await asSession(host.owner.token, requests, [community])).rows)).toEqual([requester.id]);
+    expect(users((await asSession(admin.token, requests, [community])).rows)).toEqual([requester.id]);
+    expect((await asSession(null, requests, [community])).rows).toEqual([]);
+    // A host workspace admin manages members without joining; posts stay with members (unchanged by 0030).
+    expect(users((await asSession(admin.token, members, [community])).rows)).toEqual([host.owner.id, member.id].sort());
+    expect((await asSession(admin.token, posts, [community])).rows).toEqual([]);
+    // Topics are public reference data.
+    expect((await asSession(null, `SELECT slug,name FROM ${table("topics")} WHERE slug = ANY($1::text[]) ORDER BY slug`, [topicCodes])).rows).toEqual([
+      { slug: "ai-data", name: "AI & Data" }, { slug: "b2b-saas", name: "B2B SaaS" }, { slug: "climate-tech", name: "Climate Tech" },
+      { slug: "fintech", name: "FinTech" }, { slug: "founders", name: "Founders Circle" }, { slug: "product", name: "Product" }]);
+    // Leaving revokes access at once.
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='left',left_at=now() WHERE community_id=$1 AND user_id=$2`, [community, member.id]);
+    expect((await asSession(member.token, posts, [community])).rows).toEqual([]);
+    expect((await asSession(member.token, members, [community])).rows).toEqual([]);
+  });
+  it("discovers communities by audience", async () => {
+    const tag = searchTag();
+    const host = await hostWorkspace("Audience host");
+    const member = await account("Audience member"), stranger = await account("Audience stranger");
+    const pub = await communityFixture(host, { name: `${tag} Public`, tagline: "Founders shipping AI", topics: ["ai-data", "b2b-saas"], country: "VN", city: "Hanoi", stage: "seed" });
+    const priv = await communityFixture(host, { name: `${tag} Private`, visibility: "private" });
+    const hid = await communityFixture(host, { name: `${tag} Hidden`, visibility: "hidden" });
+    await communityFixture(host, { name: `${tag} Archived`, archived: true });
+    const froz = await communityFixture(host, { name: `${tag} Frozen`, frozen: true });
+    await joinCommunity(host, hid, member);
+    // A topic outside the fixed set (as in older demo data) is kept but never shown.
+    await owner.query(`INSERT INTO ${table("topics")} (slug,name) VALUES ($1,'Legacy topic')`, [`legacy-${tag}`]);
+    await owner.query(`INSERT INTO ${table("community_topics")} (tenant_id,community_id,topic_id) SELECT $1,$2,id FROM ${table("topics")} WHERE slug=$3`, [host.workspace, pub, `legacy-${tag}`]);
+    // Two visible posts and a comment this week count; an older, a moderated and a deleted post do not.
+    const recent = randomUUID();
+    await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,$4,'Recent','Body')`, [recent, host.workspace, pub, host.owner.id]);
+    await owner.query(`INSERT INTO ${table("posts")} (tenant_id,community_id,author_user_id,title,body,created_at,moderation_status,deleted_at) VALUES
+      ($1,$2,$3,'Also recent','Body',now(),'visible',NULL),($1,$2,$3,'Old','Body',now()-interval '8 days','visible',NULL),
+      ($1,$2,$3,'Moderated','Body',now(),'hidden',NULL),($1,$2,$3,'Deleted','Body',now(),'visible',now())`, [host.workspace, pub, host.owner.id]);
+    await owner.query(`INSERT INTO ${table("post_comments")} (tenant_id,community_id,post_id,author_user_id,body) VALUES ($1,$2,$3,$4,'Reply')`, [host.workspace, pub, recent, host.owner.id]);
+    await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id) VALUES ($1,$2,$3)`, [host.workspace, priv, stranger.id]);
+    // Signed out: public only, archived never, frozen listed and flagged.
+    const anonymous = await discover(null, { query: tag });
+    expect(cardIds(anonymous)).toEqual([froz, pub]);
+    expect(anonymous[0]).toMatchObject({ frozen: true, featured: false, viewer_status: null });
+    expect(anonymous[1]).toEqual({ id: pub, slug: communitySlug(pub), name: `${tag} Public`, tagline: "Founders shipping AI", visibility: "public", country_code: "VN", city: "Hanoi",
+      stage: "seed", topics: ["b2b-saas", "ai-data"], member_count: "1", weekly_posts: "3", featured: false, frozen: false, host_workspace_name: "Audience host", viewer_status: null });
+    // Signed in: private too, with the viewer's status.
+    const strangerView = await discover(stranger.token, { query: tag });
+    expect(cardIds(strangerView)).toEqual([froz, priv, pub]);
+    expect(strangerView.map((card) => card.viewer_status)).toEqual(["none", "pending", "none"]);
+    // Hidden communities only for their members.
+    const memberView = await discover(member.token, { query: tag });
+    expect(cardIds(memberView)).toEqual([froz, hid, priv, pub]);
+    expect(memberView[1]).toMatchObject({ visibility: "hidden", member_count: "2", viewer_status: "member" });
+    expect((await discover(host.owner.token, { query: tag })).map((card) => card.viewer_status)).toEqual(["owner", "owner", "owner", "owner"]);
+    // A revoked session is treated as signed out.
+    await runtime.query(`SELECT ${fn("auth_revoke_session")}($1)`, [stranger.token]);
+    expect(cardIds(await discover(stranger.token, { query: tag }))).toEqual([froz, pub]);
+    // An archived host workspace takes its communities out of discovery.
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("workspaces")} SET status='archived',archived_at=now(),version=version+1 WHERE id=$1`, [host.workspace]);
+    expect(await discover(member.token, { query: tag })).toEqual([]);
+  });
+  it("pages discovery without gaps or duplicates", async () => {
+    const tag = searchTag();
+    const host = await hostWorkspace("Paging host");
+    const created: string[] = [];
+    // The two Alphas straddle the first page boundary, so the id tie-break decides where page two starts.
+    for (const name of ["Aardvark", "abacus", "Alpha", "Alpha", "beta", "Gamma", "zeta"]) created.push(await communityFixture(host, { name: `${tag} ${name}` }));
+    await owner.query("SET ROLE spark_owner");
+    const expected = (await owner.query(`SELECT id FROM ${table("communities")} WHERE id = ANY($1::uuid[]) ORDER BY lower(name), id`, [created])).rows.map((row) => row.id as string);
+    const seen: string[] = [];
+    let after: Card | undefined;
+    let pages = 0;
+    for (;;) {
+      const page = await discover(null, { query: tag, limit: 3, afterName: after?.name ?? null, afterId: after?.id ?? null });
+      pages++;
+      expect(page.length).toBeLessThanOrEqual(4);
+      seen.push(...cardIds(page.slice(0, 3)));
+      if (page.length <= 3 || pages > 5) break;
+      after = page[2];
+    }
+    expect(seen).toEqual(expected);
+    expect(pages).toBe(3);
+  });
+  it("filters with AND semantics and escapes wildcards", async () => {
+    const tag = searchTag();
+    const host = await hostWorkspace("Filter host");
+    const match = await communityFixture(host, { name: `${tag} Match`, topics: ["product", "fintech"], stage: "seed", country: "VN" });
+    const elsewhere = await communityFixture(host, { name: `${tag} Elsewhere`, topics: ["product"], stage: "seed", country: "SG" });
+    const topic = await communityFixture(host, { name: `${tag} Topic`, topics: ["fintech"], stage: "seed", country: "VN" });
+    const stage = await communityFixture(host, { name: `${tag} Stage`, topics: ["product"], stage: "idea", country: "VN" });
+    expect(cardIds(await discover(null, { query: tag, topic: "product", country: "VN", stage: "seed" }))).toEqual([match]);
+    expect(cardIds(await discover(null, { query: tag, topic: "product", stage: "seed" }))).toEqual([elsewhere, match]);
+    expect(cardIds(await discover(null, { query: tag, country: "VN" }))).toEqual([match, stage, topic]);
+    expect(cardIds(await discover(null, { query: tag, topic: "founders" }))).toEqual([]);
+    // The query also matches taglines and topic names, case-insensitively and trimmed.
+    const byTagline = await communityFixture(host, { name: "Unrelated name", tagline: `Notes from ${tag}TL readers` });
+    expect(cardIds(await discover(null, { query: `  ${tag.toUpperCase()}tl ` }))).toEqual([byTagline]);
+    const climate = await communityFixture(host, { name: `${tag} Weather`, topics: ["climate-tech"] });
+    expect(cardIds(await discover(null, { query: "cLiMaTe TeCh" }))).toEqual([climate]);
+    // LIKE wildcards and the escape character are literal.
+    const percent = await communityFixture(host, { name: `${tag} 50% off` });
+    await communityFixture(host, { name: `${tag} 50 club` });
+    await communityFixture(host, { name: `${tag} 500x` });
+    const underscore = await communityFixture(host, { name: `${tag} a_b` });
+    await communityFixture(host, { name: `${tag} axb` });
+    const backslash = await communityFixture(host, { name: `${tag} back\\slash` });
+    expect(cardIds(await discover(null, { query: "50%" }))).toEqual([percent]);
+    expect(cardIds(await discover(null, { query: `${tag} a_b` }))).toEqual([underscore]);
+    expect(cardIds(await discover(null, { query: "k\\s" }))).toEqual([backslash]);
+    // 100 characters after trimming is the longest query.
+    expect(await discover(null, { query: ` ${"x".repeat(100)} ` })).toEqual([]);
+    for (const input of [{ query: "x".repeat(101) }, { topic: "nope" }, { topic: "Product" }, { stage: "Seed" }, { country: "vn" }, { country: "VNM" },
+      { limit: 0 }, { limit: 51 }, { limit: null }, { afterName: "Alpha" }, { afterId: randomUUID() }] as DiscoverInput[]) {
+      await expect(discover(null, input)).rejects.toMatchObject({ code: "22023" });
+    }
+  });
+  it("hides hidden communities by slug", async () => {
+    const host = await hostWorkspace("Slug host");
+    const member = await account("Slug member"), stranger = await account("Slug stranger"), admin = await account("Slug admin");
+    await addMember(host.workspace, admin, "admin");
+    const hidden = await communityFixture(host, { name: "Slug Hidden", visibility: "hidden" });
+    const privateOne = await communityFixture(host, { name: "Slug Private", visibility: "private" });
+    const archived = await communityFixture(host, { name: "Slug Archived", archived: true });
+    await joinCommunity(host, hidden, member);
+    // Indistinguishable from an unknown slug for everyone who may not see it.
+    expect(await bySlug(stranger.token, communitySlug(hidden))).toEqual([]);
+    expect(await bySlug(null, communitySlug(hidden))).toEqual([]);
+    expect(await bySlug(host.owner.token, "no-such-community")).toEqual([]);
+    expect(await bySlug(host.owner.token, communitySlug(archived))).toEqual([]);
+    const seen = await bySlug(member.token, communitySlug(hidden));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ id: hidden, slug: communitySlug(hidden), name: "Slug Hidden", visibility: "hidden", description: "Description", settings_version: 1,
+      member_count: "2", viewer_status: "member", can_manage: false, host_workspace_name: "Slug host" });
+    expect(seen[0]!.created_at).toBeInstanceOf(Date);
+    // Managers see it without joining.
+    expect(await bySlug(admin.token, communitySlug(hidden))).toMatchObject([{ id: hidden, viewer_status: "none", can_manage: true }]);
+    expect(await bySlug(host.owner.token, communitySlug(hidden))).toMatchObject([{ id: hidden, viewer_status: "owner", can_manage: true }]);
+    // Private communities open by slug for anyone.
+    expect(await bySlug(null, communitySlug(privateOne))).toMatchObject([{ id: privateOne, viewer_status: null, can_manage: false }]);
+    expect(await bySlug(stranger.token, communitySlug(privateOne))).toMatchObject([{ id: privateOne, viewer_status: "none", can_manage: false }]);
+  });
+  it("lists filter values over the communities the caller can discover", async () => {
+    const host = await hostWorkspace("Values host");
+    const member = await account("Values member");
+    type FilterValue = { kind: string; value: string; label: string; count: string };
+    const values = async (token: Buffer | null) => (await asSession(token, `SELECT * FROM ${fn("community_filter_values")}()`)).rows as FilterValue[];
+    const count = (rows: FilterValue[], kind: string, value: string) => Number(rows.find((row) => row.kind === kind && row.value === value)?.count ?? 0);
+    const before = await values(null);
+    await communityFixture(host, { name: "Values Public", topics: ["founders"], stage: "growth", country: "QQ" });
+    const hidden = await communityFixture(host, { name: "Values Hidden", visibility: "hidden", topics: ["founders"], stage: "growth", country: "ZZ" });
+    await joinCommunity(host, hidden, member);
+    const anonymous = await values(null);
+    expect(anonymous.filter((row) => row.kind === "topic").map((row) => [row.value, row.label])).toEqual([["b2b-saas", "B2B SaaS"], ["climate-tech", "Climate Tech"],
+      ["ai-data", "AI & Data"], ["product", "Product"], ["fintech", "FinTech"], ["founders", "Founders Circle"]]);
+    expect(anonymous.filter((row) => row.kind === "stage").map((row) => [row.value, row.label])).toEqual([["idea", "Idea"], ["pre_seed", "Pre-seed"], ["seed", "Seed"],
+      ["series_a", "Series A"], ["growth", "Growth"], ["any", "Any stage"]]);
+    expect(anonymous.map((row) => row.kind)).toEqual([...Array(6).fill("topic"), ...Array(6).fill("stage"), ...Array(anonymous.length - 12).fill("country")]);
+    expect(count(anonymous, "topic", "founders") - count(before, "topic", "founders")).toBe(1);
+    expect(count(anonymous, "stage", "growth") - count(before, "stage", "growth")).toBe(1);
+    expect(anonymous.find((row) => row.value === "QQ")).toEqual({ kind: "country", value: "QQ", label: "QQ", count: "1" });
+    expect(anonymous.find((row) => row.value === "ZZ")).toBeUndefined();
+    const countries = anonymous.filter((row) => row.kind === "country").map((row) => row.value);
+    expect(countries).toEqual([...countries].sort());
+    const memberValues = await values(member.token);
+    expect(memberValues.find((row) => row.value === "ZZ")).toEqual({ kind: "country", value: "ZZ", label: "ZZ", count: "1" });
+    expect(count(memberValues, "topic", "founders") - count(anonymous, "topic", "founders")).toBeGreaterThanOrEqual(1);
+  });
+  it("normalizes stages, locations and taglines of existing communities", async () => {
+    await owner.query("SET ROLE spark_owner");
+    const rows = (await owner.query(`SELECT id,stage,tagline,country_code,city,settings_version FROM ${table("communities")} WHERE id = ANY($1::uuid[])`, [legacyCommunities.map((row) => row.id)])).rows;
+    const byId = new Map(rows.map((row) => [row.id as string, row]));
+    expect(legacyCommunities.map((legacy) => byId.get(legacy.id))).toEqual([
+      { id: legacyCommunities[0]!.id, stage: "seed", tagline: "Founders in Hanoi", country_code: "VN", city: "Hanoi", settings_version: 1 },
+      { id: legacyCommunities[1]!.id, stage: "pre_seed", tagline: "D".repeat(89), country_code: null, city: null, settings_version: 1 },
+      { id: legacyCommunities[2]!.id, stage: "any", tagline: "Description", country_code: null, city: null, settings_version: 1 },
+      { id: legacyCommunities[3]!.id, stage: "series_a", tagline: "Description", country_code: "SG", city: "Singapore", settings_version: 1 },
+      { id: legacyCommunities[4]!.id, stage: "any", tagline: "Description", country_code: null, city: null, settings_version: 1 },
+      { id: legacyCommunities[5]!.id, stage: "any", tagline: "Legacy community", country_code: null, city: null, settings_version: 1 },
+    ]);
+    // New rows must already be normalized.
+    const insert = `INSERT INTO ${table("communities")} (tenant_id,slug,name,tagline,description,stage,country_code,city,settings_version,created_by_user_id) VALUES ($1,$2,'Checked',$3,'Description',$4,$5,$6,$7,$8)`;
+    type Row = { tagline: string | null; stage: string; country: string; city: string; version: number };
+    const attempt = (changes: Partial<Row>) => {
+      const row: Row = { tagline: "Tagline", stage: "seed", country: "VN", city: "Hanoi", version: 1, ...changes };
+      return [tenantA, `checked-${randomUUID()}`, row.tagline, row.stage, row.country, row.city, row.version, userA];
+    };
+    for (const changes of [{ stage: "Seed" }, { stage: "pre-seed" }, { country: "vn" }, { country: "VNM" }, { city: " Hanoi" }, { city: "" }, { city: "x".repeat(81) },
+      { tagline: "" }, { tagline: " Padded" }, { tagline: "x".repeat(91) }, { version: 0 }] as Partial<Row>[]) {
+      await reject(insert, attempt(changes), "23514");
+    }
+    await reject(insert, attempt({ tagline: null }), "23502");
+    await rollback(async () => {
+      await owner.query(insert, attempt({ tagline: "x".repeat(90), city: "x".repeat(80) }));
+      const defaults = (await owner.query(`INSERT INTO ${table("communities")} (tenant_id,slug,name,tagline,description,created_by_user_id) VALUES ($1,$2,'Defaults','Tagline','Description',$3) RETURNING stage,settings_version`,
+        [tenantA, `defaults-${randomUUID()}`, userA])).rows[0];
+      expect(defaults).toEqual({ stage: "any", settings_version: 1 });
+    });
+  });
+  it("keeps the community read functions definers with an empty search_path and the helpers internal", async () => {
+    await owner.query("SET ROLE spark_owner");
+    const rows = (await owner.query(`SELECT p.proname, p.prosecdef, p.provolatile, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname`,
+      [namespace, ["can_manage_community", "community_by_slug", "community_cards", "community_filter_values", "community_topic_codes", "discover_communities", "discoverable_communities"]])).rows;
+    expect(rows.map((row) => [row.proname, row.prosecdef, row.provolatile, row.proconfig, row.runtime, row.worker, row.auth])).toEqual([
+      ["can_manage_community", true, "s", ['search_path=""'], true, false, false],
+      ["community_by_slug", true, "s", ['search_path=""'], true, false, false],
+      ["community_cards", false, "s", ['search_path=""'], false, false, false],
+      ["community_filter_values", true, "s", ['search_path=""'], true, false, false],
+      ["community_topic_codes", false, "i", ['search_path=""'], false, false, false],
+      ["discover_communities", true, "s", ['search_path=""'], true, false, false],
+      ["discoverable_communities", false, "s", ['search_path=""'], false, false, false],
+    ]);
+    // No function reads the spoofable settings any more.
+    const legacy = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname=$1 AND (p.prosrc LIKE '%spark.user\\_id%' OR p.prosrc LIKE '%spark.tenant\\_id%') ORDER BY p.proname`, [namespace]);
+    expect(legacy.rows).toEqual([]);
+  });
+});
 
 describe("Insight reads", () => {
   it("replays issue states", async () => {

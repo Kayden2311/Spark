@@ -74,11 +74,16 @@ export const startupConnections = spark.table("startup_connections", {
   ...mutable(), requesterTenantId: ref("requester_tenant_id").notNull(), recipientTenantId: ref("recipient_tenant_id").notNull(), requestedByUserId: ref("requested_by_user_id").notNull(),
   message: text("message"), status: state("status", ["pending", "accepted", "rejected", "withdrawn", "disconnected"]).notNull().default("pending"), respondedByUserId: ref("responded_by_user_id"), respondedAt: instant("responded_at"),
 }).enableRLS();
+export const communityStages = ["idea", "pre_seed", "seed", "series_a", "growth", "any"] as const;
 export const communities = spark.table("communities", {
-  ...tenant(), slug: text("slug").notNull(), name: text("name").notNull(), description: text("description").notNull(),
-  visibility: state("visibility", ["public", "private", "hidden"]).notNull().default("private"), countryCode: text("country_code"), city: text("city"), stage: text("stage"),
+  ...tenant(), slug: text("slug").notNull(), name: text("name").notNull(), tagline: text("tagline").notNull(), description: text("description").notNull(),
+  visibility: state("visibility", ["public", "private", "hidden"]).notNull().default("private"), countryCode: text("country_code"), city: text("city"),
+  stage: state("stage", communityStages).notNull().default("any"),
   createdByUserId: ref("created_by_user_id").notNull(), archivedAt: instant("archived_at"), featuredAt: instant("featured_at"), frozenAt: instant("frozen_at"),
+  settingsVersion: integer("settings_version").notNull().default(1),
 }).enableRLS();
+// The fixed topic codes (0030); other rows in topics never match a discovery filter.
+export const communityTopicCodes = ["b2b-saas", "climate-tech", "ai-data", "product", "fintech", "founders"] as const;
 export const topics = spark.table("topics", { ...mutable(), slug: text("slug").notNull(), name: text("name").notNull() }).enableRLS();
 export const communityTopics = spark.table("community_topics", { ...community(), topicId: ref("topic_id").notNull() }).enableRLS();
 export const communityMemberships = spark.table("community_memberships", {

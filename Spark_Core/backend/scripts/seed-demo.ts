@@ -72,20 +72,20 @@ const iso = (ms: number) => new Date(Math.min(ms, NOW - 60_000)).toISOString();
 const FIRST = ["Minh", "Anh", "Linh", "Huy", "Thao", "Quang", "Duc", "Mai", "Khoa", "Trang", "Bao", "Nam", "Vy", "Long", "Hoa", "Tuan", "Ngoc", "Phuc", "Lan", "Son", "Alex", "Sam", "Priya", "Daniel", "Chloe", "Marcus", "Aisha", "Leo", "Nora", "Ethan", "Sofia", "Kenji", "Isla", "Omar", "Maya", "Lucas"];
 const LAST = ["Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Dang", "Bui", "Do", "Ngo", "Duong", "Ly", "Carter", "Patel", "Kim", "Silva", "Novak", "Rossi", "Okafor", "Lindqvist"];
 const COMMUNITIES = [
-  ["northstar-founders", "Northstar Founders", "B2B founders selling software across Southeast Asia.", "Seed", 1.0],
-  ["climate-builders", "Climate Builders", "Operators turning climate problems into practical products.", "Pre-Seed", 0.55],
-  ["product-practice", "Product Practice", "Product leaders sharpening discovery and delivery.", "Any", 0.85],
-  ["ai-applied", "AI Applied Engineers", "Engineers shipping agentic workflows and LLM products.", "Pre-Seed", 0.95],
-  ["fintech-hub", "FinTech Builders Hub", "Founders and compliance leads in payments and lending.", "Series A", 0.5],
-  ["first-time-founders", "First-time Founders Circle", "Peer support from idea to first raise.", "Idea", 0.75],
-  ["design-systems", "Design Systems Guild", "Designers and engineers building shared UI foundations.", "Any", 0.45],
-  ["growth-loops", "Growth Loops", "Growth leads comparing acquisition and retention experiments.", "Seed", 0.6],
-  ["devtools-makers", "DevTools Makers", "Builders of developer tools and infrastructure.", "Seed", 0.5],
-  ["health-innovators", "Health Innovators", "Founders working across digital health.", "Pre-Seed", 0.3],
-  ["edtech-lab", "EdTech Lab", "Educators and founders building learning products.", "Idea", 0.35],
-  ["remote-ops", "Remote Ops Collective", "Operations leads running distributed teams.", "Any", 0.4],
-  ["web3-skeptics", "Web3 Skeptics", "Pragmatic builders testing what actually works on-chain.", "Idea", 0.2],
-  ["hardware-hackers", "Hardware Hackers", "Founders shipping physical products.", "Seed", 0.25],
+  ["northstar-founders", "Northstar Founders", "B2B founders selling software across Southeast Asia.", "seed", 1.0],
+  ["climate-builders", "Climate Builders", "Operators turning climate problems into practical products.", "pre_seed", 0.55],
+  ["product-practice", "Product Practice", "Product leaders sharpening discovery and delivery.", "any", 0.85],
+  ["ai-applied", "AI Applied Engineers", "Engineers shipping agentic workflows and LLM products.", "pre_seed", 0.95],
+  ["fintech-hub", "FinTech Builders Hub", "Founders and compliance leads in payments and lending.", "series_a", 0.5],
+  ["first-time-founders", "First-time Founders Circle", "Peer support from idea to first raise.", "idea", 0.75],
+  ["design-systems", "Design Systems Guild", "Designers and engineers building shared UI foundations.", "any", 0.45],
+  ["growth-loops", "Growth Loops", "Growth leads comparing acquisition and retention experiments.", "seed", 0.6],
+  ["devtools-makers", "DevTools Makers", "Builders of developer tools and infrastructure.", "seed", 0.5],
+  ["health-innovators", "Health Innovators", "Founders working across digital health.", "pre_seed", 0.3],
+  ["edtech-lab", "EdTech Lab", "Educators and founders building learning products.", "idea", 0.35],
+  ["remote-ops", "Remote Ops Collective", "Operations leads running distributed teams.", "any", 0.4],
+  ["web3-skeptics", "Web3 Skeptics", "Pragmatic builders testing what actually works on-chain.", "idea", 0.2],
+  ["hardware-hackers", "Hardware Hackers", "Founders shipping physical products.", "seed", 0.25],
 ] as const;
 const TOPICS = ["pricing", "hiring", "fundraising", "onboarding", "churn", "roadmaps", "sales", "analytics", "community", "launch", "infra", "design"];
 const TITLES = [
@@ -185,8 +185,8 @@ async function main() {
       const owner = founders[index % founders.length]!;
       const createdAt = Math.max(owner.createdAt + DAY, NOW - int(110, 175) * DAY);
       const row = await client.query<{ id: string }>(
-        `INSERT INTO spark.communities (tenant_id, slug, name, description, stage, visibility, created_by_user_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        `INSERT INTO spark.communities (tenant_id, slug, name, tagline, description, stage, visibility, created_by_user_id, created_at)
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8) RETURNING id`,
         [owner.workspace, `demo-${slug}`, name, description, stage, index % 5 === 4 ? "private" : "public", owner.id, iso(createdAt)],
       );
       communities.push({ id: row.rows[0]!.id, tenant: owner.workspace, owner, createdAt, popularity, members: [{ member: owner, joined: createdAt }] });
