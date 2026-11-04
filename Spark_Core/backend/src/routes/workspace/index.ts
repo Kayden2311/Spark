@@ -7,8 +7,10 @@ import { registerInvitationRoutes } from "./invitations.js";
 import { registerIssueRoutes } from "./issues.js";
 import { registerMemberRoutes } from "./members.js";
 import { registerMethodologyRoutes } from "./methodologies.js";
+import { registerNotificationRoutes } from "./notifications.js";
 import { registerPlanningRoutes } from "./planning.js";
 import { registerProjectRoutes } from "./projects.js";
+import { registerScheduleRoutes } from "./schedule.js";
 import { registerWorkspaceCrudRoutes } from "./workspaces.js";
 
 export interface WorkspacePluginOptions {
@@ -26,4 +28,6 @@ export function registerWorkspaceRoutes(app: FastifyInstance, options: Workspace
   registerIssueRoutes(app, guard);
   registerPlanningRoutes(app, guard);
   registerInsightRoutes(app, guard);
+  registerScheduleRoutes(app, guard);
+  registerNotificationRoutes(app, guard);
 }

@@ -4,18 +4,19 @@ import type { PoolClient } from "pg";
 import {
   addDays,
   chooseUnit,
+  completion,
   creepPercent,
   forecast,
   idealLine,
   milestoneState,
-  planPercent,
-  planStatus,
+  planWindow,
   rangeOf,
   reliability,
   todayUtc,
   varianceDays,
   type MilestoneState,
-  type PlanStatus,
+  type ScopeAggregate,
+  type WindowedProject,
   type Unit,
 } from "../../modules/work/domain/metrics.js";
 import { problem } from "../responses.js";
@@ -437,69 +438,12 @@ const pair = (p50: string | null, p85: string | null) => ({ p50: nullableNum(p50
 
 // ---------- Shared scope maths ----------
 
-/** One SQL aggregate over a scope of non-archived issues: counts arrive as bigint text, points as numeric text. */
-interface ScopeAggregate {
-  total_count: string;
-  done_count: string;
-  estimated_count: string;
-  total_points: string;
-  done_points: string;
-}
-
 // Aggregates over issues `i` joined to their status `st`; `inScope` narrows the scope with a FILTER.
 const scopeAggregate = (inScope = "true") => `count(*) FILTER (WHERE ${inScope}) AS total_count,
   count(*) FILTER (WHERE ${inScope} AND st.category = 'done') AS done_count,
   count(i.story_points) FILTER (WHERE ${inScope}) AS estimated_count,
   coalesce(sum(coalesce(i.story_points, 0)) FILTER (WHERE ${inScope}), 0) AS total_points,
   coalesce(sum(coalesce(i.story_points, 0)) FILTER (WHERE ${inScope} AND st.category = 'done'), 0) AS done_points`;
-
-interface Completion {
-  unit: Unit;
-  total: number;
-  done: number;
-  donePercent: number;
-  planPercent: number | null;
-  status: PlanStatus;
-}
-
-/** Done toward plan in the scope's unit (points when at least 80% of the issues are estimated). */
-function completion(agg: ScopeAggregate, window: { start: string; end: string } | null, day: string): Completion {
-  const count = num(agg.total_count);
-  const estimated = num(agg.estimated_count);
-  // chooseUnit works on items; only the estimated share matters, so a stand-in list keeps the 80% rule in one place.
-  const unit = chooseUnit(Array.from({ length: count }, (_, index) => ({ points: index < estimated ? 1 : null })));
-  const total = unit === "points" ? num(agg.total_points) : count;
-  const done = unit === "points" ? num(agg.done_points) : num(agg.done_count);
-  // Both percentages are rounded to the one decimal the UI shows before the status is decided, so the pill never
-  // contradicts the numbers next to it at the -10 / -25 edges.
-  const donePercent = total > 0 ? round((done / total) * 100, 1) : 0;
-  const raw = planPercent(window, day);
-  const elapsed = raw === null ? null : round(raw, 1);
-  // An empty scope has nothing to be late on.
-  const status: PlanStatus = total === 0 && elapsed !== null ? "on_track" : planStatus(donePercent, elapsed);
-  return { unit, total, done, donePercent, planPercent: elapsed, status };
-}
-
-interface WindowedProject {
-  methodology: string;
-  start_date: string | null;
-  target_date: string | null;
-}
-
-/** Scrum scores the active sprint; Kanban and Waterfall the project window (both dates needed). */
-function planWindow(
-  project: WindowedProject,
-  sprint: { name: string; starts_on: string | null; ends_on: string | null } | null,
-): { window: { start: string; end: string } | null; kind: "sprint" | "project" | null; label: string | null } {
-  if (project.methodology === "scrum") {
-    return sprint?.starts_on && sprint.ends_on
-      ? { window: { start: sprint.starts_on, end: sprint.ends_on }, kind: "sprint", label: sprint.name }
-      : { window: null, kind: null, label: null };
-  }
-  return project.start_date && project.target_date
-    ? { window: { start: project.start_date, end: project.target_date }, kind: "project", label: "Project window" }
-    : { window: null, kind: null, label: null };
-}
 
 // ---------- Member stats (shared by project and workspace insights) ----------
 

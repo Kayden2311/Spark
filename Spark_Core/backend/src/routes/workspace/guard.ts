@@ -48,6 +48,21 @@ const KNOWN_INPUT_ERRORS: ReadonlySet<string> = new Set([
   "Invalid WIP limit",
   "Invalid status mapping",
   "Invalid switch reason",
+  "Invalid event title",
+  "Invalid event description",
+  "Invalid event location",
+  "Invalid event time",
+  "Invalid event timezone",
+  "Invalid event project",
+  "Invalid event issue",
+  "Invalid event attendees",
+  "Invalid event patch",
+  "Invalid event response",
+  "Invalid notification cursor",
+  "Invalid notification limit",
+  "Invalid notification before",
+  "Invalid notification preferences",
+  "Invalid timezone",
 ]);
 
 // Raised by the issue trigger when a concurrent writer filled the column first: the race fallback for

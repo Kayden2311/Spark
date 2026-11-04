@@ -136,3 +136,7 @@ FE must match the landing-page concept (light calm "signal" look: `globals.css` 
 - Methodology switch touches many issues in one transaction → bounded by project size; lock ordering defined.
 - Chart CSS rename may regress admin visuals → visual check of admin pages in M0.
 - Rate limits are per IP; UTC day buckets.
+- Reminder and digest recipients are the account's primary email, which is unverified until Phase 3, so mail can reach an address its owner never confirmed (the task-assigned email already can). One reminder a day per user and one digest a week per workspace bound the damage.
+- Email delivery is at least once: a worker that dies between the SMTP send and the settle repeats the message after the lease (5 minutes).
+- Throughput: each scheduled job claims 5 rows a minute (about 300 emails an hour); a bigger population is delivered late and what is unsent at the user's local midnight is dropped (`suppressed`, `expired`). Raise the batch or loop while the claim is full when a deployment needs more.
+- The digest's "completed last week" credits the assignee in the done snapshot (the completing actor is not recorded in the event), and its at-risk and overdue lists cover the whole workspace.

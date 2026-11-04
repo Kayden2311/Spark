@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   chooseUnit,
+  completion,
   creepPercent,
   daysBetween,
   forecast,
@@ -11,6 +12,7 @@ import {
   milestoneState,
   planPercent,
   planStatus,
+  planWindow,
   rangeOf,
   reliability,
   roundDays,
@@ -148,5 +150,39 @@ describe("waterfall milestones", () => {
     expect(varianceDays("2026-10-05", "2026-10-10")).toBe(-5);
     expect(varianceDays("2026-10-05", "2026-10-05")).toBe(0);
     expect(varianceDays("2026-10-05", null)).toBeNull();
+  });
+});
+
+describe("completion and plan window (shared with the digest)", () => {
+  const aggregate = { total_count: "10", done_count: "4", estimated_count: "9", total_points: "20", done_points: "5" };
+
+  it("scores in points when at least 80% are estimated and counts otherwise", () => {
+    const window = { start: "2026-10-01", end: "2026-10-10" };
+    expect(completion(aggregate, window, "2026-10-05")).toEqual({
+      unit: "points", total: 20, done: 5, donePercent: 25, planPercent: 50, status: "at_risk",
+    });
+    expect(completion({ ...aggregate, estimated_count: "7" }, window, "2026-10-05")).toMatchObject({
+      unit: "count", total: 10, done: 4, donePercent: 40, planPercent: 50, status: "on_track",
+    });
+  });
+
+  it("has no plan without a window and treats an empty scope as on track", () => {
+    expect(completion(aggregate, null, "2026-10-05")).toMatchObject({ planPercent: null, status: "no_plan" });
+    const empty = { total_count: "0", done_count: "0", estimated_count: "0", total_points: "0", done_points: "0" };
+    expect(completion(empty, { start: "2026-10-01", end: "2026-10-10" }, "2026-10-05")).toMatchObject({
+      unit: "count", total: 0, donePercent: 0, status: "on_track",
+    });
+  });
+
+  it("picks the sprint for Scrum and the project dates otherwise", () => {
+    const sprint = { name: "Sprint 4", starts_on: "2026-10-01", ends_on: "2026-10-14" };
+    expect(planWindow({ methodology: "scrum", start_date: null, target_date: null }, sprint)).toEqual({
+      window: { start: "2026-10-01", end: "2026-10-14" }, kind: "sprint", label: "Sprint 4",
+    });
+    expect(planWindow({ methodology: "scrum", start_date: "2026-01-01", target_date: "2026-02-01" }, null).window).toBeNull();
+    expect(planWindow({ methodology: "kanban", start_date: "2026-01-01", target_date: "2026-02-01" }, sprint)).toEqual({
+      window: { start: "2026-01-01", end: "2026-02-01" }, kind: "project", label: "Project window",
+    });
+    expect(planWindow({ methodology: "waterfall", start_date: "2026-01-01", target_date: null }, null).window).toBeNull();
   });
 });
