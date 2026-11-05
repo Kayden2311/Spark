@@ -15,9 +15,9 @@ const NAME_MAX = 80;
 const SLUG_RULE = "Use 3–40 lowercase letters, numbers or hyphens, starting and ending with a letter or number.";
 
 const METHODS = [
-  { name: "Scrum", tone: "blue", text: "Sprints and a backlog" },
-  { name: "Kanban", tone: "green", text: "A continuous flow" },
-  { name: "Waterfall", tone: "amber", text: "Phases and milestones" },
+  { name: "Scrum", text: "Sprints and a backlog" },
+  { name: "Kanban", text: "A continuous flow" },
+  { name: "Waterfall", text: "Phases and milestones" },
 ] as const;
 
 export default function OnboardingPage() {
@@ -103,7 +103,7 @@ export default function OnboardingPage() {
 
       <main className="wsOnboardingMain">
         <div className="wsOnboardingIntro">
-          <p className="sparkKicker wsPulse"><span aria-hidden="true" />Get started</p>
+          <p className="sparkKicker">Get started</p>
           <h1>Name your workspace</h1>
           <p className="wsLead">A workspace is home for your team&apos;s projects, people and decisions. Pick a name everyone recognises — you can change it later.</p>
         </div>
@@ -160,12 +160,11 @@ export default function OnboardingPage() {
 
           <aside aria-label="Preview" className="wsPreviewCard">
             <div className="wsPreviewBar">
-              <span aria-hidden="true" className="wsPreviewDots"><i /><i /><i /></span>
               <p className="wsPreviewUrl" data-testid="slug-preview">spark.app/w/{previewSlug}</p>
             </div>
             <div className="wsPreviewBody">
               <div className="wsPreviewWorkspace">
-                <span className="avatar">{initials(previewName, "W")}</span>
+                <span aria-hidden="true" className="spSquare spSquareLg">{initials(previewName, "W")}</span>
                 <div>
                   <strong>{previewName}</strong>
                   <span>1 member · You&apos;re the owner</span>
@@ -181,7 +180,7 @@ export default function OnboardingPage() {
                 <ul className="wsNextMethods">
                   {METHODS.map((method) => (
                     <li key={method.name}>
-                      <span className={`tag ${method.tone}`}>{method.name}</span>
+                      <span className="spBadge spBadgeDot" data-methodology={method.name.toLowerCase()}>{method.name}</span>
                       <span>{method.text}</span>
                     </li>
                   ))}
