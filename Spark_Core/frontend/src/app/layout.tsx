@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import { AuthProvider } from "./auth-context";
 import "./globals.css";
 import "./_ui/viz/viz.css";
+import "./_ui/app.css";
+import { appFont } from "./_ui/font";
 
 export const metadata: Metadata = {
   title: {
@@ -22,7 +24,7 @@ type RootLayoutProps = Readonly<{
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="en" data-scroll-behavior="smooth">
+    <html className={appFont.variable} data-scroll-behavior="smooth" lang="en">
       <body>
         <AuthProvider>{children}</AuthProvider>
       </body>

@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "../../../auth-context";
-import { PageTitle, initials } from "../../../components";
+import { initials } from "../../../components";
+import { PageHeader } from "../../../_ui/page-header";
 import { Modal } from "../../_components/modal";
 import { ApiError, canManage, messageOf, roleLabel, workspaceApi, type WorkspaceInvitation, type WorkspaceMember, type WorkspaceRole } from "../../_lib/api";
 import { forgetWorkspace } from "../../_lib/last-workspace";
@@ -167,23 +168,20 @@ export default function MembersPage() {
 
   return (
     <div className="wsMembers">
-      <div aria-hidden="true" className="wsGlow" />
-      <PageTitle eyebrow={workspace.name} title="Members">
-        {manager && (
+      <PageHeader
+        actions={manager && (
           <button className="sparkPrimary" onClick={() => setInviting(true)} type="button">
             <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10" cy="8.5" r="3.5" /><path d="M3.5 19.5c.7-3.4 3.3-5.2 6.5-5.2 1.4 0 2.7.3 3.8 1M18 13v6M15 16h6" /></svg>
             Invite people
           </button>
         )}
-      </PageTitle>
-      <p className="wsPageLead">
-        {count} {count === 1 ? "person" : "people"} in {workspace.name}.{" "}
-        {isOwner ? "As an owner you decide who can manage the workspace." : manager ? "Admins invite people and manage members." : "Owners and admins manage who belongs here."}
-      </p>
+        lead={<>{count} {count === 1 ? "person" : "people"} in {workspace.name}. {isOwner ? "As an owner you decide who can manage the workspace." : manager ? "Admins invite people and manage members." : "Owners and admins manage who belongs here."}</>}
+        title="Members"
+      />
 
-      <section aria-labelledby="members-title" className="wsCard wsMembersCard">
-        <header className="wsCardHeader">
-          <div>
+      <section aria-labelledby="members-title" className="spPanel wsMembersCard">
+        <header className="spPanelHead">
+          <div className="spPanelHeadText">
             <h2 id="members-title">People</h2>
             <p>Everyone with access to this workspace.</p>
           </div>
@@ -193,7 +191,7 @@ export default function MembersPage() {
         {members.error && !members.data && (
           <div className="wsAlert wsInlineAlert" role="alert">
             {members.error}
-            <button className="textButton" onClick={members.reload} type="button">Try again</button>
+            <button className="spBtn spBtnSecondary spBtnSm" onClick={members.reload} type="button">Try again</button>
           </div>
         )}
 
@@ -266,9 +264,9 @@ export default function MembersPage() {
       </section>
 
       {manager && (
-        <section aria-labelledby="pending-title" className="wsCard wsPendingCard">
-          <header className="wsCardHeader">
-            <div>
+        <section aria-labelledby="pending-title" className="spPanel wsPendingCard">
+          <header className="spPanelHead">
+            <div className="spPanelHeadText">
               <h2 id="pending-title">Pending invitations</h2>
               <p>Each link works once and expires after 7 days. Resending sends a fresh link.</p>
             </div>

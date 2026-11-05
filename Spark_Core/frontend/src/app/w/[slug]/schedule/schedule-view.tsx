@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 
+import { PageHeader } from "../../../_ui/page-header";
 import { useAuth } from "../../../auth-context";
 import { initials } from "../../../components";
 import { useInsight } from "../../_components/insights/shared";
@@ -214,21 +215,28 @@ export function ScheduleView() {
 
   return (
     <div className="wsSchedule">
-      <section aria-label="Schedule controls" className="wsSchedBar">
-        <div className="wsSchedBarTitle">
-          <h1>Schedule</h1>
-          <p aria-live="polite" className="wsSchedWeekLabel">{formatWeekLabel(week)}</p>
-        </div>
-        <div className="wsSchedControls">
-          <div className="wsSchedNav" role="group" aria-label="Week">
-            <button aria-label="Previous week" className="sparkSecondary" onClick={() => goTo(addDays(week, -7))} type="button">‹</button>
-            <button className="sparkSecondary" disabled={week === thisWeek} onClick={() => goTo(thisWeek)} type="button">Today</button>
-            <button aria-label="Next week" className="sparkSecondary" onClick={() => goTo(addDays(week, 7))} type="button">›</button>
-          </div>
-          <button aria-pressed={onlyMine} className="wsSchedToggle" onClick={() => setOnlyMine((value) => !value)} type="button">Only mine</button>
-          <button className="sparkPrimary" onClick={() => openCreate(newEventDay)} type="button">New event</button>
-        </div>
-      </section>
+      <PageHeader
+        actions={(
+          <>
+            <div aria-label="Week" className="spBtnGroup wsSchedNav" role="group">
+              <button aria-label="Previous week" className="spBtn spBtnSecondary wsSchedArrow" onClick={() => goTo(addDays(week, -7))} type="button">
+                <svg aria-hidden="true" className="spIcon" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6" /></svg>
+              </button>
+              <button className="spBtn spBtnSecondary" disabled={week === thisWeek} onClick={() => goTo(thisWeek)} type="button">Today</button>
+              <button aria-label="Next week" className="spBtn spBtnSecondary wsSchedArrow" onClick={() => goTo(addDays(week, 7))} type="button">
+                <svg aria-hidden="true" className="spIcon" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>
+              </button>
+            </div>
+            <button aria-pressed={onlyMine} className="spBtn spBtnSecondary wsSchedToggle" onClick={() => setOnlyMine((value) => !value)} type="button">Only mine</button>
+            <button className="spBtn spBtnPrimary" onClick={() => openCreate(newEventDay)} type="button">
+              <svg aria-hidden="true" className="spIcon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+              New event
+            </button>
+          </>
+        )}
+        lead={<span aria-live="polite" className="wsSchedWeekLabel">{formatWeekLabel(week)}</span>}
+        title="Schedule"
+      />
 
       {calendar.loading && <WeekSkeleton />}
       {zoneFallback && <p className="wsSchedNote" role="status">Your time zone is not known to the server, so the week is shown in UTC.</p>}

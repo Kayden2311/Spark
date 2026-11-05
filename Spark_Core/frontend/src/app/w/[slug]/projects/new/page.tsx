@@ -53,7 +53,6 @@ function NewProject() {
   if (!canManage(workspace.role)) {
     return (
       <section aria-labelledby="project-restricted-title" className="wsStateCard">
-        <div aria-hidden="true" className="wsGlow" />
         <p className="sparkKicker"><span aria-hidden="true" />New project</p>
         <h1 id="project-restricted-title">Only owners and admins can create projects</h1>
         <p>Ask an owner or admin of {workspace.name} to set up the project. You&apos;ll see it here as soon as it exists.</p>
@@ -235,7 +234,6 @@ function ProjectCreator({ workspace, first, onCreated }: { workspace: Workspace;
 
   return (
     <div className="wsProjectNew">
-      <div aria-hidden="true" className="wsGlow" />
       <header className="wsProjectNewIntro">
         <p className="sparkKicker"><span aria-hidden="true" />{first ? "Your first project" : "New project"}</p>
         <h1 id="project-new-title">How does your team work?</h1>

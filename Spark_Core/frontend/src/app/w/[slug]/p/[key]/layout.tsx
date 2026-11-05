@@ -5,12 +5,24 @@ import { useParams, usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import { useAuth } from "../../../../auth-context";
+import { initials } from "../../../../components";
+import { PageHeader } from "../../../../_ui/page-header";
 import { canPlan } from "../../../_lib/planning";
 import { isValidProjectKey } from "../../../_lib/project-key";
 import { methodologyAccent, methodologyName, methodologyOf, projectEtag, type ProjectDetail } from "../../../_lib/projects";
 import { useWorkspaceData } from "../../../_lib/use-workspace-data";
 import { useWorkspace } from "../../workspace-context";
 import { ProjectProvider, type ToastTone } from "./project-context";
+
+/** 16px icons for the project view tabs (same stroke family as the shell). */
+const TAB_ICONS: Record<string, ReactNode> = {
+  Board: <><rect height="14" rx="1.5" width="5" x="3.5" y="5" /><rect height="9" rx="1.5" width="5" x="9.5" y="5" /><rect height="11" rx="1.5" width="5" x="15.5" y="5" /></>,
+  Backlog: <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />,
+  Timeline: <path d="M4 6h9M8 12h10M6 18h7" />,
+  Overview: <><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" /><circle cx="12" cy="12" r="2.5" /></>,
+  Insights: <path d="M5 19V11M12 19V5M19 19v-5" />,
+  Settings: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8" /></>,
+};
 
 type Toast = { id: number; text: string; tone: ToastTone };
 type Announcement = { id: number; text: string };
@@ -58,20 +70,17 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
   if (!valid || loaded.errorStatus === 404) {
     content = (
       <section aria-labelledby="project-missing-title" className="wsStateCard">
-        <div aria-hidden="true" className="wsGlow" />
-        <p className="sparkKicker"><span aria-hidden="true" />Project</p>
         <h1 id="project-missing-title">This project isn&apos;t available</h1>
         <p>There is no project with the key {key || "—"} in {workspace.name}. It may have been archived, or the address is mistyped.</p>
-        <Link className="sparkPrimary" href={`/w/${workspace.slug}`}>Back to workspace home</Link>
+        <Link className="spBtn spBtnPrimary" href={`/w/${workspace.slug}`}>Back to workspace home</Link>
       </section>
     );
   } else if (loaded.error && !loaded.loading && !ready) {
     content = (
       <section aria-labelledby="project-error-title" className="wsStateCard">
-        <p className="sparkKicker"><span aria-hidden="true" />Project</p>
         <h1 id="project-error-title">We couldn&apos;t open this project</h1>
         <p role="alert">{loaded.error}</p>
-        <button className="sparkPrimary" onClick={loaded.reload} type="button">Try again</button>
+        <button className="spBtn spBtnPrimary" onClick={loaded.reload} type="button">Try again</button>
       </section>
     );
   } else if (!ready || !value) {
@@ -102,20 +111,26 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
     ].filter((tab) => tab.show);
     content = (
       <div className="wsProject" style={accent}>
-        <div aria-hidden="true" className="wsGlow" />
         <section aria-label="Project" className="wsProjectHero">
-          <div className="wsProjectHeroMain">
-            <p className="wsProjectHeroTags">
-              <span className="wsKeyTag">{ready.key}</span>
-              <span className="wsMethodPill" data-methodology={methodology}>{methodologyName(ready.methodology)}</span>
-            </p>
-            <h1>{ready.name}</h1>
-          </div>
-          <nav aria-label="Project views" className="wsProjectTabs">
-            {tabs.map((tab) => (
-              <Link aria-current={pathname === tab.href ? "page" : undefined} href={tab.href} key={tab.href}>{tab.label}</Link>
-            ))}
-          </nav>
+          <PageHeader
+            meta={(
+              <>
+                <span className="wsKeyTag">{ready.key}</span>
+                <span className="wsMethodPill" data-methodology={methodology}>{methodologyName(ready.methodology)}</span>
+              </>
+            )}
+            square={{ label: initials(ready.name).slice(0, 1), color: methodologyAccent(ready.methodology) }}
+            title={ready.name}
+          >
+            <nav aria-label="Project views" className="spTabs wsProjectTabs">
+              {tabs.map((tab) => (
+                <Link aria-current={pathname === tab.href ? "page" : undefined} href={tab.href} key={tab.href}>
+                  <svg aria-hidden="true" className="spIcon" viewBox="0 0 24 24">{TAB_ICONS[tab.label]}</svg>
+                  {tab.label}
+                </Link>
+              ))}
+            </nav>
+          </PageHeader>
         </section>
         <ProjectProvider value={value}>{children}</ProjectProvider>
       </div>
