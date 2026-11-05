@@ -21,6 +21,13 @@ const nav = vi.hoisted(() => {
       return () => void listeners.delete(listener);
     },
     replace: vi.fn(),
+    /** When true, URL updates wait for flush(), like a soft navigation still fetching. */
+    deferred: false,
+    queued: [] as string[],
+    flush() {
+      const next = this.queued.shift();
+      if (next !== undefined) this.set(next);
+    },
   };
 });
 
@@ -35,7 +42,9 @@ vi.mock("next/navigation", async () => {
     useRouter: () => ({
       replace: (url: string, options?: unknown) => {
         nav.replace(url, options);
-        nav.set(url.split("?")[1] ?? "");
+        const search = url.split("?")[1] ?? "";
+        if (nav.deferred) nav.queued.push(search);
+        else nav.set(search);
       },
       push: vi.fn(),
     }),
@@ -70,6 +79,8 @@ const articleNames = () => screen.getAllByRole("article").map((article) => withi
 describe("communities directory page", () => {
   beforeEach(() => {
     nav.set("");
+    nav.deferred = false;
+    nav.queued.length = 0;
     nav.replace.mockClear();
     auth.isAuthenticated = false;
     auth.user = null;
@@ -113,6 +124,30 @@ describe("communities directory page", () => {
       const last = calls.filter((call) => call.path === "/api/v1/communities").at(-1)!;
       expect(Object.fromEntries(last.search)).toEqual({ q: "ai", topic: "fintech", stage: "growth" });
     });
+  });
+
+  it("keeps text typed while the URL is still catching up, and still follows outside URL changes", async () => {
+    directoryRoutes({ first: { items: [alpha], nextCursor: null } });
+    render(<CommunitiesPage />);
+    await screen.findByRole("heading", { level: 3, name: "Alpha Circle" });
+    nav.deferred = true;
+    const box = screen.getByRole("searchbox", { name: /search communities/i });
+
+    await userEvent.type(box, "ab");
+    await waitFor(() => expect(nav.replace).toHaveBeenLastCalledWith("/communities?q=ab", { scroll: false }));
+    await userEvent.type(box, "c");
+    // The navigation for "ab" lands after "c" was typed.
+    act(() => nav.flush());
+    expect(box).toHaveValue("abc");
+    await waitFor(() => expect(nav.replace).toHaveBeenLastCalledWith("/communities?q=abc", { scroll: false }));
+    act(() => nav.flush());
+    expect(box).toHaveValue("abc");
+
+    // A change that did not come from the box (back button, shared link) still shows in it.
+    act(() => nav.set("q=ab"));
+    expect(box).toHaveValue("ab");
+    act(() => nav.set("q=abc"));
+    expect(box).toHaveValue("abc");
   });
 
   it("appends the next page on Show more without duplicating communities", async () => {

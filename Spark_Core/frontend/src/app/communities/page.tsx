@@ -74,10 +74,14 @@ function Directory() {
   // The search box is typed into locally and written to the URL after a pause.
   const [searchText, setSearchText] = useState(filters.q);
   const [syncedQ, setSyncedQ] = useState(filters.q);
+  // The q this page last wrote to the URL and has not seen arrive yet. Its arrival must not overwrite
+  // what was typed meanwhile (navigation is asynchronous); any other q came from elsewhere.
+  const [writtenQ, setWrittenQ] = useState<string | null>(null);
   if (filters.q !== syncedQ) {
-    // The URL changed from elsewhere (Clear filters, back button): show what it says.
     setSyncedQ(filters.q);
-    if (filters.q !== searchText.trim()) setSearchText(filters.q);
+    if (filters.q === writtenQ) setWrittenQ(null);
+    // Back/forward, a shared link or another tab of history: show what the URL says.
+    else if (filters.q !== searchText.trim()) setSearchText(filters.q);
   }
   const latestFilters = useRef(filters);
   const searchTimer = useRef<number | null>(null);
@@ -90,6 +94,9 @@ function Directory() {
 
   const navigate = (next: CommunityFilters) => {
     const search = filtersToSearch(next);
+    const q = filtersFromParams(new URLSearchParams(search)).q;
+    // Only a q that changes the URL will arrive later; remembering an unchanged one would go stale.
+    setWrittenQ(q !== latestFilters.current.q ? q : null);
     router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
   };
   const cancelSearch = () => {
