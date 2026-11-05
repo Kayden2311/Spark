@@ -24,6 +24,9 @@ const KNOWN_INPUT_ERRORS: ReadonlySet<string> = new Set([
 
 const nullableString = { type: ["string", "null"] } as const;
 
+// Postgres text cannot hold NUL; refusing it in the schema keeps it from becoming a 500.
+export const NO_NUL = "^[^\u0000]*$";
+
 const cardProperties = {
   id: { type: "string" },
   slug: { type: "string" },
@@ -41,7 +44,7 @@ const cardProperties = {
   viewerStatus: nullableString,
 } as const;
 
-const cardResponse = { type: "object", properties: cardProperties } as const;
+export const cardResponse = { type: "object", properties: cardProperties } as const;
 
 const listResponse = {
   type: "object",
@@ -50,7 +53,7 @@ const listResponse = {
 
 const myResponse = { type: "object", properties: { items: { type: "array", items: cardResponse } } } as const;
 
-const detailResponse = {
+export const detailResponse = {
   type: "object",
   properties: {
     ...cardProperties,
@@ -76,11 +79,12 @@ const listQuery = {
   type: "object",
   propertyNames: { enum: ["q", "topic", "country", "stage", "cursor", "limit"] },
   properties: {
-    q: { type: "string", maxLength: 100 },
+    q: { type: "string", maxLength: 100, pattern: NO_NUL },
     topic: { type: "string", enum: TOPIC_SLUGS },
     country: { type: "string", pattern: "^[A-Z]{2}$" },
     stage: { type: "string", enum: STAGE_CODES },
-    cursor: { type: "string", maxLength: 300 },
+    // No maxLength: an over-long cursor is answered as invalid_cursor by the decoder.
+    cursor: { type: "string" },
     limit: { type: "integer", minimum: 1, maximum: 50, default: DEFAULT_LIMIT },
   },
   additionalProperties: false,
@@ -91,11 +95,11 @@ const noQuery = { type: "object", properties: {}, additionalProperties: false, m
 const slugParams = {
   type: "object",
   required: ["slug"],
-  properties: { slug: { type: "string", minLength: 1, maxLength: 60 } },
+  properties: { slug: { type: "string", minLength: 1, maxLength: 60, pattern: NO_NUL } },
   additionalProperties: false,
 } as const;
 
-interface CardRow {
+export interface CardRow {
   id: string;
   slug: string;
   name: string;
@@ -132,9 +136,9 @@ interface FilterRow {
 }
 
 // Explicit columns: nothing else (reviewer ids, emails) can reach a response.
-const CARD_COLUMNS = "id, slug, name, tagline, visibility, country_code, city, stage, topics, member_count, weekly_posts, featured, frozen, host_workspace_name, viewer_status";
+export const CARD_COLUMNS = "id, slug, name, tagline, visibility, country_code, city, stage, topics, member_count, weekly_posts, featured, frozen, host_workspace_name, viewer_status";
 
-function toCard(row: CardRow) {
+export function toCard(row: CardRow) {
   return {
     id: row.id,
     slug: row.slug,
@@ -151,6 +155,33 @@ function toCard(row: CardRow) {
     host: { name: row.host_workspace_name },
     viewerStatus: row.viewer_status,
   };
+}
+
+export type CommunityDetail = ReturnType<typeof toDetail>;
+
+function toDetail(row: DetailRow) {
+  return {
+    ...toCard(row),
+    description: row.description,
+    createdAt: new Date(row.created_at).toISOString(),
+    canManage: row.can_manage,
+    version: row.settings_version,
+  };
+}
+
+const DETAIL_COLUMNS = `${CARD_COLUMNS}, description, created_at, settings_version, can_manage`;
+
+/**
+ * The community detail by id as the session sees it (same projection as GET /communities/{slug}), or
+ * null when it is not visible. Runs inside the caller's session-bound transaction.
+ */
+export async function readCommunityDetail(client: PoolClient, communityId: string): Promise<CommunityDetail | null> {
+  const found = await client.query<DetailRow>(
+    `SELECT ${DETAIL_COLUMNS} FROM spark.community_by_slug((SELECT c.slug FROM spark.communities c WHERE c.id = $1::uuid))`,
+    [communityId],
+  );
+  const row = found.rows[0];
+  return row ? toDetail(row) : null;
 }
 
 // Discovery cursors carry the last row's (lower(name), id): an opaque keyset for ORDER BY lower(name), id.
@@ -237,12 +268,12 @@ export function registerDiscoveryRoutes(app: FastifyInstance, pool: Pool): void 
     "/api/v1/communities",
     { schema: { querystring: listQuery, response: { 200: listResponse } } },
     async (request, reply) => {
+      const viewer = await resolveViewer(pool, request);
+      reply.header("Cache-Control", cacheControl(viewer));
       const cursor = decodeNameCursor(request.query.cursor);
       if (cursor === "invalid") {
         return problem(request, reply, 400, "Bad Request", "invalid_cursor", "The cursor is not valid for this collection.");
       }
-      const viewer = await resolveViewer(pool, request);
-      reply.header("Cache-Control", cacheControl(viewer));
       const limit = request.query.limit ?? DEFAULT_LIMIT;
       const { q, topic, country, stage } = request.query;
       const rows = await readAs(pool, request, reply, viewer, async (client) =>
@@ -281,19 +312,14 @@ export function registerDiscoveryRoutes(app: FastifyInstance, pool: Pool): void 
       reply.header("Cache-Control", cacheControl(viewer));
       const rows = await readAs(pool, request, reply, viewer, async (client) =>
         (await client.query<DetailRow>(
-          `SELECT ${CARD_COLUMNS}, description, created_at, settings_version, can_manage FROM spark.community_by_slug($1::text)`,
+          `SELECT ${DETAIL_COLUMNS} FROM spark.community_by_slug($1::text)`,
           [request.params.slug],
         )).rows);
       if (!rows) return reply;
       const row = rows[0];
       if (!row) return problem(request, reply, 404, "Not Found", "community_not_found", "Community not found.");
-      return reply.header("ETag", formatEtag(row.settings_version)).send({
-        ...toCard(row),
-        description: row.description,
-        createdAt: new Date(row.created_at).toISOString(),
-        canManage: row.can_manage,
-        version: row.settings_version,
-      });
+      const detail = toDetail(row);
+      return reply.header("ETag", formatEtag(detail.version)).send(detail);
     },
   );
 

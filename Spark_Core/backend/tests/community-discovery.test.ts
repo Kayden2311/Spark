@@ -239,3 +239,32 @@ describe("GET /me/communities", () => {
     expect(response.statusCode).toBe(500);
   });
 });
+
+describe("discovery input edge cases", () => {
+  it("sets Cache-Control on an invalid cursor too", async () => {
+    const anonymous = await call(`${base}?cursor=!!!`, [listHandler([])]);
+    expect(anonymous.response.statusCode).toBe(400);
+    expect(anonymous.response.headers["cache-control"]).toBe("no-store");
+    const signedIn = await call(`${base}?cursor=!!!`, [listHandler([])], "valid");
+    expect(signedIn.response.headers["cache-control"]).toBe("private, no-store");
+  });
+
+  it("answers invalid_cursor for an over-long cursor", async () => {
+    const { response, calls } = await call(`${base}?cursor=${"A".repeat(400)}`, [listHandler([])]);
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: "invalid_cursor" });
+    expect(called(calls, "spark.discover_communities")).toBe(false);
+  });
+
+  it("rejects a NUL byte in q with 400 before the database", async () => {
+    const { response, calls } = await call(`${base}?q=a%00b`, [listHandler([])]);
+    expect(response.statusCode).toBe(400);
+    expect(called(calls, "spark.discover_communities")).toBe(false);
+  });
+
+  it("rejects a NUL byte in the slug with 400 before the database", async () => {
+    const { response, calls } = await call(`${base}/a%00b`, [["spark.community_by_slug", () => [detailRow()]]]);
+    expect(response.statusCode).toBe(400);
+    expect(called(calls, "spark.community_by_slug")).toBe(false);
+  });
+});

@@ -63,6 +63,22 @@ const KNOWN_INPUT_ERRORS: ReadonlySet<string> = new Set([
   "Invalid notification before",
   "Invalid notification preferences",
   "Invalid timezone",
+  "Invalid community slug",
+  "Invalid community name",
+  "Invalid community tagline",
+  "Invalid community description",
+  "Invalid community visibility",
+  "Invalid community location",
+  "Invalid community stage",
+  "Invalid community topics",
+  "Invalid community patch",
+  "Invalid community role",
+  "Invalid community search",
+  "Invalid community cursor",
+  "Invalid community limit",
+  "Invalid request message",
+  "Invalid request status",
+  "Invalid decision",
 ]);
 
 // Raised by the issue trigger when a concurrent writer filled the column first: the race fallback for
