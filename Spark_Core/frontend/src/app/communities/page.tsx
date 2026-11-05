@@ -2,16 +2,30 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth-context";
 import { SignalParticles } from "../signal-particles";
-import { ALL_TOPICS, ALL_VALUES, emptyFilters, filterCommunities, hasActiveFilters } from "./filter";
-import { CommunityCard } from "./community-card";
-import { communitySummaries } from "./community-summaries";
-import { formatCount, formatEventDate } from "./format";
-import type { CommunityCategory } from "./types";
-import { SparkLogo as SparkMark } from "../brand/spark-logo";
+import { CommunityCard, initialsOf, toneOf } from "./community-card";
+import { emptyFilters, filtersFromParams, filtersToSearch, hasActiveFilters, MAX_SEARCH_LENGTH, TOPIC_SLUGS, type CommunityFilters } from "./filter";
+import { countryName, formatCount } from "./format";
+import { SiteFooter, SiteHeader } from "./site-chrome";
+import type { CommunityCard as CommunityCardData, FilterOption } from "./types";
+import { useCommunityDirectory, useFilterOptions, useMyCommunities } from "./_lib/use-communities";
 
+const SEARCH_DELAY_MS = 300;
+
+/** Topic names for the chips before the filter options load (same vocabulary as the API). */
+const TOPIC_FALLBACK: FilterOption[] = [
+  { value: "b2b-saas", label: "B2B SaaS", count: 0 },
+  { value: "climate-tech", label: "Climate Tech", count: 0 },
+  { value: "ai-data", label: "AI & Data", count: 0 },
+  { value: "product", label: "Product", count: 0 },
+  { value: "fintech", label: "FinTech", count: 0 },
+  { value: "founders", label: "Founders Circle", count: 0 },
+];
+
+const ROLE_LABELS: Record<string, string> = { owner: "Owner", moderator: "Moderator", member: "Member", pending: "Requested" };
 
 function SearchIcon() {
   return (
@@ -22,83 +36,102 @@ function SearchIcon() {
   );
 }
 
-const CATEGORIES: CommunityCategory[] = ["B2B SaaS", "AI & Data", "Climate Tech", "Product", "FinTech", "Founders Circle"];
-const LOCATIONS = ["Ho Chi Minh City", "Hanoi", "Remote · Vietnam"];
-const STAGES = ["Idea to Pre-seed", "Pre-seed to Seed", "Seed to Series A", "Any stage"];
+/** Keeps a value from the URL selectable even when the options do not list it (yet). */
+function withCurrent(options: FilterOption[], value: string, label: (value: string) => string): FilterOption[] {
+  return !value || options.some((option) => option.value === value) ? options : [...options, { value, label: label(value), count: 0 }];
+}
 
-const totals = {
-  circles: communitySummaries.length,
-  members: communitySummaries.reduce((sum, item) => sum + item.memberCount, 0),
-  posts: communitySummaries.reduce((sum, item) => sum + item.weeklyPosts, 0),
-};
-const mostActive = [...communitySummaries].sort((a, b) => b.weeklyPosts - a.weeklyPosts)[0]!;
-const nextUp = communitySummaries
-  .filter((item) => item.nextEventAt)
-  .sort((a, b) => a.nextEventAt!.localeCompare(b.nextEventAt!))[0];
-
-export default function CommunitiesPage() {
-  const { isAuthenticated } = useAuth();
-  const [searchTerm, setSearchTerm] = useState(emptyFilters.searchTerm);
-  const [selectedCategory, setSelectedCategory] = useState<string>(ALL_TOPICS);
-  const [selectedLocation, setSelectedLocation] = useState<string>(ALL_VALUES);
-  const [selectedStage, setSelectedStage] = useState<string>(ALL_VALUES);
-
-  const filters = useMemo(
-    () => ({ searchTerm, category: selectedCategory, location: selectedLocation, stage: selectedStage }),
-    [searchTerm, selectedCategory, selectedLocation, selectedStage],
+function YourCommunities({ items }: { items: CommunityCardData[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="dirMine" aria-labelledby="your-communities-title">
+      <h2 id="your-communities-title">Your communities</h2>
+      <ul>
+        {items.map((item) => (
+          <li key={item.id}>
+            <Link className={`dirMineLink summaryTone-${toneOf(item)}`} href={`/communities/${encodeURIComponent(item.slug)}`}>
+              <span aria-hidden="true" className="dirMineLogo">{initialsOf(item.name)}</span>
+              <span className="dirMineName">{item.name}</span>
+              {item.viewerStatus && <span className="dirMineRole">{ROLE_LABELS[item.viewerStatus] ?? "Member"}</span>}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
-  const filteredCommunities = useMemo(() => filterCommunities(communitySummaries, filters), [filters]);
-  const hasFilters = hasActiveFilters(filters);
-  // Category counts follow the other filters, so each chip shows what clicking it would return.
-  const categoryCounts = useMemo(() => {
-    const others = filterCommunities(communitySummaries, { ...filters, category: ALL_TOPICS });
-    const counts = new Map<string, number>([[ALL_TOPICS, others.length]]);
-    for (const item of others) counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
-    return counts;
-  }, [filters]);
+}
 
-  const handleResetFilters = () => {
-    setSearchTerm(emptyFilters.searchTerm);
-    setSelectedCategory(ALL_TOPICS);
-    setSelectedLocation(ALL_VALUES);
-    setSelectedStage(ALL_VALUES);
+function Directory() {
+  const { isAuthenticated } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const filters = useMemo(() => filtersFromParams(params), [params]);
+  const options = useFilterOptions();
+  const directory = useCommunityDirectory(filters);
+  const mine = useMyCommunities(isAuthenticated);
+
+  // The search box is typed into locally and written to the URL after a pause.
+  const [searchText, setSearchText] = useState(filters.q);
+  const [syncedQ, setSyncedQ] = useState(filters.q);
+  if (filters.q !== syncedQ) {
+    // The URL changed from elsewhere (Clear filters, back button): show what it says.
+    setSyncedQ(filters.q);
+    if (filters.q !== searchText.trim()) setSearchText(filters.q);
+  }
+  const latestFilters = useRef(filters);
+  const searchTimer = useRef<number | null>(null);
+  useEffect(() => {
+    latestFilters.current = filters;
+  });
+  useEffect(() => () => {
+    if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
+  }, []);
+
+  const navigate = (next: CommunityFilters) => {
+    const search = filtersToSearch(next);
+    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
+  };
+  const cancelSearch = () => {
+    if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
+    searchTimer.current = null;
+  };
+  const setFilter = (change: Partial<CommunityFilters>) => {
+    cancelSearch();
+    navigate({ ...filters, q: searchText, ...change });
+  };
+  const onSearch = (value: string) => {
+    setSearchText(value);
+    cancelSearch();
+    searchTimer.current = window.setTimeout(() => {
+      searchTimer.current = null;
+      navigate({ ...latestFilters.current, q: value });
+    }, SEARCH_DELAY_MS);
+  };
+  const clearFilters = () => {
+    cancelSearch();
+    setSearchText("");
+    navigate(emptyFilters);
   };
 
-  const resultsTitle = selectedCategory === ALL_TOPICS ? "All circles" : selectedCategory;
+  const topics = withCurrent(options?.topics ?? TOPIC_FALLBACK, filters.topic, (value) => value);
+  const countries = withCurrent(options?.countries ?? [], filters.country, (value) => value);
+  const stages = withCurrent(options?.stages ?? [], filters.stage, (value) => value);
+  const topicLabel = topics.find((topic) => topic.value === filters.topic)?.label;
+  const hasFilters = hasActiveFilters(filters) || searchText.trim() !== "";
+
+  const totals = options && {
+    circles: options.stages.reduce((sum, stage) => sum + stage.count, 0),
+    topics: options.topics.filter((topic) => topic.count > 0).length,
+    countries: options.countries.length,
+  };
+  const mostActive = directory.items.reduce<CommunityCardData | null>((best, item) => (item.weeklyPosts > (best?.weeklyPosts ?? 0) ? item : best), null);
+  const shown = directory.items.length;
 
   return (
     <main className="sparkLanding communityPageRoot">
       <SignalParticles />
-
-      <header className="sparkHeader">
-        <Link className="sparkBrand" href="/" aria-label="Spark home">
-          <SparkMark />
-          <span>Spark</span>
-        </Link>
-        <nav aria-label="Main navigation">
-          <Link href="/#product">Product</Link>
-          <Link href="/#pathways">Pathways</Link>
-          <Link href="/#workflow">Workflow</Link>
-          <Link href="/pricing">Pricing</Link>
-          <Link aria-current="page" href="/communities" style={{ color: "var(--landing-blue)" }}>
-            Community
-          </Link>
-        </nav>
-        <div className="headerActions">
-          {isAuthenticated ? (
-            <Link className="sparkNavButton" href="/workspace">
-              Workspace
-            </Link>
-          ) : (
-            <>
-              <Link href="/login">Sign in</Link>
-              <Link className="sparkNavButton" href="/signup?redirect=/workspace">
-                Start free
-              </Link>
-            </>
-          )}
-        </div>
-      </header>
+      <SiteHeader />
 
       <section className="dirHero" aria-labelledby="directory-title">
         <div className="dirHeroPanel">
@@ -111,15 +144,15 @@ export default function CommunitiesPage() {
             <dl className="dirHeroStats">
               <div>
                 <dt>Circles</dt>
-                <dd>{totals.circles}</dd>
+                <dd>{totals ? formatCount(totals.circles) : "—"}</dd>
               </div>
               <div>
-                <dt>Members</dt>
-                <dd>{formatCount(totals.members)}</dd>
+                <dt>Topics</dt>
+                <dd>{totals ? totals.topics : "—"}</dd>
               </div>
               <div>
-                <dt>Posts this week</dt>
-                <dd>{formatCount(totals.posts)}</dd>
+                <dt>Countries</dt>
+                <dd>{totals ? totals.countries : "—"}</dd>
               </div>
             </dl>
           </div>
@@ -134,19 +167,12 @@ export default function CommunitiesPage() {
             <div className="dirHeroPhoto dirHeroPhotoBottom">
               <Image alt="" fill sizes="13rem" src="/spark-founder-circle.png" />
             </div>
-            <div className="dirHeroChip dirHeroChipActive">
-              <span className="dirHeroChipDot" />
-              <div>
-                <strong>{mostActive.weeklyPosts} posts this week</strong>
-                <span>{mostActive.name}</span>
-              </div>
-            </div>
-            {nextUp && (
-              <div className="dirHeroChip dirHeroChipEvent">
-                <span className="dirHeroChipDate">{formatEventDate(nextUp.nextEventAt)}</span>
+            {mostActive && (
+              <div className="dirHeroChip dirHeroChipActive">
+                <span className="dirHeroChipDot" />
                 <div>
-                  <strong>Next session</strong>
-                  <span>{nextUp.name}</span>
+                  <strong>{formatCount(mostActive.weeklyPosts)} posts this week</strong>
+                  <span>{mostActive.name}</span>
                 </div>
               </div>
             )}
@@ -159,71 +185,103 @@ export default function CommunitiesPage() {
             <span className="srOnly">Search communities</span>
             <input
               type="search"
-              placeholder="Search by name, topic or tag"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              maxLength={MAX_SEARCH_LENGTH}
+              placeholder="Search by name, tagline or topic"
+              value={searchText}
+              onChange={(event) => onSearch(event.target.value)}
             />
           </label>
           <div className="dirSelects">
             <label className="dirSelect">
               <span>Location</span>
-              <select value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)}>
-                <option value={ALL_VALUES}>Anywhere</option>
-                {LOCATIONS.map((location) => <option key={location} value={location}>{location}</option>)}
+              <select value={filters.country} onChange={(event) => setFilter({ country: event.target.value })}>
+                <option value="">Anywhere</option>
+                {countries.map((country) => (
+                  <option key={country.value} value={country.value}>{countryName(country.value)}</option>
+                ))}
               </select>
             </label>
             <label className="dirSelect">
               <span>Stage</span>
-              <select value={selectedStage} onChange={(e) => setSelectedStage(e.target.value)}>
-                <option value={ALL_VALUES}>Any stage</option>
-                {STAGES.filter((stage) => stage !== "Any stage").map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+              <select value={filters.stage} onChange={(event) => setFilter({ stage: event.target.value })}>
+                <option value="">Any stage</option>
+                {stages.filter((stage) => stage.value !== "any").map((stage) => (
+                  <option key={stage.value} value={stage.value}>{stage.label}</option>
+                ))}
               </select>
             </label>
           </div>
         </div>
       </section>
 
+      <YourCommunities items={mine} />
+
       <section className="dirResults" aria-labelledby="directory-results-title">
         <div className="dirChips" role="group" aria-label="Filter by topic">
-          {[ALL_TOPICS, ...CATEGORIES].map((category) => (
+          <button aria-pressed={filters.topic === ""} className="dirChip" onClick={() => setFilter({ topic: "" })} type="button">
+            All topics
+          </button>
+          {topics.filter((topic) => (TOPIC_SLUGS as readonly string[]).includes(topic.value)).map((topic) => (
             <button
-              aria-pressed={selectedCategory === category}
+              aria-pressed={filters.topic === topic.value}
               className="dirChip"
-              key={category}
-              onClick={() => setSelectedCategory(category)}
+              key={topic.value}
+              onClick={() => setFilter({ topic: topic.value })}
               type="button"
             >
-              {category}
-              <span className="dirChipCount">{categoryCounts.get(category) ?? 0}</span>
+              {topic.label}
+              {options && <span className="dirChipCount">{topic.count}</span>}
             </button>
           ))}
         </div>
 
         <div className="dirResultsHeader">
           <h2 id="directory-results-title">
-            {resultsTitle}
-            <span>{filteredCommunities.length} {filteredCommunities.length === 1 ? "circle" : "circles"}</span>
+            {topicLabel ?? "All circles"}
+            <span>
+              {shown}
+              {directory.nextCursor ? "+" : ""} {shown === 1 && !directory.nextCursor ? "circle" : "circles"}
+            </span>
           </h2>
           {hasFilters && (
-            <button type="button" className="dirReset" onClick={handleResetFilters}>
+            <button type="button" className="dirReset" onClick={clearFilters}>
               Clear filters
             </button>
           )}
         </div>
 
-        <div className="communityGrid">
-          {filteredCommunities.length > 0 ? (
-            filteredCommunities.map((community) => <CommunityCard community={community} key={community.slug} />)
+        <div className="communityGrid" aria-busy={directory.loading}>
+          {directory.error ? (
+            <div className="communityEmptyState">
+              <h3>The directory could not load</h3>
+              <p role="alert">{directory.error}</p>
+              <button type="button" className="sparkPrimary" onClick={directory.retry}>
+                Try again
+              </button>
+            </div>
+          ) : shown > 0 ? (
+            directory.items.map((community) => <CommunityCard community={community} key={community.id} />)
+          ) : directory.loading ? (
+            <p className="dirLoading" role="status">Loading communities…</p>
           ) : (
             <div className="communityEmptyState">
-              <h3>No circles match these filters</h3>
-              <p>Try a broader topic or location, or clear the filters to see every circle.</p>
-              <button type="button" className="sparkPrimary" onClick={handleResetFilters}>
-                Clear all filters
+              <h3>No communities match — clear filters</h3>
+              <p>Try a broader search, topic or location to see more circles.</p>
+              <button type="button" className="sparkPrimary" onClick={clearFilters}>
+                Clear filters
               </button>
             </div>
           )}
         </div>
+
+        {!directory.error && directory.nextCursor && (
+          <div className="dirMore">
+            <button type="button" className="dirReset" disabled={directory.loadingMore} onClick={() => void directory.loadMore()}>
+              {directory.loadingMore ? "Loading…" : "Show more"}
+            </button>
+            {directory.loadMoreError && <p role="alert">{directory.loadMoreError}</p>}
+          </div>
+        )}
       </section>
 
       <section className="dirCta" aria-labelledby="community-cta-heading">
@@ -247,92 +305,21 @@ export default function CommunitiesPage() {
         </div>
       </section>
 
-      {/* Fully Styled Spark Footer */}
-      <footer className="sparkFooter">
-        <div className="footerInner">
-          <div className="footerGrid">
-            {/* Brand Column */}
-            <div className="footerBrandCol">
-              <Link className="sparkBrand footerBrand" href="/" aria-label="Spark home">
-                <SparkMark tone="dark" />
-                <span>Spark</span>
-              </Link>
-              <p className="footerTagline">
-                One calm operating system for startup communities, founder circles, and high-velocity product teams.
-              </p>
-              <div className="footerStatusBadge">
-                <span className="footerStatusDot" />
-                <span>All systems operational</span>
-              </div>
-            </div>
-
-            {/* Column 1: Product */}
-            <div className="footerCol">
-              <h4 className="footerColTitle">Product</h4>
-              <ul className="footerLinksList">
-                <li><Link href="/workspace">Workspace Boards</Link></li>
-                <li><Link href="/communities">Community Circles</Link></li>
-                <li><Link href="/schedule">Schedule & Timeline</Link></li>
-                <li><Link href="/notifications">Signal Notifications</Link></li>
-                <li><Link href="/pricing">Pricing & Plans</Link></li>
-              </ul>
-            </div>
-
-            {/* Column 2: Ecosystem */}
-            <div className="footerCol">
-              <h4 className="footerColTitle">Ecosystem</h4>
-              <ul className="footerLinksList">
-                <li><Link href="/communities">Browse Directory</Link></li>
-                <li><Link href="/communities">Founder Circles</Link></li>
-                <li><Link href="/communities">Builder Network</Link></li>
-                <li><Link href="/workspace">Agile Templates</Link></li>
-                <li><Link href="/#pathways">Pathway Choices</Link></li>
-              </ul>
-            </div>
-
-            {/* Column 3: Trust & Resources */}
-            <div className="footerCol">
-              <h4 className="footerColTitle">Trust & Resources</h4>
-              <ul className="footerLinksList">
-                <li><Link href="/#workflow">Workflow Guide</Link></li>
-                <li><Link href="/pricing">Plan Matrix</Link></li>
-                <li><Link href="/#main-content">Privacy Policy</Link></li>
-                <li><Link href="/#main-content">Terms of Service</Link></li>
-                <li><Link href="/#main-content">Security & RLS</Link></li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Footer Bottom Bar */}
-          <div className="footerBottom">
-            <p className="footerCopyright">
-              &copy; {new Date().getFullYear()} Spark Technologies, Inc. Built for high-velocity teams.
-            </p>
-            <div className="footerSocialLinks">
-              <a href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-                </svg>
-              </a>
-              <a href="https://x.com" target="_blank" rel="noopener noreferrer" aria-label="X (formerly Twitter)">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-                </svg>
-              </a>
-              <a href="https://discord.com" target="_blank" rel="noopener noreferrer" aria-label="Discord">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.893.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
-                </svg>
-              </a>
-              <a href="https://linkedin.com" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                  <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
-                </svg>
-              </a>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </main>
+  );
+}
+
+export default function CommunitiesPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="sparkLanding communityPageRoot">
+          <SiteHeader />
+        </main>
+      }
+    >
+      <Directory />
+    </Suspense>
   );
 }

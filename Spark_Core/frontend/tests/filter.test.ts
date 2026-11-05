@@ -1,49 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { communitySummaries } from "../src/app/communities/community-summaries";
-import { emptyFilters, filterCommunities, hasActiveFilters } from "../src/app/communities/filter";
+import { emptyFilters, filtersFromParams, filtersToSearch, hasActiveFilters } from "../src/app/communities/filter";
 
-describe("filterCommunities", () => {
-  it("returns every community for empty filters", () => {
-    expect(filterCommunities(communitySummaries, emptyFilters)).toHaveLength(communitySummaries.length);
+describe("community filters in the URL", () => {
+  it("round-trips every filter through the query string", () => {
+    const filters = { q: "pricing teardown", topic: "fintech", country: "VN", stage: "series_a" };
+    const search = filtersToSearch(filters);
+    expect(search).toBe("q=pricing+teardown&topic=fintech&country=VN&stage=series_a");
+    expect(filtersFromParams(new URLSearchParams(search))).toEqual(filters);
   });
 
-  it("matches the keyword case-insensitively across name, tagline, category and tags", () => {
-    const target = communitySummaries[0];
-    const byName = filterCommunities(communitySummaries, { ...emptyFilters, searchTerm: target.name.toUpperCase() });
-    expect(byName.map((c) => c.slug)).toContain(target.slug);
-    const byTag = filterCommunities(communitySummaries, { ...emptyFilters, searchTerm: target.tags[0].toLowerCase() });
-    expect(byTag.map((c) => c.slug)).toContain(target.slug);
+  it("omits empty filters, so no filters means a bare path", () => {
+    expect(filtersToSearch(emptyFilters)).toBe("");
+    expect(filtersToSearch({ ...emptyFilters, q: "   ", topic: "product" })).toBe("topic=product");
+    expect(filtersFromParams(new URLSearchParams(""))).toEqual(emptyFilters);
   });
 
-  it("requires all active filters to match", () => {
-    const target = communitySummaries[0];
-    const result = filterCommunities(communitySummaries, {
-      ...emptyFilters,
-      category: target.category,
-      location: target.location,
-      stage: target.stage,
-    });
-    expect(result.length).toBeGreaterThan(0);
-    for (const item of result) {
-      expect(item.category).toBe(target.category);
-      expect(item.location).toBe(target.location);
-      expect(item.stage).toBe(target.stage);
-    }
+  it("drops values the API would reject instead of sending them", () => {
+    const params = new URLSearchParams({ topic: "crypto", stage: "Seed", country: "vietnam", q: "a".repeat(150) });
+    const filters = filtersFromParams(params);
+    expect(filters.topic).toBe("");
+    expect(filters.stage).toBe("");
+    expect(filters.country).toBe("");
+    expect(filters.q).toHaveLength(100);
   });
 
-  it("returns an empty list when nothing matches", () => {
-    expect(filterCommunities(communitySummaries, { ...emptyFilters, searchTerm: "zzz-no-such-community" })).toEqual([]);
-  });
-
-  it("ignores whitespace-only keywords", () => {
-    expect(filterCommunities(communitySummaries, { ...emptyFilters, searchTerm: "   " })).toHaveLength(communitySummaries.length);
+  it("accepts a lowercase country code by normalizing it", () => {
+    expect(filtersFromParams(new URLSearchParams("country=sg")).country).toBe("SG");
   });
 });
 
 describe("hasActiveFilters", () => {
   it("is false for defaults and true when any filter is set", () => {
     expect(hasActiveFilters(emptyFilters)).toBe(false);
-    expect(hasActiveFilters({ ...emptyFilters, searchTerm: "x" })).toBe(true);
-    expect(hasActiveFilters({ ...emptyFilters, stage: "Growth" })).toBe(true);
+    expect(hasActiveFilters({ ...emptyFilters, q: "  " })).toBe(false);
+    expect(hasActiveFilters({ ...emptyFilters, q: "x" })).toBe(true);
+    expect(hasActiveFilters({ ...emptyFilters, stage: "growth" })).toBe(true);
   });
 });

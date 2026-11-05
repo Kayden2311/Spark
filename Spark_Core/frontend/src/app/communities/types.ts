@@ -1,34 +1,71 @@
-export type CommunityCategory = "B2B SaaS" | "Climate Tech" | "AI & Data" | "Product" | "FinTech" | "Founders Circle";
+/** Shapes of the community discovery and membership API (/api/v1). */
 
-export type CommunityStage = "Idea to Pre-seed" | "Pre-seed to Seed" | "Seed to Series A" | "Growth" | "Any stage";
+export type CommunityVisibility = "public" | "private" | "hidden";
 
-export type CommunityVisibility = "public" | "private";
+/** The viewer's active community role, "pending" for an open join request, or null. */
+export type ViewerStatus = "owner" | "moderator" | "member" | "pending" | null;
 
-/**
- * Card-sized community record returned by the future community listing API
- * (`GET /api/v1/communities`). Mock fixtures must use this shape exactly:
- * structured fields only, never preformatted display strings.
- */
-export interface CommunitySummary {
+export interface CommunityCard {
+  id: string;
   slug: string;
   name: string;
-  /** One sentence, at most 90 characters. */
   tagline: string;
-  category: CommunityCategory;
-  location: string;
-  stage: CommunityStage;
   visibility: CommunityVisibility;
+  location: { countryCode: string | null; city: string | null };
+  /** `label` is for people; never show `code`. */
+  stage: { code: string; label: string };
+  topics: { slug: string; name: string }[];
   memberCount: number;
   /** Posts and comments published in the last 7 days. */
   weeklyPosts: number;
-  /** ISO 8601 start time of the next scheduled event, or null. */
-  nextEventAt: string | null;
-  /** Searchable focus areas, at most four. */
-  tags: string[];
   featured: boolean;
-  /** Cover photo; null renders a generated cover from the name and category. */
-  image: {
-    url: string;
-    alt: string;
-  } | null;
+  /** Paused by Spark moderators: visible, but joins and requests are refused. */
+  frozen: boolean;
+  host: { name: string };
+  viewerStatus: ViewerStatus;
+}
+
+export interface CommunityDetail extends CommunityCard {
+  description: string;
+  createdAt: string;
+  canManage: boolean;
+  version: number;
+}
+
+export interface CommunityPage {
+  items: CommunityCard[];
+  nextCursor: string | null;
+}
+
+export interface FilterOption {
+  value: string;
+  label: string;
+  count: number;
+}
+
+export interface CommunityFilterOptions {
+  topics: FilterOption[];
+  stages: FilterOption[];
+  countries: FilterOption[];
+}
+
+export interface JoinResult {
+  status: "member";
+  alreadyMember: boolean;
+}
+
+export interface JoinRequest {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  message: string | null;
+  createdAt: string;
+}
+
+export interface MyCommunityRequest {
+  id: string;
+  community: { slug: string; name: string };
+  status: JoinRequest["status"];
+  message: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
 }
