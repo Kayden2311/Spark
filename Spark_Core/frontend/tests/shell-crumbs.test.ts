@@ -49,4 +49,22 @@ describe("shellCrumbs", () => {
   it("calls every settings page Settings", () => {
     expect(shellCrumbs({ pathname: "/settings/notifications", current: "", workspace: null, projects: null })).toEqual([{ label: "Settings" }]);
   });
+  it("puts the workspace communities pages under the workspace", () => {
+    expect(shellCrumbs({ pathname: "/w/acme/communities", current: "Communities", workspace, projects })).toEqual([
+      { label: "Acme", href: "/w/acme" },
+      { label: "Communities" },
+    ]);
+    expect(shellCrumbs({ pathname: "/w/acme/communities/new", current: "Communities", workspace, projects })).toEqual([
+      { label: "Acme", href: "/w/acme" },
+      { label: "Communities", href: "/w/acme/communities" },
+      { label: "New community" },
+    ]);
+  });
+
+  it("labels the community manage page under Communities", () => {
+    expect(shellCrumbs({ pathname: "/communities/climate-circle/manage", current: "Communities", workspace, projects: null })).toEqual([
+      { label: "Communities", href: "/communities" },
+      { label: "Manage community" },
+    ]);
+  });
 });

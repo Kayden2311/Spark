@@ -18,6 +18,7 @@ function sectionFor(pathname: string, slug: string): string {
   if (pathname === `${base}/members` || pathname.startsWith(`${base}/members/`)) return "Members";
   if (pathname === `${base}/insights` || pathname.startsWith(`${base}/insights/`)) return "Insights";
   if (pathname === `${base}/schedule` || pathname.startsWith(`${base}/schedule/`)) return "Schedule";
+  if (pathname === `${base}/communities` || pathname.startsWith(`${base}/communities/`)) return "Communities";
   // Project pages are marked in the shell's project list instead.
   if (pathname.startsWith(`${base}/p/`) || pathname.startsWith(`${base}/projects/`)) return "";
   return "Home";

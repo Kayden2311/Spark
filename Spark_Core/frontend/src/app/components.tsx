@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { useUnreadCount } from "./_lib/use-unread-count";
 import { useAuth } from "./auth-context";
 import { shellCrumbs } from "./_ui/crumbs";
@@ -216,7 +216,7 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
   const navigation: Array<[string, string]> = [
     ["Home", active ? `/w/${active.slug}` : "/workspace"],
     ...(active ? [["Members", `/w/${active.slug}/members`] as [string, string], ["Insights", `/w/${active.slug}/insights`] as [string, string]] : []),
-    ["Communities", "/communities"],
+    ["Communities", active ? `/w/${active.slug}/communities` : "/communities"],
     ["Schedule", active ? `/w/${active.slug}/schedule` : "/schedule"],
     ["Notifications", "/notifications"],
     ["Billing", "/billing"],
@@ -238,16 +238,23 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
         <div className="sidebarPanel">
           <nav className="sideNav" aria-label="Workspace navigation">
             {navigation.map(([label, href]) => (
-              <Link
-                aria-current={label === current ? "page" : undefined}
-                className={label === current ? "navItem active" : "navItem"}
-                href={href}
-                key={label}
-              >
-                {ICONS[label]}
-                <span className="navLabel">{label}</span>
-                {label === "Notifications" && user && <NotificationBadge />}
-              </Link>
+              <Fragment key={label}>
+                <Link
+                  aria-current={label === current ? "page" : undefined}
+                  className={label === current ? "navItem active" : "navItem"}
+                  href={href}
+                >
+                  {ICONS[label]}
+                  <span className="navLabel">{label}</span>
+                  {label === "Notifications" && user && <NotificationBadge />}
+                </Link>
+                {/* Inside a workspace, Communities is the hosted list; the public directory stays one click away. */}
+                {label === "Communities" && active && (
+                  <Link className="navItem navSubItem" href="/communities">
+                    <span className="navLabel">Browse communities</span>
+                  </Link>
+                )}
+              </Fragment>
             ))}
             {isPlatformStaff && (
               <Link aria-current={current === "Admin" ? "page" : undefined} className={current === "Admin" ? "navItem navItemStaff active" : "navItem navItemStaff"} href="/admin">

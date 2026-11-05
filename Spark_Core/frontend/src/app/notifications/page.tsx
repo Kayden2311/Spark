@@ -6,6 +6,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { PageTitle, WorkspaceShell, initials } from "../components";
 import { useAuth } from "../auth-context";
 import {
+  communityKindLabel,
   fetchNotifications,
   internalLink,
   markAllNotificationsRead,
@@ -31,13 +32,21 @@ const FILTERS: Array<[NotificationFilter, string]> = [["all", "All"], ["unread",
 
 function Row({ item, now, onOpen }: { item: AppNotification; now: number; onOpen(item: AppNotification): void }) {
   const unread = item.readAt === null;
+  const community = communityKindLabel(item.kind);
   return (
     <li>
       <button className={unread ? "notification notificationRow unread" : "notification notificationRow"} onClick={() => onOpen(item)} type="button">
-        <span aria-hidden="true" className="avatar">{initials(item.workspace.name)}</span>
+        {community ? (
+          <span aria-hidden="true" className="notificationCommunityIcon">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="m15.5 8.5-2.1 4.9-4.9 2.1 2.1-4.9z" /></svg>
+          </span>
+        ) : (
+          <span aria-hidden="true" className="avatar">{initials(item.workspace.name)}</span>
+        )}
         <span className="notificationBody">
-          <span className="notificationWorkspace">{item.workspace.name}</span>
+          <span className="notificationWorkspace">{community ? `Community · hosted by ${item.workspace.name}` : item.workspace.name}</span>
           <strong className="notificationTitle">{item.title}</strong>
+          {community && <span className="spBadge notificationKind" data-kind={item.kind}>{community}</span>}
           {item.body && <span className="notificationText">{item.body}</span>}
           <time dateTime={item.createdAt}>{relativeTime(item.createdAt, now)}</time>
         </span>

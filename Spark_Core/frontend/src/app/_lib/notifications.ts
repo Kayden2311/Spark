@@ -58,6 +58,20 @@ export function newestCreatedAt(items: readonly AppNotification[]): string | nul
   return newest;
 }
 
+const COMMUNITY_KINDS: Record<string, string> = {
+  community_request_received: "Join request",
+  community_request_approved: "Request approved",
+  community_request_rejected: "Request declined",
+};
+
+/**
+ * The label for a community notification, or null for other kinds. Their `workspace` is the community's host,
+ * which the reader may not belong to (a requester outside the workspace), so it is not shown as theirs.
+ */
+export function communityKindLabel(kind: string): string | null {
+  return COMMUNITY_KINDS[kind] ?? null;
+}
+
 /** Only in-app paths are followed; anything else just marks the notification read. */
 export function internalLink(link: string | null): string | null {
   return link && link.startsWith("/") && !link.startsWith("//") && !/[\u0000-\u001f\\]/u.test(link) ? link : null;

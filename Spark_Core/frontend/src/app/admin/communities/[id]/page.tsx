@@ -12,6 +12,7 @@ import { ReasonDialog, type ReasonRequest } from "../../_components/reason-dialo
 import { Avatar, Badge, Card, EmptyState, ErrorBanner, KeyValue, KpiCards, NoAccess, RangePicker, SkeletonRows } from "../../_components/ui";
 import { adminApi } from "../../_lib/api";
 import { canAccess } from "../../_lib/access";
+import { stageLabel } from "../../../communities/_lib/catalog";
 import { AUDIT_ACTIONS, COMMUNITY_STATE, formatCount, formatDate, formatDateTime, formatRelative, humanize, shortDate } from "../../_lib/format";
 import { SERIES } from "../../_lib/palette";
 import { useRange } from "../../_lib/range";
@@ -67,7 +68,7 @@ function CommunityView() {
         <span aria-hidden="true" className="admEntityMark admEntityMarkLg">{community.name.slice(0, 1).toUpperCase()}</span>
         <div className="admProfileText">
           <h1>{community.name}</h1>
-          <p>/{community.slug} · {humanize(community.visibility)}{community.stage ? ` · ${community.stage}` : ""} · created {formatDate(community.createdAt)} by {community.creator.displayName}</p>
+          <p>/{community.slug} · {humanize(community.visibility)}{community.stage ? ` · ${stageLabel(community.stage)}` : ""} · created {formatDate(community.createdAt)} by {community.creator.displayName}</p>
           <div className="admBadgeRow">
             <Badge tone={COMMUNITY_STATE[community.state].tone}>{COMMUNITY_STATE[community.state].label}</Badge>
             <Badge tone={health.tone}>{health.label}</Badge>
@@ -109,7 +110,7 @@ function CommunityView() {
                 ["Description", community.description || "No description"],
                 ["Owner", <span className="admInline" key="owner"><Avatar name={community.creator.displayName} size="sm" />{community.creator.displayName}</span>],
                 ["Visibility", humanize(community.visibility)],
-                ["Stage", community.stage ?? "Not set"],
+                ["Stage", stageLabel(community.stage)],
                 ["Created", formatDateTime(community.createdAt)],
               ]}
             />

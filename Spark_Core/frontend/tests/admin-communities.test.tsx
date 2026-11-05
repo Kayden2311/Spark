@@ -127,6 +127,14 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("communities dashboard", () => {
+  it("shows stage labels, never raw stage codes", async () => {
+    const staged = { items: [{ ...community(1), stage: "pre_seed" }], nextCursor: null };
+    mockApi({ ...routes, "GET /api/v1/admin/communities": json(staged) });
+    render(<AdminLayout><CommunitiesAdminPage /></AdminLayout>);
+    expect(await screen.findByText(/Pre-seed/u)).toBeInTheDocument();
+    expect(screen.queryByText(/pre_seed/u)).toBeNull();
+  });
+
   it("shows the four trend cards for an admin", async () => {
     mockApi(routes);
     render(<AdminLayout><CommunitiesAdminPage /></AdminLayout>);

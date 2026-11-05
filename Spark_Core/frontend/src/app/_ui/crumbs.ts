@@ -22,6 +22,8 @@ export function shellCrumbs({ pathname, current, workspace, projects }: {
   projects: CrumbProject[] | null;
 }): Crumb[] {
   if (pathname.startsWith("/settings")) return [{ label: "Settings" }];
+  // The community manage page is a member-app screen outside any workspace address.
+  if (/^\/communities\/[^/]+\/manage\/?$/u.test(pathname)) return [{ label: "Communities", href: "/communities" }, { label: "Manage community" }];
   const base = workspace ? `/w/${workspace.slug}` : null;
   if (!workspace || !base || (pathname !== base && !pathname.startsWith(`${base}/`))) return current ? [{ label: current }] : [];
 
@@ -36,5 +38,6 @@ export function shellCrumbs({ pathname, current, workspace, projects }: {
     return [...crumbs, projectsCrumb, { label: project?.name ?? key }];
   }
   if (rest[0] === "projects" && rest[1] === "new") return [...crumbs, projectsCrumb, { label: "New project" }];
+  if (rest[0] === "communities" && rest[1] === "new") return [...crumbs, { label: "Communities", href: `${base}/communities` }, { label: "New community" }];
   return current ? [...crumbs, { label: current }] : crumbs;
 }
