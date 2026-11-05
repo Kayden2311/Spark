@@ -144,10 +144,7 @@ export default function AcceptInvitationPage() {
   };
 
   return (
-    <div className="wsOnboarding wsAccept">
-      <div aria-hidden="true" className="authAmbientGrid" />
-      <div aria-hidden="true" className="wsGlow" />
-      <div aria-hidden="true" className="wsGlow two" />
+    <div className="spSurface wsOnboarding wsAccept">
       <header className="wsOnboardingHeader">
         <Link aria-label="Spark home" className="sparkBrand" href="/">
           <SparkMark />
@@ -196,7 +193,7 @@ export default function AcceptInvitationPage() {
         {state.kind === "ready" && (
           <section aria-labelledby="accept-title" className="wsAcceptCard">
             <div className="wsAcceptBanner">
-              <span aria-hidden="true" className="avatar wsAcceptAvatar">{initials(state.preview.workspaceName, "W")}</span>
+              <span aria-hidden="true" className="spSquare spSquareXl wsAcceptAvatar">{initials(state.preview.workspaceName, "W")}</span>
               <div>
                 <p className="wsAcceptKicker">You&apos;re invited</p>
                 <h1 id="accept-title">Join {state.preview.workspaceName}</h1>

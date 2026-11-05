@@ -89,10 +89,7 @@ export default function OnboardingPage() {
   const previewSlug = slug || deriveSlug(name) || "your-team";
 
   return (
-    <div className="wsOnboarding">
-      <div aria-hidden="true" className="authAmbientGrid" />
-      <div aria-hidden="true" className="wsGlow" />
-      <div aria-hidden="true" className="wsGlow two" />
+    <div className="spSurface wsOnboarding">
       <header className="wsOnboardingHeader">
         <Link aria-label="Spark home" className="sparkBrand" href="/">
           <SparkMark />

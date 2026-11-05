@@ -11,6 +11,7 @@ import { GroupHeading, StatusPill, useInsight } from "../../_components/insights
 import { canManage } from "../../_lib/api";
 import { RANGE_OPTIONS, insightPaths, parseRange, percentText, unitLabel, type WorkspaceInsights } from "../../_lib/insights";
 import { formatShortDay, methodologyAccent, methodologyName, methodologyOf } from "../../_lib/projects";
+import { PageHeader } from "../../../_ui/page-header";
 import { useWorkspace } from "../workspace-context";
 
 /** Sets or removes one query parameter without a navigation (Next.js keeps useSearchParams in sync). */
@@ -76,12 +77,8 @@ export default function WorkspaceInsightsPage() {
 
   return (
     <div className="wsInsights">
-      <section aria-label="Insights controls" className="wsInsightsBar">
-        <div className="wsInsightsBarTitle">
-          <h1>Insights</h1>
-          <p>Progress, people and deadlines across {workspace.name}. Day buckets are UTC.</p>
-        </div>
-        <div className="wsInsightsControls">
+      <PageHeader
+        actions={(
           <div aria-label="Range" className="wsInsightsSegment" role="group">
             {RANGE_OPTIONS.map((option) => (
               <button aria-pressed={days === option} key={option} onClick={() => chooseRange(option)} type="button">
@@ -90,8 +87,10 @@ export default function WorkspaceInsightsPage() {
               </button>
             ))}
           </div>
-        </div>
-      </section>
+        )}
+        lead={`Progress, people and deadlines across ${workspace.name}. Day buckets are UTC.`}
+        title="Insights"
+      />
 
       {noProjects && (
         <section aria-labelledby="insights-empty" className="wsEmpty">
