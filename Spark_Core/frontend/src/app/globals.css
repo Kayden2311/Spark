@@ -3691,142 +3691,14 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 /* ==========================================================================
-   Member workspace: shell, onboarding and workspace home (landing tokens)
+   Member app: its styles live in _ui/app.css (tokens, primitives, every screen).
+   Only rules shared with landing pages stay here.
    ========================================================================== */
-
-
-
 .wsSrOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.wsGlow { position: absolute; z-index: -1; top: -12rem; right: -10rem; width: 38rem; height: 38rem; border-radius: 50%; background: radial-gradient(circle, rgba(37, 99, 235, .14), rgba(37, 99, 235, 0) 66%); pointer-events: none; }
-.wsGlow.two { top: auto; right: auto; bottom: -14rem; left: -12rem; width: 32rem; height: 32rem; background: radial-gradient(circle, rgba(14, 165, 233, .11), rgba(14, 165, 233, 0) 66%); }
-
-/* Calm loading screen */
-
-/* Workspace home */
-
-/* In-shell states: not found, failed to load, loading */
-
-/* First-run onboarding */
-
-/* Members, invitations and the accept page */
 button.sparkPrimary { border: 0; font: inherit; font-size: .9rem; font-weight: 750; }
 button.sparkPrimary:disabled, button.sparkSecondary:disabled { cursor: progress; opacity: .7; transform: none; }
 button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 
-
-
-
-
-.wsExpiry { color: #925d00; font-weight: 600; }
-
-
-/* Absolutely positioned so the always-mounted live region takes no grid row in .wsMembers. */
-
-
-@keyframes ws-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes ws-rise { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
-
-
-
-@keyframes ws-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-@keyframes ws-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
-@keyframes ws-ring { 0% { opacity: .9; transform: scale(.85); } 100% { opacity: 0; transform: scale(1.35); } }
-@keyframes ws-dot { 0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, .45); } 70%, 100% { box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); } }
-@keyframes ws-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-
-
-@media (max-width: 640px) {
-  /* Keep the address and date with the title; the action follows them. */
-}
-
 @media (prefers-reduced-motion: reduce) {
   .appShell *, .appShell *::before, .appShell *::after, .wsOnboarding *, .wsOnboarding *::before, .wsOnboarding *::after, .wsSplash *, .wsModalLayer, .wsModalLayer *, .wsToast { scroll-behavior: auto !important; transition-duration: .01ms !important; animation: none !important; }
 }
-
-/* New project: methodology picker and project form */
-/* An outline, not a box-shadow, so the focus ring never competes with the selected card's shadow. */
-
-
-@media (max-width: 640px) {
-  /* Name and Remove share the first line; the two dates stack under the name at full width. */
-}
-
-/* Sidebar project list */
-
-/* Project list on the workspace home */
-
-/* Project overview */
-.wsProject .wsGlow { top: -9rem; right: -6rem; background: radial-gradient(circle, color-mix(in srgb, var(--method-accent) 16%, transparent), transparent 66%); }
-
-/* Waterfall timeline */
-
-/* Project settings dialog */
-
-
-
-
-/* Project header tabs (board / overview) */
-
-/* Project board */
-
-/* Touch screens have no hover, so the Move button stays visible at every width. */
-
-@media (max-width: 767px) {
-  /* The button stays compact, but its touch target grows to at least 44 x 44 px around it. */
-}
-
-
-/* Task drawer: the modal's drawer variant slides in from the right; phones get the whole screen. */
-
-
-@media (prefers-reduced-motion: reduce) {
-  .wsModal[data-variant="drawer"], .wsDrawerConfirm, .wsDrawerSkeleton span { animation: none; }
-}
-
-/* Scrum backlog (M4): sprint lanes stacked top to bottom — active, planned, Backlog. */
-
-@media (max-width: 640px) {
-  /* Phones: key and title on top, tags below with the Move button at the end of the tags row. */
-}
-
-
-/* Waterfall Timeline tab (M4): the plan Gantt with progress, variance and milestones, and its table. */
-
-
-
-/* Project Settings tab: General, board columns, methodology history */
-
-/* Methodology switch wizard */
-
-
-
-/* ---------- Project insights (M5) ---------- */
-
-
-
-
-
-
-/* Taller than the generic chart table (viz.css caps it at 360px) so a team of ten and Unassigned, or seven milestones, fit unscrolled. */
-/* Task keys stay on one line next to long titles, also at 390 px. */
-
-
-
-
-
-
-/* Workspace schedule (week grid on wide screens, agenda on phones) */
-
-
-
-
-
-
-/* ---- Schedule: event dialog and details ---- */
-
-
-
-
-/* Notification inbox and the unread badge in the sidebar. */
-
-/* Email notification settings */
