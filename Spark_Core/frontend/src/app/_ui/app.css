@@ -422,16 +422,16 @@ a.wsProjectRow:hover .wsProjectName strong { color: var(--sp-accent-ink); }
 /* Fields */
 .wsField { display: grid; min-width: 0; gap: 6px; }
 .wsField label, .wsField legend { color: var(--sp-ink); font-size: var(--sp-t12); font-weight: 600; }
-.wsField :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select), .wsSelect { width: 100%; min-width: 0; min-height: 0; height: 34px; padding: 0 10px; border: 1px solid var(--sp-line-strong); border-radius: var(--sp-r2); color: var(--sp-ink); font: inherit; font-size: var(--sp-t13); background-color: var(--sp-surface); box-shadow: var(--sp-e1); outline: none; transition: border-color var(--sp-fast), box-shadow var(--sp-fast); }
+.wsField :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select), .wsSelect { width: 100%; min-width: 0; min-height: 0; height: 34px; padding: 0 10px; border: 1px solid var(--sp-line-strong); border-radius: var(--sp-r2); color: var(--sp-ink); font: inherit; font-size: var(--sp-t13); background-color: var(--sp-surface); box-shadow: var(--sp-e1); outline: none; transition: border-color var(--sp-fast), box-shadow var(--sp-fast); }
 .wsField textarea { height: auto; min-height: 84px; padding: 8px 10px; line-height: 1.5; resize: vertical; }
 .wsField select, .wsSelect { padding-right: 30px; appearance: none; background: var(--sp-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235f6377' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E") no-repeat right 8px center / 16px; cursor: pointer; }
 .wsSelect { width: auto; }
 .wsField .wsSelect { width: 100%; height: 34px; min-height: 0; font-size: var(--sp-t13); }
-.wsField :is(input, textarea)::placeholder { color: var(--sp-faint); }
-.wsField :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select):hover, .wsSelect:hover { border-color: #c3c3d2; }
-.wsField :is(input, textarea, select):focus, .wsField :is(input, textarea, select):focus-visible, .wsSelect:focus-visible { border-color: var(--sp-accent); box-shadow: var(--sp-ring); }
-.wsField :is(input, textarea, select)[aria-invalid="true"], .wsSelect[aria-invalid="true"] { border-color: var(--sp-danger); box-shadow: none; }
-.wsField :is(input, textarea, select):disabled, .wsSelect:disabled { color: var(--sp-muted); background-color: var(--sp-sunken); cursor: not-allowed; opacity: 1; }
+.wsField :where(input, textarea)::placeholder { color: var(--sp-faint); }
+.wsField :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select):hover, .wsSelect:hover { border-color: #c3c3d2; }
+.wsField :where(input, textarea, select):focus, .wsField :where(input, textarea, select):focus-visible, .wsSelect:focus-visible { border-color: var(--sp-accent); box-shadow: var(--sp-ring); }
+.wsField :where(input, textarea, select)[aria-invalid="true"], .wsSelect[aria-invalid="true"] { border-color: var(--sp-danger); box-shadow: none; }
+.wsField :where(input, textarea, select):disabled, .wsSelect:disabled { color: var(--sp-muted); background-color: var(--sp-sunken); cursor: not-allowed; opacity: 1; }
 .wsAddress { display: flex; align-items: stretch; overflow: hidden; border: 1px solid var(--sp-line-strong); border-radius: var(--sp-r2); background: var(--sp-surface); box-shadow: var(--sp-e1); transition: border-color var(--sp-fast), box-shadow var(--sp-fast); }
 .wsAddress:focus-within { border-color: var(--sp-accent); box-shadow: var(--sp-ring); }
 .wsAddress[data-invalid="true"] { border-color: var(--sp-danger); box-shadow: none; }
@@ -739,3 +739,137 @@ a.wsProjectRow:hover .wsProjectName strong { color: var(--sp-accent-ink); }
 .wsEmpty h2 { margin: 0; color: var(--sp-ink); font-size: var(--sp-t14); font-weight: 600; }
 .wsEmpty > p { max-width: 36rem; margin: 0; color: var(--sp-muted); font-size: var(--sp-t13); line-height: 1.55; }
 .wsEmpty > .sparkPrimary, .wsEmpty > .spBtn { margin-top: 8px; }
+
+/* ---------- Project header ---------- */
+.wsProject { display: grid; gap: 16px; min-width: 0; }
+.wsProjectHero { min-width: 0; }
+.wsProjectHero .spPageHeader { margin-bottom: 0; }
+.wsProjectTabs { margin: 0 -10px; }
+
+/* ---------- Board ---------- */
+.wsBoard { display: grid; gap: 12px; min-width: 0; }
+.wsBoardBanner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid #f2dcc0; border-radius: var(--sp-r2); color: #6b3a00; font-size: var(--sp-t13); background: var(--sp-review-soft); }
+.wsBoardBanner svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+.wsBoardFilter { display: inline-flex; flex-wrap: wrap; align-items: center; justify-self: start; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--sp-line); border-radius: var(--sp-r2); color: var(--sp-text); font-size: var(--sp-t12); font-weight: 500; background: var(--sp-surface); }
+.wsBoardFilter a { color: var(--sp-accent-ink); font-weight: 600; }
+.wsBoardScroller { display: grid; grid-auto-columns: minmax(264px, 1fr); grid-auto-flow: column; align-items: start; gap: 12px; overflow-x: auto; padding: 2px 2px 10px; scrollbar-width: thin; scrollbar-color: var(--sp-line-strong) transparent; }
+.wsBoardColumn { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 6px; min-width: 0; padding: 6px; border-radius: var(--sp-r2); background: var(--sp-sunken); transition: background var(--sp-fast), box-shadow var(--sp-fast); }
+.wsBoardColumn[data-drop="ok"] { background: var(--sp-accent-soft); box-shadow: inset 0 0 0 1px var(--sp-accent); }
+.wsBoardColumn[data-drop="blocked"] { background: var(--sp-danger-soft); box-shadow: inset 0 0 0 1px var(--sp-danger); }
+.wsBoardColumnHead { display: flex; min-width: 0; align-items: center; gap: 8px; height: 30px; padding: 0 4px; }
+.wsBoardColumnHead h2 { display: inline-flex; min-width: 0; max-width: 70%; align-items: center; height: 20px; margin: 0; padding: 0 7px; overflow: hidden; border-radius: var(--sp-r1); color: #ffffff; font-size: var(--sp-t11); font-weight: 700; letter-spacing: .04em; line-height: 20px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; background: var(--sp-status, var(--sp-todo)); }
+.wsBoardCount { color: var(--sp-muted); font-size: var(--sp-t12); font-weight: 600; font-variant-numeric: tabular-nums; }
+.wsBoardWip { margin-left: auto; color: var(--sp-muted); font-size: var(--sp-t11); font-weight: 600; white-space: nowrap; }
+.wsBoardWip[data-state="at"] { color: var(--sp-review); }
+.wsBoardWip[data-state="over"] { color: var(--sp-danger); }
+.wsBoardNotice { margin: 0; padding: 6px 8px; border: 1px solid #f2dcc0; border-radius: var(--sp-r2); color: #6b3a00; font-size: var(--sp-t12); font-weight: 500; line-height: 1.45; background: var(--sp-review-soft); animation: sp-pop .16s ease-out; }
+.wsBoardList { display: grid; align-content: start; gap: 6px; min-height: 40px; margin: 0; padding: 0; list-style: none; }
+.wsBoardItem { position: relative; }
+.wsBoardCard { display: grid; gap: 6px; padding: 9px 10px 8px; border: 1px solid var(--sp-line); border-radius: var(--sp-r2); background: var(--sp-surface); box-shadow: var(--sp-e1); cursor: grab; transition: transform var(--sp-move), box-shadow var(--sp-move), border-color var(--sp-fast); }
+.wsBoardCard:hover { border-color: var(--sp-line-strong); box-shadow: var(--sp-e2); transform: translateY(-1px); }
+.wsBoardCard:focus-visible { border-color: var(--sp-accent); box-shadow: var(--sp-ring); }
+.wsBoardCard[data-picked] { border-color: var(--sp-accent); box-shadow: var(--sp-ring), var(--sp-e2); transform: translateY(-1px); }
+.wsBoardCard[data-dragging] { opacity: .45; }
+.wsBoardCard[data-busy] { cursor: progress; }
+.wsBoardCardTop { display: flex; min-height: 18px; align-items: center; gap: 6px; padding-right: 76px; }
+.wsBoardCardTop .wsKeyTag { height: auto; padding: 0; border: 0; color: var(--sp-muted); font-family: inherit; font-size: var(--sp-t11); font-weight: 600; letter-spacing: 0; background: none; }
+.wsBoardPoints { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: var(--sp-r1); color: var(--sp-accent-ink); font-size: var(--sp-t11); font-weight: 600; font-variant-numeric: tabular-nums; background: var(--sp-accent-soft); }
+.wsBoardCardTitle { margin: 0; color: var(--sp-ink); font-size: var(--sp-t13); font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.wsBoardCardMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 20px; color: var(--sp-muted); font-size: var(--sp-t11); }
+.wsBoardTag { display: inline-flex; align-items: center; gap: 5px; color: var(--sp-muted); font-size: var(--sp-t11); font-weight: 600; white-space: nowrap; }
+.wsBoardTag[data-type]::before { content: ""; width: 8px; height: 8px; flex: none; border-radius: 2px; background: var(--sp-tag, var(--sp-todo)); }
+.wsBoardTag[data-type="task"] { --sp-tag: var(--sp-doing); }
+.wsBoardTag[data-type="bug"] { --sp-tag: var(--sp-danger); }
+.wsBoardTag[data-type="story"] { --sp-tag: #7c5cd6; }
+.wsBoardTag[data-priority] { color: var(--sp-priority, var(--sp-muted)); }
+.wsBoardTag[data-priority]::before { content: ""; width: 12px; height: 12px; flex: none; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 21V4M5 4h11l-2 4 2 4H5'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 21V4M5 4h11l-2 4 2 4H5'/%3E%3C/svg%3E") center / contain no-repeat; }
+.wsBoardTag[data-priority="highest"], .wsBoardTag[data-priority="high"] { --sp-priority: var(--sp-danger); }
+.wsBoardTag[data-priority="medium"] { --sp-priority: var(--sp-review); }
+.wsBoardTag[data-priority="low"], .wsBoardTag[data-priority="lowest"] { --sp-priority: var(--sp-todo); }
+.wsBoardPhase { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: var(--sp-r1); color: var(--sp-review); font-size: var(--sp-t11); font-weight: 600; white-space: nowrap; background: var(--sp-review-soft); }
+.wsBoardDue { color: var(--sp-muted); font-size: var(--sp-t11); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wsBoardDue[data-overdue] { color: var(--sp-danger); font-weight: 600; }
+.wsBoardAssignee { margin-left: auto; }
+.wsBoardMove { position: absolute; top: 6px; right: 6px; }
+.wsBoardMoveButton { display: inline-flex; height: 22px; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--sp-line); border-radius: var(--sp-r1); color: var(--sp-muted); font: inherit; font-size: var(--sp-t11); font-weight: 600; background: var(--sp-surface); cursor: pointer; opacity: 0; transition: opacity var(--sp-fast), color var(--sp-fast), background var(--sp-fast); }
+.wsBoardMoveButton svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.wsBoardItem:hover .wsBoardMoveButton, .wsBoardItem:focus-within .wsBoardMoveButton, .wsBoardMoveButton[aria-expanded="true"] { opacity: 1; }
+.wsBoardMoveButton:hover { color: var(--sp-ink); background: var(--sp-hover); }
+.wsBoardMoveButton:disabled { cursor: progress; opacity: .5; }
+.wsBoardMenu { position: fixed; z-index: 90; top: 0; left: 0; display: grid; min-width: 208px; padding: 4px; border: 1px solid var(--sp-line); border-radius: var(--sp-r3); font-family: var(--sp-font-stack); background: var(--sp-surface); box-shadow: var(--sp-e3); animation: sp-pop .12s ease-out; }
+.wsBoardMenuItem { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border: 0; border-radius: var(--sp-r2); color: var(--sp-text); font: inherit; font-size: var(--sp-t13); text-align: left; background: transparent; cursor: pointer; }
+.wsBoardMenuItem:hover, .wsBoardMenuItem:focus-visible { outline: none; background: var(--sp-hover); }
+.wsBoardMenuItem[aria-checked="true"] { color: var(--sp-accent-ink); font-weight: 600; }
+.wsBoardMenuItem[aria-disabled="true"] { color: var(--sp-faint); cursor: not-allowed; }
+.wsBoardMenuCheck { display: grid; width: 16px; height: 16px; flex: none; place-items: center; }
+.wsBoardMenuCheck svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.wsBoardMenuHint { margin-left: auto; color: var(--sp-muted); font-size: var(--sp-t11); font-weight: 500; }
+.wsBoardDropMarker { height: 3px; border-radius: var(--sp-r1); background: var(--sp-accent); }
+.wsBoardDropMarker[data-blocked] { background: var(--sp-danger); }
+.wsBoardAdd { display: grid; gap: 4px; }
+.wsBoardAddRow { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 3px 0 8px; border: 1px solid transparent; border-radius: var(--sp-r2); color: var(--sp-muted); transition: background var(--sp-fast), border-color var(--sp-fast), box-shadow var(--sp-fast); }
+.wsBoardAddRow::before { content: "+"; flex: none; width: 12px; color: var(--sp-muted); font-size: var(--sp-t16); line-height: 1; text-align: center; }
+.wsBoardAddRow:hover { background: var(--sp-hover); }
+.wsBoardAddRow:focus-within { border-color: var(--sp-accent); background: var(--sp-surface); box-shadow: var(--sp-ring); }
+.wsBoardAddRow input { width: 0; min-width: 0; flex: 1; height: 28px; padding: 0; border: 0; color: var(--sp-ink); font: inherit; font-size: var(--sp-t13); background: transparent; outline: none; }
+.wsBoardAddRow input::placeholder { color: var(--sp-muted); }
+.wsBoardAddRow input:disabled { cursor: not-allowed; }
+.wsBoardAddButton { display: grid; width: 24px; height: 24px; flex: none; place-items: center; padding: 0; border: 0; border-radius: var(--sp-r1); color: #ffffff; background: var(--sp-accent); cursor: pointer; transition: opacity var(--sp-fast), background var(--sp-fast); }
+.wsBoardAddButton:hover:not(:disabled) { background: var(--sp-accent-hover); }
+.wsBoardAddButton:disabled { cursor: default; opacity: 0; }
+.wsBoardAddRow:focus-within .wsBoardAddButton:disabled { opacity: .35; }
+.wsBoardAddButton svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.wsBoardState { display: grid; justify-items: start; gap: 8px; }
+.wsBoardState h2 { margin: 0; color: var(--sp-ink); font-size: var(--sp-t14); font-weight: 600; }
+.wsBoardState p { margin: 0; color: var(--sp-muted); }
+.wsBoardSkeleton { display: grid; grid-auto-columns: minmax(264px, 1fr); grid-auto-flow: column; gap: 12px; overflow: hidden; }
+.wsBoardSkeleton span:not(.wsSrOnly) { display: block; height: 320px; border-radius: var(--sp-r2); background: linear-gradient(90deg, var(--sp-sunken) 0%, #fbfbfc 50%, var(--sp-sunken) 100%); background-size: 200% 100%; animation: sp-shimmer 1.4s linear infinite; }
+
+/* ---------- Task drawer ---------- */
+.wsModal[data-variant="drawer"] .wsModalHeader h2 { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--sp-line); border-radius: var(--sp-r1); color: var(--sp-muted); font-family: var(--sp-mono); font-size: var(--sp-t12); font-weight: 600; letter-spacing: .02em; background: var(--sp-canvas); }
+.wsField textarea.wsDrawerTitle { height: auto; min-height: 0; padding: 6px 8px; border-color: transparent; box-shadow: none; color: var(--sp-ink); font-size: var(--sp-t20); font-weight: 600; line-height: 1.35; letter-spacing: -.015em; resize: none; field-sizing: content; }
+.wsField textarea.wsDrawerTitle:hover { border-color: var(--sp-line); }
+.wsField textarea.wsDrawerTitle:focus { border-color: var(--sp-accent); box-shadow: var(--sp-ring); }
+.wsDrawerForm { display: grid; gap: 16px; }
+.wsDrawerFields { display: grid; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.wsDrawerFields:disabled .wsField label { color: var(--sp-muted); }
+.wsDrawerGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.wsDrawerActions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 14px; border-top: 1px solid var(--sp-line-soft); }
+.wsDrawerArchive { display: inline-flex; height: 30px; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--sp-r2); color: var(--sp-danger); font: inherit; font-size: var(--sp-t13); font-weight: 600; background: transparent; cursor: pointer; transition: background var(--sp-fast); }
+.wsDrawerArchive:hover { background: var(--sp-danger-soft); }
+.wsDrawerArchive svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.wsDrawerConfirm { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid #f3cdd0; border-radius: var(--sp-r2); background: var(--sp-danger-soft); animation: sp-pop .16s ease-out; }
+.wsDrawerConfirm p { margin: 0; color: #7a1a21; font-size: var(--sp-t13); line-height: 1.5; }
+.wsDrawerConfirm strong { color: var(--sp-danger-hover); }
+.wsDrawerConfirm .wsModalActions { margin-top: 0; padding-top: 0; border-top: 0; }
+.wsDrawerState { display: grid; justify-items: start; gap: 10px; color: var(--sp-muted); }
+.wsDrawerSkeleton { display: grid; gap: 10px; }
+.wsDrawerSkeleton span:not(.wsSrOnly) { display: block; height: 36px; border-radius: var(--sp-r2); background: linear-gradient(90deg, var(--sp-sunken) 0%, #fbfbfc 50%, var(--sp-sunken) 100%); background-size: 200% 100%; animation: sp-shimmer 1.4s linear infinite; }
+.wsDrawerSkeleton span:nth-child(3) { height: 96px; }
+.wsDrawerHistory { display: grid; gap: 8px; padding-top: 16px; border-top: 1px solid var(--sp-line); }
+.wsDrawerHistory h3 { margin: 0; color: var(--sp-ink); font-size: var(--sp-t14); font-weight: 600; }
+.wsHistoryList { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.wsHistoryList li { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 0; }
+.wsHistoryList li + li::before { content: ""; position: absolute; top: -8px; left: 10px; width: 1px; height: 12px; background: var(--sp-line); }
+.wsHistoryList p { margin: 0; color: var(--sp-text); font-size: var(--sp-t13); line-height: 1.45; }
+.wsHistoryList time { color: var(--sp-muted); font-size: var(--sp-t11); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wsHistoryList:empty::after { content: "No history yet."; color: var(--sp-muted); font-size: var(--sp-t13); }
+.wsHistoryMore { justify-self: start; }
+
+@media (hover: none) { .wsBoardMoveButton { opacity: 1; } }
+@media (max-width: 767px) {
+  .wsBoardScroller { grid-auto-columns: minmax(82%, 1fr); scroll-snap-type: x mandatory; }
+  .wsBoardColumn { scroll-snap-align: start; }
+  .wsBoardMoveButton { position: relative; opacity: 1; }
+  /* The button stays compact, but its touch target grows to at least 44 x 44 px around it. */
+  .wsBoardMoveButton::after { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+}
+@media (max-width: 640px) {
+  .wsDrawerGrid { grid-template-columns: minmax(0, 1fr); }
+  .wsDrawerActions .sparkPrimary { flex: 1 1 8rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wsBoardCard, .wsBoardColumn, .wsBoardMoveButton { transition: none; }
+  .wsBoardCard:hover, .wsBoardCard[data-picked] { transform: none; }
+  .wsBoardNotice, .wsBoardMenu, .wsDrawerConfirm, .wsBoardSkeleton span, .wsDrawerSkeleton span { animation: none; }
+}
