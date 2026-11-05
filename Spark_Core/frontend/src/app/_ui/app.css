@@ -332,3 +332,67 @@
   .sidebar, .sidebar[data-open="true"] { transition: none; }
   .sidebarScrim, .workspaceMenu, .wsSplashMark, .wsSkeleton > span, .wsSkeletonRow span { animation: none; }
 }
+
+/* ---------- Shared member pieces (older ws* class names, now on the tokens) ---------- */
+.wsCard { min-width: 0; padding: 16px; border: 1px solid var(--sp-line); border-radius: var(--sp-r2); background: var(--sp-surface); box-shadow: var(--sp-e1); }
+.wsCardHeader { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
+.wsCardHeader h2 { margin: 0; color: var(--sp-ink); font-size: var(--sp-t14); font-weight: 600; letter-spacing: -.005em; }
+.wsCardHeader p { margin: 2px 0 0; color: var(--sp-muted); font-size: var(--sp-t12); }
+.wsKeyTag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--sp-line); border-radius: var(--sp-r1); color: var(--sp-muted); font-family: var(--sp-mono); font-size: var(--sp-t11); font-weight: 500; letter-spacing: .02em; white-space: nowrap; background: var(--sp-canvas); }
+.wsMethodPill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border: 1px solid var(--sp-line); border-radius: var(--sp-r1); color: var(--sp-text); font-size: var(--sp-t12); font-weight: 500; white-space: nowrap; background: var(--sp-surface); }
+.wsMethodPill::before { content: ""; width: 7px; height: 7px; flex: none; border-radius: 2px; background: var(--sp-dot, var(--sp-faint)); }
+.wsAlert { padding: 10px 12px; border: 1px solid #f3cdd0; border-radius: var(--sp-r2); color: var(--sp-danger); font-size: var(--sp-t13); line-height: 1.5; background: var(--sp-danger-soft); }
+.wsInlineAlert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 12px 16px; }
+.wsEmpty { display: grid; justify-items: center; gap: 6px; padding: 32px 20px; text-align: center; }
+.wsEmptyArt { display: grid; width: 40px; height: 40px; place-items: center; margin-bottom: 4px; border: 1px solid var(--sp-line); border-radius: var(--sp-r2); color: var(--sp-muted); background: var(--sp-surface); box-shadow: var(--sp-e1); }
+.wsEmptyArt svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.wsEmptyTitle { max-width: 34rem; margin: 0; color: var(--sp-ink); font-size: var(--sp-t14); font-weight: 600; text-wrap: balance; }
+.wsEmptyText { max-width: 36rem; margin: 0; color: var(--sp-muted); font-size: var(--sp-t13); line-height: 1.55; }
+.wsMethods { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; text-align: left; }
+.wsMethods > li { display: grid; }
+.wsMethod { display: grid; align-content: start; justify-items: start; gap: 6px; padding: 12px; border: 1px solid var(--sp-line); border-radius: var(--sp-r2); color: var(--sp-text); text-decoration: none; background: var(--sp-surface); box-shadow: var(--sp-e1); }
+.wsMethod strong { color: var(--sp-ink); font-size: var(--sp-t14); font-weight: 600; }
+.wsMethod > span:last-child { color: var(--sp-muted); font-size: var(--sp-t12); line-height: 1.5; }
+.wsMethodLink { transition: border-color var(--sp-fast), box-shadow var(--sp-move), transform var(--sp-move); }
+.wsMethodLink:hover { border-color: var(--sp-line-strong); box-shadow: var(--sp-e2); transform: translateY(-1px); }
+.wsProgressBar { position: relative; height: 4px; flex: 1; min-width: 40px; overflow: hidden; border-radius: var(--sp-r1); background: var(--sp-line-soft); }
+.wsProgressBar > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--sp-done); }
+.wsProgressText { color: var(--sp-muted); font-size: var(--sp-t12); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- Workspace home ---------- */
+.spPageLead { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.spDot { color: var(--sp-faint); }
+.wsHomeAddress { font-family: var(--sp-mono); font-size: var(--sp-t12); }
+.wsProjects { overflow: hidden; }
+.wsProjectList { margin: 0; padding: 0; list-style: none; }
+.wsProjectRow { display: grid; grid-template-columns: minmax(0, 2.4fr) 130px minmax(0, 1.2fr) minmax(170px, 1fr); align-items: center; gap: 16px; min-height: 44px; padding: 6px 16px; border-top: 1px solid var(--sp-line-soft); color: inherit; text-decoration: none; transition: background var(--sp-fast); }
+.wsProjectList > li:first-child .wsProjectRow { border-top: 0; }
+a.wsProjectRow:hover { background: #fbfbfd; }
+a.wsProjectRow:hover .wsProjectName strong { color: var(--sp-accent-ink); }
+.wsProjectRowHead { min-height: 32px; border-top: 0; border-bottom: 1px solid var(--sp-line); color: var(--sp-muted); font-size: var(--sp-t11); font-weight: 600; background: var(--sp-canvas); }
+.wsProjectName { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.wsProjectName strong { min-width: 0; overflow: hidden; color: var(--sp-ink); font-size: var(--sp-t13); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; transition: color var(--sp-fast); }
+.wsProjectName .wsKeyTag { flex: none; }
+.wsProjectLead { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--sp-muted); font-size: var(--sp-t12); }
+.wsProjectLeadName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wsProjectNoLead { color: var(--sp-muted); font-size: var(--sp-t12); }
+.wsProjectProgress { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.wsProjectSkeleton { display: grid; gap: 8px; padding: 12px 16px 16px; }
+.wsProjectSkeleton span:not(.wsSrOnly) { display: block; height: 36px; border-radius: var(--sp-r2); background: linear-gradient(90deg, var(--sp-sunken) 0%, #fbfbfc 50%, var(--sp-sunken) 100%); background-size: 200% 100%; animation: sp-shimmer 1.4s linear infinite; }
+
+@media (max-width: 720px) {
+  .wsProjectRowHead { display: none; }
+  .wsProjectList > li:first-child .wsProjectRow { border-top: 0; }
+  .wsProjectRow { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name name" "lead method" "progress progress"; gap: 8px 12px; padding: 12px 16px; }
+  .wsProjectName { grid-area: name; }
+  .wsProjectMethod { grid-area: method; }
+  .wsProjectLead { grid-area: lead; }
+  .wsProjectProgress { grid-area: progress; }
+}
+@media (max-width: 640px) {
+  .wsMethods { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wsMethodLink:hover { transform: none; }
+  .wsProjectSkeleton span:not(.wsSrOnly) { animation: none; }
+}
