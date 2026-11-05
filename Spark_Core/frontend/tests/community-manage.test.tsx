@@ -26,7 +26,7 @@ const requestRow = (id: string, name: string, message: string | null = "We build
 const memberRow = (userId: string, displayName: string, role: string) => ({ userId, displayName, avatarUrl: null, role, joinedAt: "2026-10-05T10:00:00.000Z" });
 
 function manager(overrides: Partial<CommunityDetail> = {}) {
-  return detail({ visibility: "private", viewerStatus: "owner", canManage: true, version: 3, ...overrides });
+  return detail({ visibility: "private", viewerStatus: "owner", canManage: true, canGovern: true, version: 3, ...overrides });
 }
 
 /** Serves the community detail plus whatever the test adds; the detail handler runs last. */
@@ -174,7 +174,7 @@ describe("community manage page", () => {
   });
 
   it("shows role pills to moderators and lets them remove plain members only", async () => {
-    const { calls } = serve(manager({ viewerStatus: "moderator" }), (url, init) => {
+    const { calls } = serve(manager({ viewerStatus: "moderator", canGovern: false }), (url, init) => {
       if (url.pathname === "/api/v1/communities/c-northstar/members" && (init.method ?? "GET") === "GET") {
         return json({ items: [memberRow("u-owner", "Avery Owner", "owner"), memberRow("u-mod", "Mo Moderator", "moderator"), memberRow("u-m", "Max Member", "member")] });
       }
@@ -288,5 +288,63 @@ describe("community manage page", () => {
     await openTab("Settings");
     await userEvent.click(await screen.findByRole("radio", { name: /Hidden/ }));
     expect(screen.getByText(/disappears from the directory/)).toBeInTheDocument();
+  });
+  it("moves between tabs with the arrow, Home and End keys", async () => {
+    serve(manager());
+    render(<ManageCommunity slug="northstar-founders" />);
+    const requests = await screen.findByRole("tab", { name: "Requests" });
+    expect(requests).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tab", { name: "Members" })).toHaveAttribute("tabindex", "-1");
+    requests.focus();
+
+    await userEvent.keyboard("{ArrowRight}");
+    const members = screen.getByRole("tab", { name: "Members" });
+    expect(members).toHaveAttribute("aria-selected", "true");
+    expect(members).toHaveFocus();
+    expect(await screen.findByRole("button", { name: "Add from workspace" })).toBeInTheDocument();
+
+    await userEvent.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: "Settings" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Settings" })).toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Requests" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(screen.getByRole("tab", { name: "Settings" })).toHaveFocus();
+    await userEvent.keyboard("{Home}");
+    expect(screen.getByRole("tab", { name: "Requests" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Requests" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("lets a host workspace admin who moderates the community change roles and settings", async () => {
+    serve(manager({ viewerStatus: "moderator", canGovern: true }), (url, init) =>
+      url.pathname === "/api/v1/communities/c-northstar/members" && (init.method ?? "GET") === "GET"
+        ? json({ items: [memberRow("u-owner", "Avery Owner", "owner"), memberRow("u-hostadmin", "Hana Admin", "moderator")] })
+        : undefined,
+    );
+    auth.user = { id: "u-hostadmin" };
+    render(<ManageCommunity slug="northstar-founders" />);
+    expect(await screen.findByRole("tab", { name: "Settings" })).toBeInTheDocument();
+    await openTab("Members");
+    expect(await screen.findByRole("combobox", { name: "Role for Avery Owner" })).toBeInTheDocument();
+  });
+
+  it("asks the server again after changing your own role", async () => {
+    let detailCalls = 0;
+    serve(null, (url, init) => {
+      if (url.pathname === "/api/v1/communities/northstar-founders" && (init.method ?? "GET") === "GET") {
+        detailCalls += 1;
+        return json(detailCalls === 1 ? manager() : manager({ viewerStatus: "moderator", canGovern: false }));
+      }
+      if (url.pathname === "/api/v1/communities/c-northstar/members" && (init.method ?? "GET") === "GET") {
+        return json({ items: [memberRow("u-owner", "Avery Owner", "owner"), memberRow("u-other", "Olive Owner", "owner")] });
+      }
+      if (url.pathname === "/api/v1/communities/c-northstar/members/u-owner" && init.method === "PATCH") return json(memberRow("u-owner", "Avery Owner", "moderator"));
+      return undefined;
+    });
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Members");
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Role for Avery Owner" }), "moderator");
+    await waitFor(() => expect(detailCalls).toBe(2));
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "Settings" })).not.toBeInTheDocument());
   });
 });

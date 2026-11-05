@@ -53,6 +53,7 @@ const detailRow = (over: object = {}) => ({
   created_at: new Date("2026-10-01T10:00:00Z"),
   settings_version: 4,
   can_manage: false,
+  host_admin: false,
   ...over,
 });
 const listHandler = (rows: object[]): [string, QueryHandler] => ["spark.discover_communities", () => rows];
@@ -195,6 +196,24 @@ describe("GET /communities/{slug}", () => {
     expect(response.headers["cache-control"]).toBe("private, no-store");
     expect(response.json()).toMatchObject({ canManage: true, viewerStatus: "owner" });
     expect(sessionSet(calls)).toBe(true);
+  });
+
+  it.each([
+    ["a community owner", { can_manage: true, viewer_status: "owner", host_admin: false }, true],
+    ["a host workspace admin who is a community moderator", { can_manage: true, viewer_status: "moderator", host_admin: true }, true],
+    ["a host workspace admin who is not a member", { can_manage: true, viewer_status: null, host_admin: true }, true],
+    ["a plain moderator", { can_manage: true, viewer_status: "moderator", host_admin: false }, false],
+    ["a member", { can_manage: false, viewer_status: "member", host_admin: false }, false],
+  ])("decides canGovern on the server for %s", async (_who, row, expected) => {
+    const { response, calls } = await call(`${base}/saas-founders`, [["spark.community_by_slug", () => [detailRow(row)]]], "valid");
+    expect(response.statusCode).toBe(200);
+    expect(response.json().canGovern).toBe(expected);
+    expect(find(calls, "spark.community_by_slug")?.sql).toContain("spark.is_workspace_member(c.tenant_id, ARRAY['owner','admin'])");
+  });
+
+  it("never gives an anonymous visitor canGovern", async () => {
+    const { response } = await call(`${base}/saas-founders`, [["spark.community_by_slug", () => [detailRow({ host_admin: true, viewer_status: null })]]]);
+    expect(response.json().canGovern).toBe(false);
   });
 
   it("answers 404 community_not_found for an empty result", async () => {

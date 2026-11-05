@@ -6,6 +6,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations, localConnection } from "../../scripts/database-support.js";
 import { hashPassword } from "../../src/infrastructure/database/password.js";
+import { DETAIL_BY_SLUG_SQL } from "../../src/routes/communities/discovery.js";
 import { DEADLINES_SQL } from "../../src/routes/workspace/schedule.js";
 
 const namespace = `spark_test_${randomUUID().replaceAll("-", "")}`;
@@ -4023,6 +4024,25 @@ async function bySlug(token: Buffer | null, slug: string) {
 }
 
 describe("Community access and discovery", () => {
+  it("reads host workspace admin standing for the detail route (canGovern)", async () => {
+    const host = await hostWorkspace("Govern host");
+    const hostAdmin = await account("Govern admin"), moderator = await account("Govern moderator"), stranger = await account("Govern stranger");
+    await addMember(host.workspace, hostAdmin, "admin");
+    const community = await communityFixture(host, { name: "Govern Circle", visibility: "private" });
+    await joinCommunity(host, community, hostAdmin, "moderator");
+    await joinCommunity(host, community, moderator, "moderator");
+    const sql = DETAIL_BY_SLUG_SQL.replace(/\bspark\./gu, `"${namespace}".`);
+    const standing = async (token: Buffer | null) => {
+      const [row] = (await asSession(token, sql, [communitySlug(community)])).rows as Array<{ viewer_status: string | null; can_manage: boolean; host_admin: boolean }>;
+      return row ? { viewer_status: row.viewer_status, can_manage: row.can_manage, host_admin: row.host_admin } : null;
+    };
+    expect(await standing(host.owner.token)).toEqual({ viewer_status: "owner", can_manage: true, host_admin: true });
+    expect(await standing(hostAdmin.token)).toEqual({ viewer_status: "moderator", can_manage: true, host_admin: true });
+    expect(await standing(moderator.token)).toEqual({ viewer_status: "moderator", can_manage: true, host_admin: false });
+    expect(await standing(stranger.token)).toEqual({ viewer_status: "none", can_manage: false, host_admin: false });
+    expect(await standing(null)).toEqual({ viewer_status: null, can_manage: false, host_admin: false });
+  });
+
   it("binds community reads to the live session", async () => {
     const host = await hostWorkspace("Session host");
     const member = await account("Session member"), requester = await account("Session requester"), admin = await account("Session admin");

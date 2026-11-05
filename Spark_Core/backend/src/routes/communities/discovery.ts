@@ -60,6 +60,7 @@ export const detailResponse = {
     description: { type: "string" },
     createdAt: { type: "string" },
     canManage: { type: "boolean" },
+    canGovern: { type: "boolean" },
     version: { type: "integer" },
   },
 } as const;
@@ -126,6 +127,8 @@ interface DetailRow extends CardRow {
   created_at: Date | string;
   settings_version: number;
   can_manage: boolean;
+  /** The actor is an active owner or admin of the host workspace (false without a session). */
+  host_admin: boolean;
 }
 
 interface FilterRow {
@@ -165,11 +168,26 @@ function toDetail(row: DetailRow) {
     description: row.description,
     createdAt: new Date(row.created_at).toISOString(),
     canManage: row.can_manage,
+    // Changes roles and settings: an active community owner or a host workspace owner/admin, whatever their
+    // community role (the "administrator" standing of 0031). A moderator who is a host admin governs too.
+    canGovern: row.can_manage && (row.viewer_status === "owner" || row.host_admin === true),
     version: row.settings_version,
   };
 }
 
 const DETAIL_COLUMNS = `${CARD_COLUMNS}, description, created_at, settings_version, can_manage`;
+
+// is_workspace_member is session-bound (0014) and granted to spark_app; without a session it is false. The
+// community row is readable here because the detail itself is (same RLS visibility).
+const HOST_ADMIN = "coalesce((SELECT spark.is_workspace_member(c.tenant_id, ARRAY['owner','admin']) FROM spark.communities c WHERE c.id = d.id), false) AS host_admin";
+
+/** The detail projection over community_by_slug(<slug expression>). */
+function detailQuery(slugExpression: string): string {
+  return `SELECT ${DETAIL_COLUMNS}, ${HOST_ADMIN} FROM spark.community_by_slug(${slugExpression}) d`;
+}
+
+/** GET /communities/{slug}'s query; exported so the database tests run the same SQL. */
+export const DETAIL_BY_SLUG_SQL = detailQuery("$1::text");
 
 /**
  * The community detail by id as the session sees it (same projection as GET /communities/{slug}), or
@@ -177,7 +195,7 @@ const DETAIL_COLUMNS = `${CARD_COLUMNS}, description, created_at, settings_versi
  */
 export async function readCommunityDetail(client: PoolClient, communityId: string): Promise<CommunityDetail | null> {
   const found = await client.query<DetailRow>(
-    `SELECT ${DETAIL_COLUMNS} FROM spark.community_by_slug((SELECT c.slug FROM spark.communities c WHERE c.id = $1::uuid))`,
+    detailQuery("(SELECT c.slug FROM spark.communities c WHERE c.id = $1::uuid)"),
     [communityId],
   );
   const row = found.rows[0];
@@ -312,7 +330,7 @@ export function registerDiscoveryRoutes(app: FastifyInstance, pool: Pool): void 
       reply.header("Cache-Control", cacheControl(viewer));
       const rows = await readAs(pool, request, reply, viewer, async (client) =>
         (await client.query<DetailRow>(
-          `SELECT ${DETAIL_COLUMNS} FROM spark.community_by_slug($1::text)`,
+          DETAIL_BY_SLUG_SQL,
           [request.params.slug],
         )).rows);
       if (!rows) return reply;

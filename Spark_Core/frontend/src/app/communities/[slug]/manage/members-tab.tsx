@@ -92,7 +92,7 @@ function AddFromWorkspace({ context, onAdded, onClose }: { context: ManageContex
 }
 
 export function MembersTab({ context }: { context: ManageContext }) {
-  const { community, canGovern, notify, handleAccess, update } = context;
+  const { community, canGovern, notify, handleAccess, update, refresh } = context;
   const { user } = useAuth();
   const me = user?.id ?? null;
   const communityId = community.id;
@@ -117,8 +117,8 @@ export function MembersTab({ context }: { context: ManageContext }) {
       const updated = await communitiesApi.setRole(communityId, member.userId, role);
       list.setItems((items) => items.map((item) => (item.userId === member.userId ? updated : item)));
       notify(`${member.displayName} is now ${role === "owner" ? "an owner" : role === "moderator" ? "a moderator" : "a member"}.`);
-      // Giving up your own owner role can take away Settings: reload what the page may show.
-      if (member.userId === me) update((current) => ({ ...current, viewerStatus: role }));
+      // Your own role changed: the server decides again what you may do (a host admin keeps governing).
+      if (member.userId === me) void refresh();
     } catch (error) {
       if (!handleAccess(error)) setRowError({ userId: member.userId, text: errorFor(error) });
     } finally {

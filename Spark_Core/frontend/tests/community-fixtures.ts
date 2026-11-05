@@ -31,6 +31,7 @@ export function detail(overrides: Partial<CommunityDetail> = {}): CommunityDetai
     description: "A working community for founders selling software across Southeast Asia.",
     createdAt: "2026-10-01T10:00:00.000Z",
     canManage: false,
+    canGovern: false,
     version: 1,
     ...overrides,
   };

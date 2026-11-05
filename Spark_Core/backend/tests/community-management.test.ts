@@ -56,6 +56,7 @@ const detailRow = (over: object = {}) => ({
   created_at: new Date("2026-11-01T10:00:00Z"),
   settings_version: 1,
   can_manage: true,
+  host_admin: false,
   ...over,
 });
 const detailHandler = (over: object = {}): [string, QueryHandler] => ["spark.community_by_slug", () => [detailRow(over)]];
@@ -117,7 +118,7 @@ describe("POST /workspaces/{id}/communities", () => {
     expect(response.headers.location).toBe("/api/v1/communities/night-owls");
     expect(response.headers.etag).toBe("\"v1\"");
     expect(response.headers["cache-control"]).toBe("private, no-store");
-    expect(response.json()).toMatchObject({ id: communityId, slug: "night-owls", canManage: true, version: 1, description: "A place for night owls" });
+    expect(response.json()).toMatchObject({ id: communityId, slug: "night-owls", canManage: true, canGovern: true, version: 1, description: "A place for night owls" });
     expect(find(calls, "spark.ws_create_community")?.params).toEqual([wsId, "night-owls", "Night Owls", "Late builders", "A place for night owls", "private", "DE", null, "seed", ["founders"]]);
   });
 
@@ -206,11 +207,11 @@ describe("PATCH /communities/{id}", () => {
   it("updates and answers the detail with the new ETag", async () => {
     const { response, calls } = await send({ method: "PATCH", url, payload: { name: "New", city: null, topics: ["product"] }, headers: { "if-match": "\"v1\"" } }, [
       update("ok", 2),
-      detailHandler({ name: "New", settings_version: 2 }),
+      detailHandler({ name: "New", settings_version: 2, viewer_status: "moderator", host_admin: true }),
     ]);
     expect(response.statusCode).toBe(200);
     expect(response.headers.etag).toBe("\"v2\"");
-    expect(response.json()).toMatchObject({ name: "New", version: 2 });
+    expect(response.json()).toMatchObject({ name: "New", version: 2, canGovern: true });
     const params = find(calls, "spark.ws_update_community")?.params ?? [];
     expect(params.slice(0, 2)).toEqual([communityId, 1]);
     expect(JSON.parse(String(params[2]))).toEqual({ name: "New", city: null, topics: ["product"] });
@@ -220,10 +221,10 @@ describe("PATCH /communities/{id}", () => {
   it("answers 412 with the current representation when stale", async () => {
     const { response } = await send({ method: "PATCH", url, payload: { name: "New" }, headers: { "if-match": "\"v1\"" } }, [
       update("version_mismatch", 3),
-      detailHandler({ settings_version: 3 }),
+      detailHandler({ settings_version: 3, viewer_status: "moderator" }),
     ]);
     expect(response.statusCode).toBe(412);
-    expect(response.json()).toMatchObject({ code: "version_mismatch", current: { id: communityId, version: 3 } });
+    expect(response.json()).toMatchObject({ code: "version_mismatch", current: { id: communityId, version: 3, canGovern: false } });
   });
 
   it.each([["forbidden", 403, "insufficient_role"], ["not_found", 404, "community_not_found"]])("maps %s", async (outcome, status, code) => {

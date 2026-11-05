@@ -29,6 +29,8 @@ export interface CommunityDetail extends CommunityCard {
   description: string;
   createdAt: string;
   canManage: boolean;
+  /** Decided by the server: a community owner or a host workspace owner/admin (whatever their community role) changes roles and settings. */
+  canGovern: boolean;
   version: number;
 }
 

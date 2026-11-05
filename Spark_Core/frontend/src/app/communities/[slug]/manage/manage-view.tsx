@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 
 import { useAuth } from "../../../auth-context";
 import { PageHeader } from "../../../_ui/page-header";
-import { ApiError, currentOf, isSignedOut, loginPath } from "../../_lib/api";
+import { ApiError, communitiesApi, currentOf, isSignedOut, loginPath } from "../../_lib/api";
 import { useCommunity } from "../../_lib/use-communities";
 import type { CommunityDetail } from "../../types";
 import { MembersTab } from "./members-tab";
@@ -29,6 +29,8 @@ export interface ManageContext {
   /** Handles 401 and 403 for every tab; returns true when the error was handled here. */
   handleAccess(error: unknown): boolean;
   update(change: (community: CommunityDetail) => CommunityDetail): void;
+  /** Reloads the community quietly (after a change to your own role, the server decides what you may do). */
+  refresh(): Promise<void>;
 }
 
 function StateCard({ title, text, slug }: { title: string; text?: string; slug: string | null }) {
@@ -57,6 +59,7 @@ export function ManageCommunity({ slug }: { slug: string }) {
   const [stale, setStale] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const tabsId = useId();
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const here = `/communities/${slug}/manage`;
 
   useEffect(() => {
@@ -85,6 +88,14 @@ export function ManageCommunity({ slug }: { slug: string }) {
     },
     [here, router],
   );
+  const refresh = useCallback(async () => {
+    try {
+      const fresh = await communitiesApi.detail(slug);
+      update(() => fresh);
+    } catch (problem) {
+      if (!handleAccess(problem)) retry();
+    }
+  }, [handleAccess, retry, slug, update]);
 
   if (!signedIn) return <div aria-busy="true" className="spManageLoading" role="status"><span className="spSrOnly">Checking your access…</span></div>;
 
@@ -115,10 +126,24 @@ export function ManageCommunity({ slug }: { slug: string }) {
     return <StateCard slug={community.slug} text={`${community.name} is run by its owners and moderators. You can still visit the community page.`} title={RESTRICTED_MESSAGE} />;
   }
 
-  const canGovern = community.viewerStatus !== "moderator";
+  const canGovern = community.canGovern;
   const tabs: Array<[Tab, string]> = [["requests", "Requests"], ["members", "Members"], ...(canGovern ? [["settings", "Settings"] as [Tab, string]] : [])];
   const active = tabs.some(([value]) => value === tab) ? tab : "requests";
-  const context: ManageContext = { community, canGovern, notify, handleAccess, update };
+  const context: ManageContext = { community, canGovern, notify, handleAccess, update, refresh };
+
+  // Roving focus (WAI-ARIA tabs): arrows move and wrap, Home and End jump to the ends; the choice follows focus.
+  const onTabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = tabs.length - 1;
+    const next = event.key === "ArrowRight" ? (index === last ? 0 : index + 1)
+      : event.key === "ArrowLeft" ? (index === 0 ? last : index - 1)
+        : event.key === "Home" ? 0
+          : event.key === "End" ? last
+            : null;
+    if (next === null) return;
+    event.preventDefault();
+    setTab(tabs[next]![0]);
+    tabRefs.current[next]?.focus();
+  };
 
   const onStale = (problem: unknown) => {
     setStale(true);
@@ -141,13 +166,15 @@ export function ManageCommunity({ slug }: { slug: string }) {
         title={community.name}
       >
         <div aria-label="Manage community" className="spTabs" role="tablist">
-          {tabs.map(([value, label]) => (
+          {tabs.map(([value, label], index) => (
             <button
               aria-controls={`${tabsId}-${value}-panel`}
               aria-selected={active === value}
               id={`${tabsId}-${value}-tab`}
               key={value}
               onClick={() => setTab(value)}
+              onKeyDown={(event) => onTabKey(event, index)}
+              ref={(element) => { tabRefs.current[index] = element; }}
               role="tab"
               tabIndex={active === value ? 0 : -1}
               type="button"
