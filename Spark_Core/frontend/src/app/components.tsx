@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useUnreadCount } from "./_lib/use-unread-count";
 import { useAuth } from "./auth-context";
+import { PageHeader } from "./_ui/page-header";
 import { SparkLogo as SparkMark } from "./brand/spark-logo";
 import { readLastWorkspace, subscribeLastWorkspace } from "./w/_lib/last-workspace";
 import { methodologyAccent, methodologyOf } from "./w/_lib/projects";
@@ -286,6 +287,7 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
   );
 }
 
+/** The older title API (eyebrow + title + actions), now drawn by PageHeader. */
 export function PageTitle({ eyebrow, title, children }: { eyebrow: string; title: string; children?: ReactNode }) {
-  return <header className="pageTitle"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1></div>{children}</header>;
+  return <PageHeader actions={children} lead={eyebrow} title={title} />;
 }

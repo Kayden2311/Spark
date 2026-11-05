@@ -170,7 +170,7 @@ describe("workspace home", () => {
     });
     render(<WorkspaceLayout><WorkspaceHomePage /></WorkspaceLayout>);
     expect(await screen.findByRole("heading", { level: 1, name: "Northstar Labs" })).toBeInTheDocument();
-    expect(screen.getByText("Owner", { selector: ".eyebrow" })).toBeInTheDocument();
+    expect(screen.getByText("Owner", { selector: ".spPageLead, .spPageLead *" })).toBeInTheDocument();
     expect(screen.getByTestId("stat-members")).toHaveTextContent("4");
     await waitFor(() => expect(screen.getByTestId("stat-invites")).toHaveTextContent("2"));
     expect(screen.getByText("Your first project starts here — choose Scrum, Kanban or Waterfall.")).toBeInTheDocument();
