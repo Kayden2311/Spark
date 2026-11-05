@@ -415,7 +415,8 @@ END $$;
 --> statement-breakpoint
 -- Managers add an active member of the host workspace directly (the way hidden communities gain members).
 -- A left membership is re-activated as a member; an open request of that user is marked approved. A
--- suspended membership is left as it is (already_member).
+-- suspended membership is left as it is (already_member). Frozen communities refuse additions
+-- (community_frozen) after the idempotent already_member answer and before any write.
 CREATE FUNCTION spark.ws_add_community_member(p_community uuid, p_user uuid) RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE actor uuid := spark.require_session_actor(); target spark.communities%ROWTYPE; standing record;
@@ -434,6 +435,8 @@ BEGIN
   SELECT * INTO membership FROM spark.community_memberships m
     WHERE m.tenant_id = target.tenant_id AND m.community_id = target.id AND m.user_id = p_user FOR UPDATE;
   IF membership.status IN ('active','suspended') THEN RETURN 'already_member'; END IF;
+  -- Frozen communities take no new members, like joins, requests and decisions.
+  IF target.frozen_at IS NOT NULL THEN RETURN 'community_frozen'; END IF;
   IF membership.id IS NOT NULL THEN
     UPDATE spark.community_memberships m SET role = 'member', status = 'active', left_at = NULL, joined_at = now() WHERE m.id = membership.id;
     membership_id := membership.id;

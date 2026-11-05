@@ -6008,7 +6008,20 @@ describe("Community membership writes", () => {
     expect(await outcome(colleague, "ws_leave_community($1)", [hid])).toBe("ok");
     await leave(host.workspace, colleague);
     expect(await outcome(host.owner, "ws_add_community_member($1,$2)", [hid, colleague.id])).toBe("not_in_workspace");
+    // Frozen communities take no new members and leave a pending request untouched; existing members stay already_member.
+    const frozenTarget = await account("Add frozen target");
+    await addMember(host.workspace, frozenTarget, "member");
     await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id) VALUES ($1,$2,$3)`, [host.workspace, hid, frozenTarget.id]);
+    await owner.query(`UPDATE ${table("communities")} SET frozen_at=now() WHERE id=$1`, [hid]);
+    expect(await outcome(moderator, "ws_add_community_member($1,$2)", [hid, frozenTarget.id])).toBe("community_frozen");
+    expect(await outcome(host.owner, "ws_add_community_member($1,$2)", [hid, frozenTarget.id])).toBe("community_frozen");
+    expect(await outcome(host.owner, "ws_add_community_member($1,$2)", [hid, coworker.id])).toBe("already_member");
+    expect((await memberships(hid)).map((row) => row.user_id)).not.toContain(frozenTarget.id);
+    expect((await requestRows(hid)).filter((row) => row.user_id === frozenTarget.id)).toEqual([{ id: expect.any(String), user_id: frozenTarget.id, status: "pending", message: null,
+      reviewed_by_user_id: null, reviewed_at: null }]);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("communities")} SET frozen_at=NULL WHERE id=$1`, [hid]);
     expect((await owner.query(`SELECT action FROM ${table("audit_events")} WHERE resource_type='community_membership' AND tenant_id=$1 ORDER BY created_at,id`, [host.workspace])).rows.map((row) => row.action))
       .toEqual(["community.member_added", "community.member_added", "community.member_added"]);
     // Candidates are for managers only.
