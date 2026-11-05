@@ -70,11 +70,9 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   if (notFound) {
     content = (
       <section className="wsStateCard" aria-labelledby="workspace-missing-title">
-        <div aria-hidden="true" className="wsGlow" />
-        <p className="sparkKicker"><span aria-hidden="true" />Workspace</p>
         <h1 id="workspace-missing-title">This workspace isn&apos;t available to you</h1>
         <p>The address may have changed, or your access was removed. Your other workspaces are one click away.</p>
-        <Link className="sparkPrimary" href="/workspace">Go to your workspaces</Link>
+        <Link className="spBtn spBtnPrimary" href="/workspace">Go to your workspaces</Link>
       </section>
     );
   } else if (current) {
@@ -82,10 +80,9 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   } else if (error && !loading) {
     content = (
       <section className="wsStateCard" aria-labelledby="workspace-error-title">
-        <p className="sparkKicker"><span aria-hidden="true" />Workspace</p>
         <h1 id="workspace-error-title">We couldn&apos;t open this workspace</h1>
         <p role="alert">{error}</p>
-        <button className="sparkPrimary" onClick={reload} type="button">Try again</button>
+        <button className="spBtn spBtnPrimary" onClick={reload} type="button">Try again</button>
       </section>
     );
   } else {

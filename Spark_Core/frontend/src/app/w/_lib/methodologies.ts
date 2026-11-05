@@ -27,7 +27,8 @@ export interface MethodologyTemplate {
 }
 
 /** Accent colour per methodology, shared by the picker and project screens. */
-export const METHODOLOGY_ACCENTS: Record<MethodologyId, string> = { scrum: "#2563eb", kanban: "#1baf7a", waterfall: "#d97706" };
+// Information colours shared with the member app tokens (--sp-doing, --sp-done, --sp-review): AA with white text.
+export const METHODOLOGY_ACCENTS: Record<MethodologyId, string> = { scrum: "#1f6fe5", kanban: "#0e7c3a", waterfall: "#b45d00" };
 
 export async function fetchMethodologies(signal?: AbortSignal): Promise<MethodologyTemplate[]> {
   let response: Response;

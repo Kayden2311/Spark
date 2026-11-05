@@ -258,7 +258,7 @@ describe("notifications inbox", () => {
     render(<NotificationsPage />);
     await screen.findByRole("list", { name: "Notifications" });
     await user.click(screen.getByRole("button", { name: "Load more" }));
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
+    await waitFor(() => expect(within(screen.getByRole("list", { name: "Notifications" })).getAllByRole("listitem")).toHaveLength(3));
     expect(urls[1]).toBe("/api/v1/notifications?limit=30&cursor=CUR");
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });

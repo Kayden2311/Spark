@@ -61,83 +61,6 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .avatar { display: inline-grid; place-items: center; width: 2rem; height: 2rem; flex: 0 0 auto; border-radius: 50%; color: #1753bd; background: #dce9ff; font-size: .7rem; font-weight: 800; }
 .avatar.tiny { width: 1.45rem; height: 1.45rem; font-size: .55rem; }
 
-.appShell { display: flex; min-height: 100vh; background: #f8fafc; }
-.sidebar {
-  position: sticky;
-  top: 0;
-  display: flex;
-  width: 16.5rem;
-  height: 100vh;
-  flex-direction: column;
-  gap: 1.6rem;
-  padding: 1.5rem 1rem;
-  color: #dce9ff;
-  background: #09265a;
-}
-.sidebarBrand {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0 .6rem;
-  color: #fff;
-  font-weight: 750;
-  font-size: 1.2rem;
-  letter-spacing: -0.03em;
-}
-.workspacePicker, .sidebarFoot, .navItem { display: flex; align-items: center; gap: .7rem; }
-.workspacePicker {
-  justify-content: space-between;
-  padding: .7rem;
-  border: 1px solid #24437b;
-  border-radius: .65rem;
-  font-size: .82rem;
-  color: #dce9ff;
-  background: rgba(255, 255, 255, 0.05);
-}
-.workspacePicker .avatar { margin-right: auto; }
-.sideNav { display: grid; gap: .35rem; }
-.navItem {
-  padding: .7rem 0.85rem;
-  border-radius: .55rem;
-  color: #b7c8e7;
-  font-size: .9rem;
-  font-weight: 500;
-  transition: all .18s ease;
-}
-.navItem:hover {
-  color: #fff;
-  background: #17437e;
-}
-.navItem.active {
-  color: #fff;
-  background: #17437e;
-  font-weight: 600;
-}
-.navItem b {
-  display: grid;
-  min-width: 1.25rem;
-  height: 1.25rem;
-  place-items: center;
-  margin-left: auto;
-  border-radius: 50%;
-  color: #09265a;
-  background: #fff;
-  font-size: .65rem;
-  font-weight: 700;
-}
-.sidebarFoot {
-  margin-top: auto;
-  padding: .7rem;
-  font-size: .85rem;
-  color: #b7c8e7;
-}
-.sidebarFoot button { margin-left: auto; border: 0; color: inherit; background: transparent; transition: color .18s ease; }
-.sidebarFoot button:hover { color: #fca5a5; }
-.appMain {
-  width: min(100%, 82rem);
-  padding: 3rem clamp(1.2rem, 4vw, 4rem);
-  color: var(--ink);
-}
 .pageTitle, .sectionTitle { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .pageTitle { margin-bottom: 2rem; }
 .pageTitle h1 {
@@ -3770,56 +3693,14 @@ button, a { -webkit-tap-highlight-color: transparent; }
 /* ==========================================================================
    Member workspace: shell, onboarding and workspace home (landing tokens)
    ========================================================================== */
-.appShell :focus-visible { outline: 3px solid rgba(37, 99, 235, .55); outline-offset: 2px; }
-.sidebar :focus-visible { outline-color: #93c5fd; }
-.sidebarTop { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
-.sidebarMenuToggle { display: none; align-items: center; gap: .45rem; min-height: 2.5rem; padding: .45rem .8rem; border: 1px solid var(--sidebar-line); border-radius: .6rem; color: #dce9ff; background: rgba(255, 255, 255, .06); font-size: .82rem; font-weight: 650; }
-.sidebarMenuToggle svg { width: 1.1rem; height: 1.1rem; }
-.sidebarPanel { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 1.6rem; }
-.sidebarPanel .sideNav { overflow-y: auto; }
-.navItem .navIcon { width: 1.15rem; height: 1.15rem; flex: none; opacity: .85; }
-.navItem.active .navIcon { opacity: 1; color: #93c5fd; }
-.navItemStaff { margin-top: .5rem; color: #7dd3fc; box-shadow: inset 2px 0 0 #38bdf8; }
-.sidebarUser { display: grid; min-width: 0; line-height: 1.25; }
-.sidebarUser strong { overflow: hidden; color: #f8fafc; font-size: .85rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.sidebarUser small { overflow: hidden; color: #8fa5cc; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
-.sidebarFoot { gap: .65rem; border-top: 1px solid var(--sidebar-line); padding-top: 1rem; }
-.sidebarFoot .signOutBtn { display: grid; width: 2.1rem; height: 2.1rem; flex: none; place-items: center; padding: 0; border-radius: .5rem; }
-.sidebarFoot .signOutBtn:hover { background: rgba(255, 255, 255, .08); }
-.sidebarFoot .signOutBtn svg { width: 1.1rem; height: 1.1rem; }
 
-.workspaceSwitcher { position: relative; }
-button.workspacePicker { width: 100%; gap: .7rem; text-align: left; cursor: pointer; transition: background .18s ease, border-color .18s ease; }
-button.workspacePicker:hover, button.workspacePicker[aria-expanded="true"] { border-color: #3b64a8; background: rgba(255, 255, 255, .09); }
-.workspaceSwitcher .workspacePicker .avatar { margin-right: 0; }
-.workspaceAvatar { color: #fff; background: linear-gradient(135deg, #3b82f6, #1d4ed8); box-shadow: 0 4px 12px rgba(37, 99, 235, .35); }
-.workspacePickerText { display: grid; min-width: 0; flex: 1; line-height: 1.25; }
-.workspacePickerText strong { overflow: hidden; color: #fff; font-size: .86rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.workspacePickerText small { color: #8fa5cc; font-size: .7rem; }
-.workspacePickerChevron { width: 1rem; height: 1rem; flex: none; color: #8fa5cc; }
-.workspaceMenu { position: absolute; z-index: 40; top: calc(100% + .45rem); right: 0; left: 0; padding: .4rem; border: 1px solid var(--line); border-radius: .85rem; color: var(--ink); background: #fff; box-shadow: 0 24px 48px -16px rgba(9, 38, 90, .35), 0 2px 8px rgba(15, 23, 42, .06); animation: ws-pop .16s ease-out both; }
-.workspaceMenu ul { display: grid; gap: .15rem; margin: 0; padding: 0 0 .35rem; list-style: none; }
-.workspaceMenuItem { display: flex; align-items: center; gap: .6rem; padding: .55rem .6rem; border-radius: .55rem; font-size: .84rem; font-weight: 600; transition: background .15s ease, color .15s ease; }
-.workspaceMenuItem:hover { background: #f1f5f9; }
-.workspaceMenuItem[aria-current="true"] { background: #eef4ff; }
-.workspaceMenuName { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
-.workspaceMenuItem small { color: var(--muted); font-size: .7rem; font-weight: 600; }
-.workspaceMenuCreate { border-top: 1px solid var(--line); border-radius: 0 0 .55rem .55rem; color: var(--blue); }
-ul + .workspaceMenuCreate { margin-top: .1rem; padding-top: .7rem; }
-.workspaceMenu > .workspaceMenuCreate:first-child { border-top: 0; border-radius: .55rem; }
-.workspaceMenuPlus { display: grid; width: 1.45rem; height: 1.45rem; place-items: center; border: 1.5px dashed #9db8e6; border-radius: 50%; font-size: .9rem; line-height: 1; }
 
-.appMain { position: relative; min-width: 0; flex: 1; overflow-x: clip; outline: none; }
 
 .wsSrOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .wsGlow { position: absolute; z-index: -1; top: -12rem; right: -10rem; width: 38rem; height: 38rem; border-radius: 50%; background: radial-gradient(circle, rgba(37, 99, 235, .14), rgba(37, 99, 235, 0) 66%); pointer-events: none; }
 .wsGlow.two { top: auto; right: auto; bottom: -14rem; left: -12rem; width: 32rem; height: 32rem; background: radial-gradient(circle, rgba(14, 165, 233, .11), rgba(14, 165, 233, 0) 66%); }
 
 /* Calm loading screen */
-.wsSplash { position: relative; display: grid; min-height: 100vh; place-items: center; overflow: hidden; background: var(--canvas); isolation: isolate; }
-.wsSplashInner { display: grid; justify-items: center; gap: 1rem; color: var(--muted); font-size: .9rem; font-weight: 600; }
-.wsSplashMark { display: grid; width: 3.5rem; height: 3.5rem; place-items: center; border: 1px solid rgba(37, 99, 235, .18); border-radius: 1rem; background: #fff; box-shadow: 0 12px 30px -12px rgba(37, 99, 235, .4); animation: ws-breathe 1.8s ease-in-out infinite; }
-.wsSplashMark .sparkMark { width: 2.2rem; height: 2.2rem; }
 
 /* Workspace home */
 .wsHome { position: relative; isolation: isolate; }
@@ -3858,19 +3739,6 @@ ul + .workspaceMenuCreate { margin-top: .1rem; padding-top: .7rem; }
 .wsMethod > span:last-child { color: var(--muted); font-size: .8rem; line-height: 1.5; }
 
 /* In-shell states: not found, failed to load, loading */
-.wsStateCard { position: relative; display: grid; max-width: 36rem; justify-items: center; gap: 1rem; margin: clamp(1rem, 8vh, 5rem) auto 0; padding: 2.75rem 2rem; border: 1px solid var(--line); border-radius: 1.2rem; background: #fff; box-shadow: 0 24px 48px -20px rgba(15, 36, 87, .18); text-align: center; isolation: isolate; }
-.wsStateCard .wsGlow { top: -10rem; right: 50%; transform: translateX(50%); }
-.wsStateCard h1 { color: var(--ink); font-size: clamp(1.6rem, 3.4vw, 2.1rem); font-weight: 650; line-height: 1.1; letter-spacing: -.05em; text-wrap: balance; }
-.wsStateCard p:not(.sparkKicker) { max-width: 28rem; color: var(--muted); line-height: 1.6; }
-.wsStateCard .sparkPrimary { margin-top: .5rem; padding-inline: 1.3rem; border: 0; }
-.wsSkeleton { display: grid; gap: 1rem; }
-.wsSkeleton span, .wsSkeletonRow span { display: block; border-radius: .6rem; background: linear-gradient(90deg, #eaf0f8 0%, #f5f8fc 50%, #eaf0f8 100%); background-size: 200% 100%; animation: ws-shimmer 1.4s linear infinite; }
-.wsSkeleton .wsSrOnly { animation: none; background: none; }
-.wsSkeletonLine.short { width: 6rem; height: 1.4rem; border-radius: 999px; }
-.wsSkeletonLine.title { width: min(24rem, 80%); height: 3rem; margin-bottom: 1rem; }
-.wsSkeletonRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13.5rem), 1fr)); gap: 1rem; }
-.wsSkeletonRow span { height: 7.5rem; border-radius: 1rem; }
-.wsSkeletonBlock { height: 18rem; border-radius: 1.1rem !important; }
 
 /* First-run onboarding */
 .wsOnboarding { position: relative; min-height: 100vh; overflow: hidden; color: var(--ink); background: var(--canvas); isolation: isolate; }
@@ -3930,11 +3798,6 @@ ul + .workspaceMenuCreate { margin-top: .1rem; padding-top: .7rem; }
 .wsNextMethods li > span:last-child { color: var(--muted); font-size: .76rem; line-height: 1.45; }
 
 /* Members, invitations and the accept page */
-@media (min-width: 901px) {
-  /* The sticky sidebar is one viewport tall; paint its column on the shell so it reaches the bottom of long pages. */
-  .appShell { background: linear-gradient(90deg, var(--sidebar-bg) 0 16.5rem, #f8fafc 16.5rem); }
-  .sidebar { flex: none; }
-}
 button.sparkPrimary { border: 0; font: inherit; font-size: .9rem; font-weight: 750; }
 button.sparkPrimary:disabled, button.sparkSecondary:disabled { cursor: progress; opacity: .7; transform: none; }
 button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
@@ -4117,14 +3980,6 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 @keyframes ws-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 @media (max-width: 900px) {
-  .appShell { flex-direction: column; }
-  .sidebar { position: relative; z-index: 30; width: 100%; height: auto; gap: .85rem; padding: .85rem 1rem; }
-  .sidebarBrand { padding: 0; }
-  .sidebarMenuToggle { display: inline-flex; }
-  .sidebarPanel { display: none; gap: 1rem; }
-  .sidebar[data-open="true"] .sidebarPanel { display: flex; }
-  .sidebarFoot { margin-top: 0; }
-  .appMain { width: 100%; padding: 2rem 1rem 3.5rem; }
   .wsOnboardingGrid { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -4145,7 +4000,6 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
   .wsCard { padding: 1.2rem; }
   .wsEmpty { padding: 2.25rem 1rem 1rem; }
   .wsCardHeader { flex-direction: column; }
-  .wsStateCard { padding: 2.25rem 1.25rem; }
   .wsFormCard { padding: 1.4rem; }
   .wsBackLink { font-size: .8rem; }
   .wsNextMethods { grid-template-columns: minmax(0, 1fr); }
@@ -4232,19 +4086,6 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 }
 
 /* Sidebar project list */
-.sideProjects { display: grid; min-height: 0; align-content: start; gap: .2rem; overflow-y: auto; }
-.sideProjectsTitle { padding: 0 .85rem .35rem; color: #7f96c2; font-size: .68rem; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
-.sideProjects ul { display: grid; gap: .1rem; margin: 0; padding: 0; list-style: none; }
-.sideProject { display: flex; min-width: 0; align-items: center; gap: .65rem; padding: .5rem .85rem; border-radius: .55rem; color: #b7c8e7; font-size: .86rem; font-weight: 500; transition: background .18s ease, color .18s ease; }
-.sideProject:hover { color: #fff; background: #17437e; }
-.sideProject.active { color: #fff; background: #17437e; font-weight: 600; }
-.sideProjectDot { width: .55rem; height: .55rem; flex: none; margin: 0 .3rem; border-radius: 50%; box-shadow: 0 0 0 3px rgba(255, 255, 255, .08); }
-.sideProjectName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sideProjectNew { color: #93c5fd; }
-.sideProjectPlus { display: grid; width: 1.15rem; height: 1.15rem; flex: none; place-items: center; border: 1.5px dashed #5f84c4; border-radius: 50%; font-size: .8rem; line-height: 1; }
-.sideProjectMore { padding: .35rem .85rem; color: #93c5fd; font-size: .78rem; font-weight: 650; }
-.sideProjectMore:hover { color: #fff; }
-.sideProjectsEmpty { padding: .25rem .85rem; color: #7f96c2; font-size: .8rem; }
 
 /* Project list on the workspace home */
 .wsProjectsNew { flex: none; min-height: 2.6rem; padding: .55rem 1rem; }
@@ -5014,9 +4855,6 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 }
 
 /* Notification inbox and the unread badge in the sidebar. */
-.navItem .navBadge { min-width: 1.25rem; padding: 0 .35rem; border-radius: 999px; color: #fff; background: #2563eb; line-height: 1; }
-.sidebarMenuToggle { position: relative; }
-.sidebarMenuDot { position: absolute; top: -.3rem; right: -.3rem; width: .7rem; height: .7rem; border: 2px solid var(--sidebar-bg); border-radius: 999px; background: #2563eb; }
 .notificationTabs { display: flex; gap: .4rem; margin-bottom: 1rem; }
 .notificationTab { min-height: 2.5rem; padding: .45rem 1rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fff; font-size: .88rem; font-weight: 700; transition: background .18s ease, color .18s ease, border-color .18s ease; }
 .notificationTab:hover { color: var(--ink); }
@@ -5046,9 +4884,6 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 }
 
 /* Email notification settings */
-.sidebarFoot .settingsLink { margin-left: auto; color: inherit; }
-.sidebarFoot .settingsLink + button { margin-left: 0; }
-.settingsLink:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
 .settingsCard { display: grid; gap: 1.5rem; max-width: 38rem; }
 .settingsCard h2 { margin: 0 0 .5rem; font-size: 1rem; }
 .settingsSwitches { margin: 0; padding: 0; list-style: none; }
@@ -5068,4 +4903,3 @@ a.wsTimelineUnphased:focus-visible { outline: 3px solid rgba(37, 99, 235, .45); 
 }
 .settingsFields { display: grid; gap: 1.5rem; min-width: 0; margin: 0; padding: 0; border: 0; }
 .settingsFields:disabled { opacity: .7; }
-.sidebarFoot .settingsLink[aria-current="page"] { color: #fff; background: #17437e; }

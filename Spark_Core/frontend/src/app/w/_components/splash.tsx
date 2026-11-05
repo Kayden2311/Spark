@@ -6,7 +6,6 @@ import { SparkLogo as SparkMark } from "../../brand/spark-logo";
 export function WorkspaceSplash({ label }: { label: string }) {
   return (
     <div className="wsSplash">
-      <div aria-hidden="true" className="wsGlow" />
       <div className="wsSplashInner" role="status">
         <span className="wsSplashMark"><SparkMark /></span>
         <p>{label}</p>

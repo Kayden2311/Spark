@@ -222,3 +222,113 @@
   .spSkeleton { animation: none; }
   .appShell *, .wsModalLayer *, .spSurface * { scroll-behavior: auto !important; }
 }
+
+/* ---------- Shell: sidebar, top bar, main ---------- */
+.appShell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100dvh; background: var(--sp-canvas); }
+.sidebar { position: sticky; top: 0; z-index: 40; display: flex; height: 100dvh; min-width: 0; flex-direction: column; border-right: 1px solid var(--sp-line); color: var(--sp-muted); background: var(--sp-side); }
+.sidebarTop { display: flex; flex: none; align-items: center; gap: 4px; height: 52px; padding: 0 8px; border-bottom: 1px solid var(--sp-line); }
+.sidebarBrand { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border-radius: var(--sp-r2); transition: background var(--sp-fast); }
+.sidebarBrand:hover { background: var(--sp-hover); }
+.sidebarBrand .sparkMark { width: 22px; height: 22px; }
+.workspaceSwitcher { position: relative; flex: 1; min-width: 0; }
+.workspacePicker { display: flex; width: 100%; align-items: center; gap: 8px; height: 38px; padding: 0 6px; border: 0; border-radius: var(--sp-r2); color: var(--sp-ink); font: inherit; text-align: left; background: transparent; cursor: pointer; transition: background var(--sp-fast); }
+.workspacePicker:hover, .workspacePicker[aria-expanded="true"] { background: var(--sp-hover); }
+.workspaceAvatar, .workspaceMenuSquare { --sp-square: var(--sp-ink); }
+.workspacePickerText { display: grid; flex: 1; min-width: 0; line-height: 1.25; }
+.workspacePickerText strong { overflow: hidden; color: var(--sp-ink); font-size: var(--sp-t13); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.workspacePickerText small { color: var(--sp-muted); font-size: var(--sp-t11); }
+.workspacePickerChevron { width: 14px; height: 14px; flex: none; color: var(--sp-faint); }
+.workspaceMenu { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 248px; padding: 4px; border: 1px solid var(--sp-line); border-radius: var(--sp-r3); background: var(--sp-surface); box-shadow: var(--sp-e3); animation: sp-pop .12s ease; }
+.workspaceMenu ul { display: grid; gap: 1px; margin: 0 0 4px; padding: 0 0 4px; border-bottom: 1px solid var(--sp-line-soft); list-style: none; }
+.workspaceMenuItem { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border-radius: var(--sp-r2); color: var(--sp-text); font-size: var(--sp-t13); font-weight: 500; text-decoration: none; transition: background var(--sp-fast); }
+.workspaceMenuItem:hover { background: var(--sp-hover); }
+.workspaceMenuItem[aria-current="true"] { color: var(--sp-accent-ink); font-weight: 600; background: var(--sp-side-active); }
+.workspaceMenuName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspaceMenuItem small { color: var(--sp-muted); font-size: var(--sp-t11); font-weight: 500; }
+.workspaceMenuCreate { color: var(--sp-accent-ink); }
+.workspaceMenuPlus { display: grid; width: 20px; height: 20px; flex: none; place-items: center; border: 1px dashed var(--sp-line-strong); border-radius: var(--sp-r1); font-size: var(--sp-t14); line-height: 1; }
+
+.sidebarPanel { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 16px; padding: 8px 8px 12px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--sp-line-strong) transparent; }
+.sideNav { display: grid; gap: 1px; }
+.navItem, .sideProject { position: relative; display: flex; min-width: 0; align-items: center; gap: 9px; height: 30px; padding: 0 8px; border-radius: var(--sp-r2); color: var(--sp-muted); font-size: var(--sp-t13); font-weight: 500; text-decoration: none; transition: background var(--sp-fast), color var(--sp-fast); }
+.navItem:hover, .sideProject:hover { color: var(--sp-ink); background: var(--sp-hover); }
+.navItem.active, .sideProject.active { color: var(--sp-accent-ink); font-weight: 600; background: var(--sp-side-active); }
+.navIcon { width: 16px; height: 16px; flex: none; color: var(--sp-muted); transition: color var(--sp-fast); }
+.navItem:hover .navIcon { color: var(--sp-ink); }
+.navItem.active .navIcon { color: var(--sp-accent); }
+.navLabel, .sideProjectName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.navBadge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; color: #ffffff; font-size: var(--sp-t11); font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; background: var(--sp-accent); }
+.navItemStaff { margin-top: 9px; }
+.navItemStaff::before { content: ""; position: absolute; top: -5px; right: 8px; left: 8px; height: 1px; background: var(--sp-line); }
+.sideProjects { display: grid; gap: 1px; }
+.sideProjectsTitle { margin: 0; padding: 0 8px 4px; color: var(--sp-muted); font-size: var(--sp-t11); font-weight: 600; letter-spacing: .02em; }
+.sideProjects ul { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.sideProjectDot { width: 18px; height: 18px; font-size: var(--sp-t11); }
+.sideProjectPlus { display: grid; width: 18px; height: 18px; flex: none; place-items: center; border: 1px dashed var(--sp-line-strong); border-radius: var(--sp-r1); font-size: var(--sp-t13); line-height: 1; }
+.sideProjectMore { padding: 4px 8px; color: var(--sp-accent-ink); font-size: var(--sp-t12); font-weight: 600; text-decoration: none; }
+.sideProjectMore:hover { text-decoration: underline; }
+.sideProjectsEmpty { margin: 0; padding: 2px 8px; color: var(--sp-muted); font-size: var(--sp-t12); }
+
+.sidebarFoot { display: flex; flex: none; align-items: center; gap: 8px; padding: 10px 8px 10px 12px; border-top: 1px solid var(--sp-line); }
+.sidebarUser { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+.sidebarUser strong { overflow: hidden; color: var(--sp-ink); font-size: var(--sp-t12); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.sidebarUser small { overflow: hidden; color: var(--sp-muted); font-size: var(--sp-t11); text-overflow: ellipsis; white-space: nowrap; }
+.signOutBtn { display: grid; width: 28px; height: 28px; flex: none; place-items: center; padding: 0; border: 0; border-radius: var(--sp-r2); color: var(--sp-muted); background: transparent; cursor: pointer; transition: background var(--sp-fast), color var(--sp-fast); }
+.signOutBtn:hover { color: var(--sp-ink); background: var(--sp-hover); }
+.signOutBtn svg { width: 16px; height: 16px; }
+.settingsLink[aria-current="page"] { color: var(--sp-accent-ink); background: var(--sp-side-active); }
+
+.appColumn { display: flex; min-width: 0; flex-direction: column; }
+.spTopbar { position: sticky; top: 0; z-index: 30; display: flex; flex: none; align-items: center; gap: 10px; height: 52px; padding: 0 24px; border-bottom: 1px solid var(--sp-line); background: rgba(255, 255, 255, .92); backdrop-filter: saturate(180%) blur(8px); -webkit-backdrop-filter: saturate(180%) blur(8px); }
+.sidebarMenuToggle { position: relative; display: none; flex: none; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border: 1px solid var(--sp-line-strong); border-radius: var(--sp-r2); color: var(--sp-ink); font: inherit; font-size: var(--sp-t12); font-weight: 600; background: var(--sp-surface); box-shadow: var(--sp-e1); cursor: pointer; }
+.sidebarMenuToggle svg { width: 16px; height: 16px; }
+.sidebarMenuDot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--sp-surface); border-radius: 50%; background: var(--sp-accent); }
+.spCrumbs { flex: 1; min-width: 0; }
+.spCrumbs ol { display: flex; align-items: center; gap: 2px; margin: 0; padding: 0; overflow: hidden; list-style: none; white-space: nowrap; }
+.spCrumbs li { display: inline-flex; min-width: 0; align-items: center; gap: 2px; color: var(--sp-muted); font-size: var(--sp-t13); }
+.spCrumbs a { padding: 3px 5px; border-radius: var(--sp-r1); color: var(--sp-muted); text-decoration: none; transition: background var(--sp-fast), color var(--sp-fast); }
+.spCrumbs a:hover { color: var(--sp-ink); background: var(--sp-hover); }
+.spCrumbs [aria-current="page"] { overflow: hidden; padding: 3px 5px; color: var(--sp-ink); font-weight: 600; text-overflow: ellipsis; }
+.spCrumbSep { width: 12px; height: 12px; flex: none; color: var(--sp-faint); }
+.appMain { position: relative; flex: 1; width: 100%; min-width: 0; padding: 20px 24px 64px; overflow-x: clip; outline: none; }
+
+/* In-shell states: not found, failed to load, loading; and the full-screen splash. */
+.wsStateCard { display: grid; max-width: 440px; justify-items: center; gap: 8px; margin: 10vh auto 0; padding: 32px 28px; border: 1px solid var(--sp-line); border-radius: var(--sp-r2); text-align: center; background: var(--sp-surface); box-shadow: var(--sp-e1); }
+.wsStateCard h1 { margin: 0; color: var(--sp-ink); font-size: var(--sp-t20); font-weight: 600; line-height: 1.3; letter-spacing: -.015em; text-wrap: balance; }
+.wsStateCard p { max-width: 360px; margin: 0; color: var(--sp-muted); font-size: var(--sp-t13); line-height: 1.55; }
+.wsStateCard .spBtn, .wsStateCard .sparkPrimary { margin-top: 8px; }
+.wsSkeleton { display: grid; gap: 12px; }
+.wsSkeleton > span:not(.wsSrOnly), .wsSkeletonRow span { display: block; border-radius: var(--sp-r2); background: linear-gradient(90deg, var(--sp-sunken) 0%, #fbfbfc 50%, var(--sp-sunken) 100%); background-size: 200% 100%; animation: sp-shimmer 1.4s linear infinite; }
+.wsSkeletonLine.short { width: 120px; height: 14px; }
+.wsSkeletonLine.title { width: min(320px, 70%); height: 24px; margin-bottom: 8px; }
+.wsSkeletonRow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 12px; }
+.wsSkeletonRow span { height: 64px; }
+.wsSkeletonBlock { height: 320px; }
+.wsSplash { display: grid; min-height: 100dvh; place-items: center; font-family: var(--sp-font-stack); background: var(--sp-canvas); }
+.wsSplashInner { display: grid; justify-items: center; gap: 12px; color: var(--sp-muted); font-size: var(--sp-t13); font-weight: 500; }
+.wsSplashMark { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--sp-line); border-radius: var(--sp-r2); background: var(--sp-surface); box-shadow: var(--sp-e1); animation: sp-breathe 1.8s ease-in-out infinite; }
+.wsSplashMark .sparkMark { width: 26px; height: 26px; }
+
+@keyframes sp-pop { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes sp-fade { from { opacity: 0; } }
+@keyframes sp-breathe { 50% { transform: scale(1.05); } }
+
+@media (max-width: 900px) {
+  .appShell { grid-template-columns: minmax(0, 1fr); }
+  /* The sidebar becomes a drawer under the top bar (so the Menu/Close toggle stays in reach); hidden, not just moved,
+     when closed so it leaves the tab order. */
+  .sidebar { position: fixed; top: 52px; bottom: 0; left: 0; width: min(300px, 86vw); height: auto; box-shadow: var(--sp-e3); transform: translateX(-102%); visibility: hidden; transition: transform var(--sp-move), visibility 0s linear .18s; }
+  .sidebar[data-open="true"] { transform: none; visibility: visible; transition: transform var(--sp-move); }
+  .sidebarScrim { position: fixed; z-index: 35; inset: 52px 0 0; background: rgba(28, 29, 41, .32); animation: sp-fade .12s ease; }
+  .sidebarMenuToggle { display: inline-flex; }
+  .spTopbar { padding: 0 16px; }
+  .spCrumbs li:not(:last-child), .spCrumbs .spCrumbSep { display: none; }
+  .appMain { padding: 16px 16px 48px; }
+  .spPageHeaderTabbed { margin: -16px -16px 16px; padding: 14px 16px 0; }
+}
+@media (min-width: 901px) { .sidebarScrim { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .sidebar[data-open="true"] { transition: none; }
+  .sidebarScrim, .workspaceMenu, .wsSplashMark, .wsSkeleton > span, .wsSkeletonRow span { animation: none; }
+}

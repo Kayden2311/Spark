@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { useUnreadCount } from "./_lib/use-unread-count";
 import { useAuth } from "./auth-context";
+import { shellCrumbs } from "./_ui/crumbs";
 import { PageHeader } from "./_ui/page-header";
 import { SparkLogo as SparkMark } from "./brand/spark-logo";
 import { readLastWorkspace, subscribeLastWorkspace } from "./w/_lib/last-workspace";
@@ -67,7 +68,7 @@ function ShellProjects({ workspace, projects, pathname }: { workspace: ShellWork
             return (
               <li key={project.key}>
                 <Link aria-current={active ? "page" : undefined} className={active ? "sideProject active" : "sideProject"} href={href}>
-                  <span aria-hidden="true" className="sideProjectDot" data-methodology={methodologyOf(project.methodology)} style={{ background: methodologyAccent(project.methodology) }} />
+                  <span aria-hidden="true" className="sideProjectDot spSquare" data-methodology={methodologyOf(project.methodology)} style={{ "--sp-square": methodologyAccent(project.methodology) } as CSSProperties}>{initials(project.name).slice(0, 1)}</span>
                   <span className="sideProjectName">{project.name}</span>
                 </Link>
               </li>
@@ -126,12 +127,12 @@ function WorkspaceSwitcher({ active }: { active: ShellWorkspace | null }) {
         ref={trigger}
         type="button"
       >
-        <span className="avatar workspaceAvatar">{active ? initials(active.name) : "+"}</span>
+        <span aria-hidden="true" className="spSquare spSquareLg workspaceAvatar">{active ? initials(active.name) : "+"}</span>
         <span className="workspacePickerText">
           <strong>{name}</strong>
           <small>{active ? ROLE_NAMES[active.role] ?? "Member" : "Create one to start"}</small>
         </span>
-        <svg aria-hidden="true" className="workspacePickerChevron" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24"><path d="m8 10 4-4 4 4M8 14l4 4 4-4" /></svg>
+        <svg aria-hidden="true" className="workspacePickerChevron" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" viewBox="0 0 24 24"><path d="m8 10 4-4 4 4M8 14l4 4 4-4" /></svg>
       </button>
       {open && (
         <nav aria-label="Your workspaces" className="workspaceMenu" id={panelId}>
@@ -145,7 +146,7 @@ function WorkspaceSwitcher({ active }: { active: ShellWorkspace | null }) {
                     href={`/w/${item.workspaceSlug}`}
                     onClick={() => setOpen(false)}
                   >
-                    <span className="avatar tiny">{initials(item.workspaceName)}</span>
+                    <span aria-hidden="true" className="spSquare workspaceMenuSquare">{initials(item.workspaceName)}</span>
                     <span className="workspaceMenuName">{item.workspaceName}</span>
                     <small>{ROLE_NAMES[item.role] ?? "Member"}</small>
                   </Link>
@@ -221,30 +222,20 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
     ["Billing", "/billing"],
   ];
 
+  const crumbs = shellCrumbs({ pathname, current, workspace: active, projects: workspace ? projects : null });
+  const closeMenu = () => setMenu({ open: false, path: pathname });
+
   return (
-    <div className="appShell">
+    <div className="appShell" data-menu={menuOpen ? "open" : "closed"}>
       <a className="skipLink workspaceSkip" href="#workspace-main">Skip to content</a>
-      <aside className="sidebar" data-open={menuOpen}>
+      <aside className="sidebar" data-open={menuOpen} id="workspace-sidebar-panel">
         <div className="sidebarTop">
-          <Link className="brand sidebarBrand" href="/">
-            <SparkMark tone="dark" />
-            <span>Spark</span>
+          <Link aria-label="Spark home" className="brand sidebarBrand" href="/">
+            <SparkMark tone="light" />
           </Link>
-          <button
-            aria-controls="workspace-sidebar-panel"
-            aria-expanded={menuOpen}
-            className="sidebarMenuToggle"
-            onClick={() => setMenu({ open: !menuOpen, path: pathname })}
-            ref={menuToggle}
-            type="button"
-          >
-            <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 24 24">{menuOpen ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}</svg>
-            <span>{menuOpen ? "Close" : "Menu"}</span>
-            {user && !menuOpen && <MenuUnreadDot />}
-          </button>
+          <WorkspaceSwitcher active={active} />
         </div>
-        <WorkspaceSwitcher active={active} />
-        <div className="sidebarPanel" id="workspace-sidebar-panel">
+        <div className="sidebarPanel">
           <nav className="sideNav" aria-label="Workspace navigation">
             {navigation.map(([label, href]) => (
               <Link
@@ -254,35 +245,65 @@ export function WorkspaceShell({ children, current, workspace, projects = null }
                 key={label}
               >
                 {ICONS[label]}
-                {label}
+                <span className="navLabel">{label}</span>
                 {label === "Notifications" && user && <NotificationBadge />}
               </Link>
             ))}
             {isPlatformStaff && (
               <Link aria-current={current === "Admin" ? "page" : undefined} className={current === "Admin" ? "navItem navItemStaff active" : "navItem navItemStaff"} href="/admin">
                 {ICONS.Admin}
-                Governance Console
+                <span className="navLabel">Governance Console</span>
               </Link>
             )}
           </nav>
           {/* Only pages inside a workspace pass it, so other pages never show a stale project list. */}
           {workspace && <ShellProjects pathname={pathname} projects={projects} workspace={workspace} />}
-          <div className="sidebarFoot">
-            <span className="avatar">{initials(user?.displayName, "U")}</span>
-            <span className="sidebarUser">
-              <strong>{user?.displayName || "Member"}</strong>
-              <small>{user?.email ?? ""}</small>
-            </span>
-            <Link aria-current={pathname === "/settings/notifications" ? "page" : undefined} aria-label="Settings" className="signOutBtn settingsLink" href="/settings/notifications" title="Settings">
-              <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
-            </Link>
-            <button aria-label="Sign out" className="signOutBtn" onClick={handleLogout} title="Sign out" type="button">
-              <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M14 4h4.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H14" /><path d="M10 8l-4 4 4 4M6 12h10" /></svg>
-            </button>
-          </div>
+        </div>
+        <div className="sidebarFoot">
+          <span className="avatar">{initials(user?.displayName, "U")}</span>
+          <span className="sidebarUser">
+            <strong>{user?.displayName || "Member"}</strong>
+            <small>{user?.email ?? ""}</small>
+          </span>
+          <Link aria-current={pathname === "/settings/notifications" ? "page" : undefined} aria-label="Settings" className="signOutBtn settingsLink" href="/settings/notifications" title="Settings">
+            <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
+          </Link>
+          <button aria-label="Sign out" className="signOutBtn" onClick={handleLogout} title="Sign out" type="button">
+            <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" viewBox="0 0 24 24"><path d="M14 4h4.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H14" /><path d="M10 8l-4 4 4 4M6 12h10" /></svg>
+          </button>
         </div>
       </aside>
-      <main className="appMain" id="workspace-main" tabIndex={-1}>{children}</main>
+      {/* A tap outside the open phone menu closes it; keyboard users have Escape and the toggle. */}
+      {menuOpen && <div aria-hidden="true" className="sidebarScrim" onClick={closeMenu} />}
+      <div className="appColumn">
+        <header className="spTopbar">
+          <button
+            aria-controls="workspace-sidebar-panel"
+            aria-expanded={menuOpen}
+            className="sidebarMenuToggle"
+            onClick={() => setMenu({ open: !menuOpen, path: pathname })}
+            ref={menuToggle}
+            type="button"
+          >
+            <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.75" viewBox="0 0 24 24">{menuOpen ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}</svg>
+            <span>{menuOpen ? "Close" : "Menu"}</span>
+            {user && !menuOpen && <MenuUnreadDot />}
+          </button>
+          {crumbs.length > 0 && (
+            <nav aria-label="Breadcrumb" className="spCrumbs">
+              <ol>
+                {crumbs.map((crumb, index) => (
+                  <li key={`${index}-${crumb.label}`}>
+                    {index > 0 && <svg aria-hidden="true" className="spCrumbSep" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>}
+                    {crumb.href ? <Link href={crumb.href}>{crumb.label}</Link> : <span aria-current="page">{crumb.label}</span>}
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          )}
+        </header>
+        <main className="appMain" id="workspace-main" tabIndex={-1}>{children}</main>
+      </div>
     </div>
   );
 }

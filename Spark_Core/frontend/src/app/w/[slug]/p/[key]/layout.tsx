@@ -58,20 +58,17 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
   if (!valid || loaded.errorStatus === 404) {
     content = (
       <section aria-labelledby="project-missing-title" className="wsStateCard">
-        <div aria-hidden="true" className="wsGlow" />
-        <p className="sparkKicker"><span aria-hidden="true" />Project</p>
         <h1 id="project-missing-title">This project isn&apos;t available</h1>
         <p>There is no project with the key {key || "—"} in {workspace.name}. It may have been archived, or the address is mistyped.</p>
-        <Link className="sparkPrimary" href={`/w/${workspace.slug}`}>Back to workspace home</Link>
+        <Link className="spBtn spBtnPrimary" href={`/w/${workspace.slug}`}>Back to workspace home</Link>
       </section>
     );
   } else if (loaded.error && !loaded.loading && !ready) {
     content = (
       <section aria-labelledby="project-error-title" className="wsStateCard">
-        <p className="sparkKicker"><span aria-hidden="true" />Project</p>
         <h1 id="project-error-title">We couldn&apos;t open this project</h1>
         <p role="alert">{loaded.error}</p>
-        <button className="sparkPrimary" onClick={loaded.reload} type="button">Try again</button>
+        <button className="spBtn spBtnPrimary" onClick={loaded.reload} type="button">Try again</button>
       </section>
     );
   } else if (!ready || !value) {
@@ -102,7 +99,6 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
     ].filter((tab) => tab.show);
     content = (
       <div className="wsProject" style={accent}>
-        <div aria-hidden="true" className="wsGlow" />
         <section aria-label="Project" className="wsProjectHero">
           <div className="wsProjectHeroMain">
             <p className="wsProjectHeroTags">
