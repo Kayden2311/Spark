@@ -218,6 +218,13 @@
       "when": 1792440000000,
       "tag": "0030_community_session_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792450000000,
+      "tag": "0031_community_writes",
+      "breakpoints": true
     }
   ]
 }
