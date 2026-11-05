@@ -122,7 +122,7 @@ One set of `sp*` classes, defined once, used by every in-scope screen:
   `spBtnSm`; `spIconBtn`. 30px (sm 26px), `--sp-r2`, 12–13px semibold, icon 16px gap 6px.
 - **Status chip** `spStatus` (solid, uppercase 11px, `--sp-r1`) and **badge** `spBadge` (outlined, dot + text).
 - **Tag** `spTag` (task type with a 8px square swatch), **priority** `spPriority` (flag icon + colour).
-- **Avatar** `spAvatar` (circle, sm 20 / md 24 / lg 32, flat colour from a fixed list by name hash — no gradient)
+- **Avatar**: the existing `.avatar` / `.avatar.tiny` markup restyled inside the member app (circle, 24 / 20px, flat `--sp-accent-soft` fill with `--sp-accent-ink` initials — no gradient)
   and **entity square** `spSquare` (workspace/project initial, methodology colour).
 - **Form**: `spField`, `spLabel`, `spInput`, `spSelect`, `spTextarea`, `spHint`, `spError`, checkbox/radio styling.
 - **Panel** `spPanel` (bordered surface, `--sp-r2`, optional header row with title + actions) and **table/list**
@@ -153,7 +153,7 @@ Desktop (≥ 901px):
   right, "New project" for managers, "All N projects" overflow link — same behaviour as today). Footer: user
   avatar, name, email, settings link, sign-out button (same accessible names).
 - **Top bar 48px**, white, bottom hairline, sticky: breadcrumbs on the left (e.g. `Spark Lab › Projects › Smoke
-  test` / `Spark Lab › Members`), right side holds the Notifications bell link with unread dot. No search.
+  test` / `Spark Lab › Members`), nothing else on the right (no bell: the sidebar link already shows the unread count; no search).
   Breadcrumbs are passed by pages (a `crumbs` prop or derived from `current` + workspace + project); every crumb
   except the last is a link.
 - **Main** scrolls inside the canvas; no glow blobs.
@@ -211,4 +211,4 @@ anywhere), so the old and new systems do not both exist.
 - Whether a screen keeps restyled `ws*` classes or moves to `sp*` primitives.
 - Icon drawings (16px, 1.75 stroke, round caps — same family as today's shell icons).
 - Exact breakpoints inside screens (shell switches at 900px like admin).
-- Avatar colour list (6–8 flat colours that pass AA with white text).
+- Whether the current user's own avatar gets the solid accent fill to stand out.
