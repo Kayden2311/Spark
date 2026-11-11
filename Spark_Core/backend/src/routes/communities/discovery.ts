@@ -207,14 +207,19 @@ function encodeNameCursor(name: string, id: string): string {
   return Buffer.from(JSON.stringify({ t: name, id }), "utf8").toString("base64url");
 }
 
+// Names are at most 80 code points; lower() can lengthen a few (e.g. U+0130), so the cursor allows twice that.
+// The worst real name (80 control characters JSON-escaped to 6 bytes each) encodes to about 710 base64url chars.
+const MAX_CURSOR_NAME_CODE_POINTS = 160;
+const MAX_CURSOR_LENGTH = 1024;
+
 function decodeNameCursor(value: string | undefined): { name: string; id: string } | null | "invalid" {
   if (value === undefined || value === "") return null;
-  if (value.length > 300 || !/^[A-Za-z0-9_-]+$/u.test(value)) return "invalid";
+  if (value.length > MAX_CURSOR_LENGTH || !/^[A-Za-z0-9_-]+$/u.test(value)) return "invalid";
   try {
     const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
     if (typeof parsed !== "object" || parsed === null) return "invalid";
     const { t, id } = parsed as Record<string, unknown>;
-    if (typeof t !== "string" || t.length === 0 || t.length > 100 || t.includes("\u0000")) return "invalid";
+    if (typeof t !== "string" || t.length === 0 || [...t].length > MAX_CURSOR_NAME_CODE_POINTS || t.includes("\u0000")) return "invalid";
     if (typeof id !== "string" || !UUID.test(id)) return "invalid";
     return { name: t, id };
   } catch {

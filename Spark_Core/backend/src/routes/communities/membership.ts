@@ -5,6 +5,7 @@ import { problem } from "../responses.js";
 import { MUTATION_RATE_LIMIT } from "../session-guard.js";
 import type { MemberGuard } from "../workspace/guard.js";
 import { communityNotFound, communityParams, mapOutcome, noQuery, runCommunity, type Mapped } from "./access.js";
+import { NO_NUL } from "./discovery.js";
 
 // Join, request and withdraw: 20 per 10 minutes per client.
 const MEMBERSHIP_RATE_LIMIT = { rateLimit: { max: 20, timeWindow: 10 * 60 * 1000 } } as const;
@@ -22,7 +23,7 @@ const requestParams = {
 const requestBody = {
   type: ["object", "null"],
   propertyNames: { enum: ["message"] },
-  properties: { message: { type: ["string", "null"], maxLength: 500 } },
+  properties: { message: { type: ["string", "null"], maxLength: 500, pattern: NO_NUL } },
   additionalProperties: false,
 } as const;
 

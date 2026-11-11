@@ -439,3 +439,17 @@ describe("DELETE /communities/{id}/members/{userId}", () => {
     expect(response.statusCode).toBe(500);
   });
 });
+
+describe("NUL bytes in community text fields", () => {
+  it.each(["name", "tagline", "description", "city"])("rejects a NUL byte in %s on create with 400 before the database", async (field) => {
+    const { response, calls } = await send({ method: "POST", url: `/api/v1/workspaces/${wsId}/communities`, payload: { ...createBody, [field]: "a\u0000b" } });
+    expect(response.statusCode).toBe(400);
+    expect(called(calls, "spark.ws_create_community")).toBe(false);
+  });
+
+  it.each(["name", "tagline", "description", "city"])("rejects a NUL byte in %s on PATCH with 400 before the database", async (field) => {
+    const { response, calls } = await send({ method: "PATCH", url: `/api/v1/communities/${communityId}`, payload: { [field]: "a\u0000b" }, headers: { "if-match": "\"v1\"" } });
+    expect(response.statusCode).toBe(400);
+    expect(called(calls, "spark.ws_update_community")).toBe(false);
+  });
+});

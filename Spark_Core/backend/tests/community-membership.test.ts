@@ -273,3 +273,11 @@ describe("POST /community-requests/{id}/decision", () => {
     expect(response.statusCode).toBe(500);
   });
 });
+
+describe("NUL bytes in a request message", () => {
+  it("rejects a NUL byte in the message with 400 before the database", async () => {
+    const { response, calls } = await send({ method: "POST", url: `/api/v1/communities/${communityId}/requests`, payload: { message: "hi\u0000there" } });
+    expect(response.statusCode).toBe(400);
+    expect(called(calls, "spark.ws_request_community_membership")).toBe(false);
+  });
+});

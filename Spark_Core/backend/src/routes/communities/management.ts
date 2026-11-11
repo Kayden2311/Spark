@@ -16,7 +16,7 @@ import {
   workspaceNotFound,
   type Mapped,
 } from "./access.js";
-import { CARD_COLUMNS, cardResponse, detailResponse, readCommunityDetail, toCard, type CardRow, type CommunityDetail } from "./discovery.js";
+import { CARD_COLUMNS, NO_NUL, cardResponse, detailResponse, readCommunityDetail, toCard, type CardRow, type CommunityDetail } from "./discovery.js";
 
 const SLUG_PATTERN = "^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$";
 // GET /communities/filters shadows a community with this slug, so it can never be created.
@@ -48,13 +48,14 @@ const memberParams = {
 } as const;
 
 // Lengths are upper bounds; trimming and blank checks are the database's (22023 -> invalid_input).
+// NO_NUL keeps a NUL byte (which Postgres text cannot hold) a 400 instead of a 500.
 const fieldSchemas = {
-  name: { type: "string", maxLength: 80 },
-  tagline: { type: "string", maxLength: 90 },
-  description: { type: "string", maxLength: 2000 },
+  name: { type: "string", maxLength: 80, pattern: NO_NUL },
+  tagline: { type: "string", maxLength: 90, pattern: NO_NUL },
+  description: { type: "string", maxLength: 2000, pattern: NO_NUL },
   visibility: { type: "string", enum: VISIBILITIES },
   countryCode: { type: ["string", "null"], pattern: "^[A-Z]{2}$" },
-  city: { type: ["string", "null"], maxLength: 80 },
+  city: { type: ["string", "null"], maxLength: 80, pattern: NO_NUL },
   stage: { type: "string", enum: STAGE_CODES },
   topics: { type: "array", minItems: 1, maxItems: 4, uniqueItems: true, items: { type: "string", enum: TOPIC_SLUGS } },
 } as const;

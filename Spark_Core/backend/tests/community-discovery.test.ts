@@ -268,8 +268,30 @@ describe("discovery input edge cases", () => {
     expect(signedIn.response.headers["cache-control"]).toBe("private, no-store");
   });
 
+  it.each([
+    ["CJK", "社区".repeat(40)],
+    ["emoji", "🚀".repeat(80)],
+    ["quote and backslash", "\"\\".repeat(40)],
+  ])("pages past an 80-character %s name with its own cursor", async (_label, name) => {
+    const longRow = cardRow({ id: id2, slug: "long", name, cursor_name: name });
+    const first = await call(`${base}?limit=1`, [listHandler([longRow, cardRow({ id: id1, cursor_name: "zeta" })])]);
+    expect(first.response.statusCode).toBe(200);
+    const nextCursor = first.response.json().nextCursor as string;
+    expect(nextCursor).toEqual(expect.any(String));
+    const second = await call(`${base}?limit=1&cursor=${nextCursor}`, [listHandler([cardRow({ cursor_name: "zeta" })])]);
+    expect(second.response.statusCode).toBe(200);
+    expect(find(second.calls, "spark.discover_communities")?.params).toEqual([null, null, null, null, name, id2, 1]);
+  });
+
+  it("answers invalid_cursor for a cursor name longer than any community name", async () => {
+    const cursor = Buffer.from(JSON.stringify({ t: "a".repeat(161), id: id2 })).toString("base64url");
+    const { response } = await call(`${base}?cursor=${cursor}`, [listHandler([])]);
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: "invalid_cursor" });
+  });
+
   it("answers invalid_cursor for an over-long cursor", async () => {
-    const { response, calls } = await call(`${base}?cursor=${"A".repeat(400)}`, [listHandler([])]);
+    const { response, calls } = await call(`${base}?cursor=${"A".repeat(1100)}`, [listHandler([])]);
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ code: "invalid_cursor" });
     expect(called(calls, "spark.discover_communities")).toBe(false);

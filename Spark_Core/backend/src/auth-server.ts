@@ -3,16 +3,17 @@ import { Pool } from "pg";
 
 import { buildAuthApp } from "./app.js";
 import { loadAuthConfig } from "./config.js";
+import { poolConfig } from "./infrastructure/database/pool.js";
 import { assertLoginRole } from "./infrastructure/database/roles.js";
 
 // Private auth process. It alone holds the login-only database role (spark_auth) and serves
 // sign-up and sign-in for the API process. Bind it to a private interface only.
 const config = loadAuthConfig();
-const postgres = new Pool({
+const postgres = new Pool(poolConfig({
   connectionString: config.authDatabaseUrl,
   ssl: config.databaseSsl ? { rejectUnauthorized: true } : false,
   max: 5,
-});
+}));
 const redis = new Redis(config.redisUrl, {
   lazyConnect: true,
   enableOfflineQueue: false,
