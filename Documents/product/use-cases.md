@@ -52,15 +52,15 @@ Role hierarchy notes: a Community Member and a Workspace Member are Users with e
 
 | ID | Name | Primary actor | Story | Status |
 | --- | --- | --- | --- | --- |
-| UC-01 | Search communities | Visitor | US-B1, US-B2 | Mockup |
-| UC-02 | View community | Visitor | US-B3 | Mockup |
+| UC-01 | Search communities | Visitor | US-B1, US-B2 | Implemented (`GET /api/v1/communities`, `/communities`) |
+| UC-02 | View community | Visitor | US-B3 | Implemented (`GET /api/v1/communities/{slug}`, `/communities/[slug]`) |
 | UC-03 | Sign up | Visitor | US-A4 | Planned |
 | UC-04 | Sign in | Visitor | US-A1, US-A2 | Implemented (password), Mockup (OAuth) |
 | UC-05 | Recover password | Visitor | US-A5 | Planned |
 | UC-06 | Sign out and view session | User | US-A3 | Implemented |
-| UC-07 | Request membership | User | US-C1, US-C3 | Planned |
+| UC-07 | Request membership | User | US-C1, US-C3 | Implemented (`POST /api/v1/communities/{communityId}/requests`, `/communities/[slug]/request`) |
 | UC-08 | Create workspace | User | US-E1 | Mockup |
-| UC-09 | Decide membership request | Community Owner | US-C2 | Planned |
+| UC-09 | Decide membership request | Community Owner | US-C2 | Implemented (`POST /api/v1/community-requests/{requestId}/decision`, `/communities/[slug]/manage`) |
 | UC-10 | Accept workspace invitation | User | US-E3 | Planned |
 | UC-11 | Read community feed | Community Member | US-D1 | Planned |
 | UC-12 | Publish post | Community Member | US-D2, US-D4 | Planned |
@@ -90,7 +90,7 @@ Common rule for every authenticated use case: the session is validated first; au
 - **Main flow**:
   1. The actor enters an optional keyword and optional topic, location, and stage filters.
   2. The system validates filters and page size.
-  3. The system queries public communities with indexed PostgreSQL queries in deterministic order.
+  3. The system queries the communities the actor may see with indexed PostgreSQL queries in deterministic order.
   4. The system returns one page and a cursor.
   5. The actor opens a result (UC-02).
 - **Alternative flows**:
@@ -101,8 +101,8 @@ Common rule for every authenticated use case: the session is validated first; au
   - F2: Cache or Redis unavailable. The system reads from PostgreSQL.
 - **Postconditions**: No state changes.
 - **Business rules**:
-  - Only public communities are returned.
-  - Only public results may be cached; cache keys include visibility scope, with TTL and post-commit invalidation.
+  - Signed-out visitors see public communities only; signed-in users see every public and private community plus the hidden ones they are an active member of.
+  - Results vary by session and are not cached (`Cache-Control: no-store`).
   - A separate search engine requires evidence that PostgreSQL is insufficient.
 
 ### UC-02: View community
@@ -117,6 +117,8 @@ Common rule for every authenticated use case: the session is validated first; au
 - **Alternative flows**:
   - A1: Actor is already a member. The primary action becomes Open feed (UC-11).
   - A2: Actor has a pending request. The page shows the pending state.
+  - A3: Actor was declined within the last 14 days. The page shows when they can request again instead of Request access.
+  - A4: Actor manages the community without being a member (a host workspace owner or admin). The page offers Manage, never Request access.
 - **Failure flows**:
   - F1: Hidden community or missing slug. The system returns `404` with identical output for both.
 - **Postconditions**: No state changes.
@@ -226,7 +228,7 @@ Common rule for every authenticated use case: the session is validated first; au
   4. On approval the system creates the membership in the same transaction.
   5. The system records an event for UC-23.
 - **Failure flows**:
-  - F1: Actor is not an owner. `403`; the list stays hidden.
+  - F1: Actor is not a community manager (community owner or moderator, or host workspace owner or admin). `403`; the list stays hidden.
   - F2: Request already decided. Conflict; nothing changes.
 - **Postconditions**: The request is approved with a membership, or rejected without one. Never both states.
 - **Business rules**: Pending to approved or rejected is the only allowed transition.
