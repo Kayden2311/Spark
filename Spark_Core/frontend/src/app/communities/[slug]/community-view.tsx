@@ -9,8 +9,8 @@ import { ACCESS_LABELS, GlobeIcon, initialsOf, LockIcon, toneOf, VISIBILITY_LABE
 import { formatCount, formatDate, formatLocation } from "../format";
 import { SiteFooter, SiteHeader } from "../site-chrome";
 import type { CommunityDetail } from "../types";
-import { communitiesApi, isSignedOut, loginPath, membershipErrorMessage, messageOf, PAUSED_MESSAGE } from "../_lib/api";
-import { useCommunity } from "../_lib/use-communities";
+import { ApiError, communitiesApi, cooldownMessage, isSignedOut, LAST_OWNER_MESSAGE, loginPath, membershipErrorMessage, messageOf, PAUSED_MESSAGE } from "../_lib/api";
+import { useCommunity, useRequestCooldown } from "../_lib/use-communities";
 
 type Toast = { id: number; text: string };
 
@@ -45,22 +45,32 @@ function MembershipActions({ community, onChange, notify }: ActionsProps) {
   const [busy, setBusy] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // An expected refusal (the last owner leaving): explained, not shown as a failure.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const base = `/communities/${encodeURIComponent(community.slug)}`;
   const requestPath = `${base}/request`;
   const status = community.viewerStatus;
   const isMember = status !== null && MEMBER_STATUSES.has(status);
+  const outsider = status === null || status === "none";
   const paused = community.frozen;
+  // A declined request blocks asking again for a while; say when up front instead of offering a request that fails.
+  const cooldown = useRequestCooldown(community.slug, isAuthenticated && outsider && community.visibility === "private" && !community.canManage && !paused);
 
   const run = async (action: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       await action();
     } catch (failure) {
       if (isSignedOut(failure)) {
         router.push(loginPath(base));
+        return;
+      }
+      if (failure instanceof ApiError && failure.code === "last_owner") {
+        setNotice(LAST_OWNER_MESSAGE);
         return;
       }
       setError(membershipErrorMessage(failure));
@@ -151,12 +161,15 @@ function MembershipActions({ community, onChange, notify }: ActionsProps) {
         {busy ? "Joining…" : "Join"}
       </button>
     );
-  } else if (community.visibility === "private") {
-    control = paused ? (
-      <button className="circleCtaBtn" disabled type="button">Request access</button>
-    ) : (
-      <Link className="circleCtaBtn" href={requestPath}>Request access</Link>
-    );
+  } else if (community.visibility === "private" && !community.canManage) {
+    // Managers (for example host workspace admins) are never offered a request: they use Manage instead.
+    if (paused) {
+      control = <button className="circleCtaBtn" disabled type="button">Request access</button>;
+    } else if (cooldown.until) {
+      control = <span className="circleStatePill">{cooldownMessage(cooldown.until)}</span>;
+    } else if (cooldown.checked) {
+      control = <Link className="circleCtaBtn" href={requestPath}>Request access</Link>;
+    }
   }
 
   return (
@@ -170,6 +183,7 @@ function MembershipActions({ community, onChange, notify }: ActionsProps) {
         )}
       </div>
       {paused && <p className="circleNotice">{PAUSED_MESSAGE}</p>}
+      {notice && <p className="circleNotice">{notice}</p>}
       {error && (
         <p className="circleNotice circleNoticeError" role="alert">
           {error}
@@ -193,7 +207,7 @@ export function CommunityView({ slug }: { slug: string }) {
   if (status === "not_found") notFound();
 
   let content: React.ReactNode;
-  if (status === "error") {
+  if (status === "error" || status === "signed_out") {
     content = (
       <section className="circleSectionCard circleStateCard">
         <h1 className="circleMainTitle">This community could not load</h1>

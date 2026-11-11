@@ -4,8 +4,8 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "../../../auth-context";
-import { ApiError, communitiesApi, isSignedOut, loginPath, membershipErrorMessage, PAUSED_MESSAGE } from "../../_lib/api";
-import { useCommunity } from "../../_lib/use-communities";
+import { ApiError, communitiesApi, cooldownMessage, isSignedOut, loginPath, membershipErrorMessage, PAUSED_MESSAGE } from "../../_lib/api";
+import { useCommunity, useRequestCooldown } from "../../_lib/use-communities";
 
 export const MAX_MESSAGE_LENGTH = 500;
 
@@ -35,19 +35,21 @@ export function RequestForm({ slug }: { slug: string }) {
 
   const base = `/communities/${encodeURIComponent(slug)}`;
   const requestPath = `${base}/request`;
+  const outsider = community !== null && (community.viewerStatus === null || community.viewerStatus === "none");
   // Public communities are joined on their page; there is nothing to request.
-  const joinInstead = community?.visibility === "public" && community.viewerStatus === null;
+  const joinInstead = community?.visibility === "public" && outsider;
+  const cooldown = useRequestCooldown(slug, outsider && !community?.canManage && !community?.frozen);
 
   useEffect(() => {
-    if (signedOut) router.replace(loginPath(requestPath));
-  }, [requestPath, router, signedOut]);
+    if (signedOut || status === "signed_out") router.replace(loginPath(requestPath));
+  }, [requestPath, router, signedOut, status]);
   useEffect(() => {
     if (joinInstead) router.replace(base);
   }, [base, joinInstead, router]);
 
   if (status === "not_found") notFound();
 
-  if (signedOut) {
+  if (signedOut || status === "signed_out") {
     return (
       <div className="authCardWrapper">
         <h1 className="authHeading">Sign in to request access</h1>
@@ -95,10 +97,34 @@ export function RequestForm({ slug }: { slug: string }) {
       </StateCard>
     );
   }
+  if (community.canManage) {
+    // Managers (for example host workspace admins) never need to ask; they manage the community instead.
+    return (
+      <StateCard title="You manage this community" slug={slug} name={community.name}>
+        <p className="authSubheading">You already help run {community.name}, so there is nothing to request.</p>
+        <Link className="authSubmitBtn" href={`${base}/manage`}>Manage community</Link>
+      </StateCard>
+    );
+  }
   if (community.frozen) {
     return (
       <StateCard title={`Request access to ${community.name}`} slug={slug} name={community.name}>
         <p className="authSubheading">{PAUSED_MESSAGE}</p>
+      </StateCard>
+    );
+  }
+
+  if (!cooldown.checked) {
+    return (
+      <div className="authCardWrapper" aria-busy="true">
+        <p className="authSubheading" role="status">Loading…</p>
+      </div>
+    );
+  }
+  if (cooldown.until) {
+    return (
+      <StateCard title={`Request access to ${community.name}`} slug={slug} name={community.name}>
+        <p className="authSubheading">{cooldownMessage(cooldown.until)}</p>
       </StateCard>
     );
   }

@@ -5,12 +5,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../../auth-context";
 import { initials } from "../../../components";
 import { Modal } from "../../../w/_components/modal";
-import { ApiError, communitiesApi, membershipErrorMessage } from "../../_lib/api";
+import { ApiError, communitiesApi, LAST_OWNER_MESSAGE, membershipErrorMessage } from "../../_lib/api";
 import type { CommunityMember, CommunityRole, MemberCandidate } from "../../types";
 import type { ManageContext } from "./manage-view";
 import { useList } from "./use-list";
 
-export const LAST_OWNER = "A community must keep at least one owner. Make someone else an owner first.";
+export const LAST_OWNER = LAST_OWNER_MESSAGE;
 
 const ROLES: Array<[CommunityRole, string]> = [["owner", "Owner"], ["moderator", "Moderator"], ["member", "Member"]];
 const ROLE_LABELS: Record<string, string> = Object.fromEntries(ROLES);
@@ -21,9 +21,6 @@ function joined(iso: string): string {
   return Number.isNaN(date.getTime()) ? "—" : joinedFormat.format(date);
 }
 
-function errorFor(error: unknown): string {
-  return error instanceof ApiError && error.code === "last_owner" ? LAST_OWNER : membershipErrorMessage(error);
-}
 
 function AddFromWorkspace({ context, onAdded, onClose }: { context: ManageContext; onAdded(member: CommunityMember): void; onClose(): void }) {
   const { community, handleAccess } = context;
@@ -120,7 +117,7 @@ export function MembersTab({ context }: { context: ManageContext }) {
       // Your own role changed: the server decides again what you may do (a host admin keeps governing).
       if (member.userId === me) void refresh();
     } catch (error) {
-      if (!handleAccess(error)) setRowError({ userId: member.userId, text: errorFor(error) });
+      if (!handleAccess(error)) setRowError({ userId: member.userId, text: membershipErrorMessage(error) });
     } finally {
       setPendingRole(null);
     }
@@ -138,7 +135,7 @@ export function MembersTab({ context }: { context: ManageContext }) {
       setConfirm(null);
     } catch (error) {
       if (handleAccess(error)) setConfirm(null);
-      else setConfirmError(errorFor(error));
+      else setConfirmError(membershipErrorMessage(error));
     } finally {
       setConfirmBusy(false);
     }
@@ -167,7 +164,7 @@ export function MembersTab({ context }: { context: ManageContext }) {
         </button>
       </header>
 
-      {Boolean(list.error) && !list.items && !(list.error instanceof ApiError && (list.error.status === 403 || list.error.status === 401)) && (
+      {Boolean(list.error) && !list.items && !(list.error instanceof ApiError && list.error.status === 401) && (
         <div className="spAlert spAlertDanger spPanelAlert" role="alert">
           {membershipErrorMessage(list.error)}
           <button className="spBtn spBtnSecondary spBtnSm" onClick={list.reload} type="button">Try again</button>

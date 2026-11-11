@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fixtures from "./fixtures/community-health.json";
 
 const router = { replace: vi.fn(), push: vi.fn() };
-const navigation = { pathname: "/admin/communities", search: new URLSearchParams() };
+const navigation = { pathname: "/admin/communities", search: new URLSearchParams(), params: {} as Record<string, string> };
 const auth = {
   isAuthenticated: true,
   isLoading: false,
@@ -22,12 +22,13 @@ vi.mock("next/navigation", () => ({
   useRouter: () => router,
   usePathname: () => navigation.pathname,
   useSearchParams: () => navigation.search,
-  useParams: () => ({}),
+  useParams: () => navigation.params,
 }));
 vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 
 import AdminLayout from "../src/app/admin/layout";
 import CommunitiesAdminPage from "../src/app/admin/communities/page";
+import CommunityAdminDetailPage from "../src/app/admin/communities/[id]/page";
 import { HEALTH_TONE, healthOf } from "../src/app/admin/_components/community-actions";
 import { TONE_DOT, type Tone } from "../src/app/admin/_lib/format";
 import { HEALTH_GROUPS } from "../src/app/admin/communities/community-insights";
@@ -123,6 +124,7 @@ beforeEach(() => {
   requests = [];
   auth.platformRoles = ["platform_admin"];
   navigation.search = new URLSearchParams();
+  navigation.params = {};
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -133,6 +135,15 @@ describe("communities dashboard", () => {
     render(<AdminLayout><CommunitiesAdminPage /></AdminLayout>);
     expect(await screen.findByText(/Pre-seed/u)).toBeInTheDocument();
     expect(screen.queryByText(/pre_seed/u)).toBeNull();
+  });
+
+  it("shows the stage label on a community's detail page", async () => {
+    navigation.params = { id: "c1" };
+    const detail = { community: { ...community(1), stage: "series_a" }, series: [], history: [] };
+    mockApi({ "GET /api/v1/admin/communities/c1": json(detail), ...routes });
+    render(<AdminLayout><CommunityAdminDetailPage /></AdminLayout>);
+    expect((await screen.findAllByText(/Series A/u)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/series_a/u)).toBeNull();
   });
 
   it("shows the four trend cards for an admin", async () => {

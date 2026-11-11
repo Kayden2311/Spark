@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { detail, json, stubFetch } from "./community-fixtures";
 import type { CommunityDetail } from "../src/app/communities/types";
+import { LAST_OWNER_MESSAGE } from "../src/app/communities/_lib/api";
+import { formatDate } from "../src/app/communities/format";
+import { LAST_OWNER } from "../src/app/communities/[slug]/manage/members-tab";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const notFound = vi.hoisted(() => vi.fn());
@@ -152,8 +155,54 @@ describe("community page", () => {
     render(<CommunityView slug="northstar-founders" />);
     await userEvent.click(await screen.findByRole("button", { name: "Leave" }));
     await userEvent.click(screen.getByRole("button", { name: "Leave community" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("A community needs at least one owner.");
+    expect(await within(actions()).findByText(LAST_OWNER_MESSAGE)).toBeInTheDocument();
+    // Same words as the Members tab, and not presented as a failure.
+    expect(LAST_OWNER).toBe(LAST_OWNER_MESSAGE);
+    expect(LAST_OWNER_MESSAGE).toMatch(/at least one owner/u);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(within(actions()).getByText("You're a member")).toBeInTheDocument();
+  });
+
+  it("gives a host admin who is not a member the Manage link but never Request access", async () => {
+    serve(detail({ visibility: "private", viewerStatus: "none", canManage: true }));
+    render(<CommunityView slug="northstar-founders" />);
+    expect(await within(await screen.findByRole("region", { name: "Membership" })).findByRole("link", { name: "Manage" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Request access" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request access" })).not.toBeInTheDocument();
+  });
+
+  it("still lets a host admin join a public community", async () => {
+    serve(detail({ viewerStatus: "none", canManage: true }));
+    render(<CommunityView slug="northstar-founders" />);
+    expect(await screen.findByRole("button", { name: "Join" })).toBeEnabled();
+    expect(screen.getByRole("link", { name: "Manage" })).toBeInTheDocument();
+  });
+
+  it("shows when a declined user can request again instead of Request access", async () => {
+    const reviewedAt = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    const again = formatDate(new Date(Date.parse(reviewedAt) + 14 * 86_400_000).toISOString());
+    serve(detail({ visibility: "private", viewerStatus: "none" }), (url) =>
+      url.pathname === "/api/v1/me/community-requests"
+        ? json({ items: [
+          { id: "r-new", community: { slug: "northstar-founders", name: "Northstar Founders" }, status: "rejected", message: null, createdAt: "2026-10-20T00:00:00.000Z", reviewedAt },
+          { id: "r-elsewhere", community: { slug: "other", name: "Other" }, status: "rejected", message: null, createdAt: "2026-10-20T00:00:00.000Z", reviewedAt: new Date().toISOString() },
+        ] })
+        : undefined,
+    );
+    render(<CommunityView slug="northstar-founders" />);
+    expect(await within(await screen.findByRole("region", { name: "Membership" })).findByText(`You can request again on ${again}`)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Request access" })).not.toBeInTheDocument();
+  });
+
+  it("offers Request access again after the cooldown", async () => {
+    const reviewedAt = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    serve(detail({ visibility: "private", viewerStatus: "none" }), (url) =>
+      url.pathname === "/api/v1/me/community-requests"
+        ? json({ items: [{ id: "r-1", community: { slug: "northstar-founders", name: "Northstar Founders" }, status: "rejected", message: null, createdAt: "2026-10-01T00:00:00.000Z", reviewedAt }] })
+        : undefined,
+    );
+    render(<CommunityView slug="northstar-founders" />);
+    expect(await screen.findByRole("link", { name: "Request access" })).toBeInTheDocument();
   });
 
   it("gives managers a Manage link", async () => {

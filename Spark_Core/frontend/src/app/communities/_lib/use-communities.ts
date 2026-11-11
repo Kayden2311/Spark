@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { filtersFromParams, filtersToSearch, type CommunityFilters } from "../filter";
 import type { CommunityCard, CommunityDetail, CommunityFilterOptions } from "../types";
-import { ApiError, communitiesApi, messageOf } from "./api";
+import { ApiError, communitiesApi, cooldownEndsAt, messageOf } from "./api";
 
 interface DirectorySettled {
   /** The request (retry count and filters) this result belongs to. */
@@ -113,7 +113,8 @@ export function useMyCommunities(enabled: boolean): CommunityCard[] {
   return enabled && settled.enabled ? settled.items : [];
 }
 
-export type CommunityStatus = "loading" | "ready" | "not_found" | "error";
+/** "signed_out": the read answered 401 (the session ended); callers send the user to sign in. */
+export type CommunityStatus = "loading" | "ready" | "not_found" | "signed_out" | "error";
 
 interface CommunitySettled {
   key: string;
@@ -137,7 +138,8 @@ export function useCommunity(slug: string, enabled = true) {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         const missing = error instanceof ApiError && error.status === 404;
-        setSettled({ key, community: null, status: missing ? "not_found" : "error", error: messageOf(error) });
+        const signedOut = error instanceof ApiError && error.status === 401;
+        setSettled({ key, community: null, status: missing ? "not_found" : signedOut ? "signed_out" : "error", error: messageOf(error) });
       });
     return () => controller.abort();
   }, [enabled, key, slug]);
@@ -158,4 +160,25 @@ export function useCommunity(slug: string, enabled = true) {
     retry,
     update,
   };
+}
+
+/**
+ * Whether a declined request still holds the viewer back from asking again (GET /me/community-requests).
+ * `checked` stays false until the answer arrives; a failed read counts as no cooldown (the API still refuses).
+ */
+export function useRequestCooldown(slug: string, enabled: boolean): { checked: boolean; until: string | null } {
+  const [settled, setSettled] = useState<{ slug: string; until: string | null } | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    communitiesApi
+      .myRequests(controller.signal)
+      .then(({ items }) => setSettled({ slug, until: cooldownEndsAt(items, slug) }))
+      .catch(() => {
+        if (!controller.signal.aborted) setSettled({ slug, until: null });
+      });
+    return () => controller.abort();
+  }, [enabled, slug]);
+  const current = enabled && settled?.slug === slug ? settled : null;
+  return { checked: current !== null, until: current?.until ?? null };
 }

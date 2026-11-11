@@ -2,8 +2,8 @@
 
 export type CommunityVisibility = "public" | "private" | "hidden";
 
-/** The viewer's active community role, "pending" for an open join request, or null. */
-export type ViewerStatus = "owner" | "moderator" | "member" | "pending" | null;
+/** The viewer's active community role, "pending" for an open join request, "none" when signed in without either, null when signed out. */
+export type ViewerStatus = "owner" | "moderator" | "member" | "pending" | "none" | null;
 
 export interface CommunityCard {
   id: string;

@@ -9,6 +9,7 @@ import type { ManageContext } from "./manage-view";
 import { useList } from "./use-list";
 
 export const ALREADY_DECIDED = "Someone already decided this request";
+export const REQUEST_GONE = "This request no longer exists. It may have been withdrawn.";
 
 const shortDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 
@@ -18,11 +19,11 @@ export function requestDate(iso: string): string {
 }
 
 export function RequestsTab({ context }: { context: ManageContext }) {
-  const { community, notify, handleAccess, update } = context;
+  const { community, notify, handleAccess, update, refresh } = context;
   const communityId = community.id;
   const load = useCallback((signal: AbortSignal) => communitiesApi.requests(communityId, signal), [communityId]);
   const list = useList<ManagedRequest>(load);
-  // Rows being decided disappear at once; a failure other than "already decided" brings them back.
+  // Rows being decided disappear at once; a failure other than "already decided" or "gone" brings them back.
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [notice, setNotice] = useState<{ tone: "info" | "danger"; text: string } | null>(null);
   const busy = useRef(new Set<string>());
@@ -49,6 +50,11 @@ export function RequestsTab({ context }: { context: ManageContext }) {
       if (error instanceof ApiError && error.code === "already_decided") {
         setNotice({ tone: "info", text: ALREADY_DECIDED });
         list.reload();
+        // The other decision may have added a member: reload the header count too.
+        void refresh();
+      } else if (error instanceof ApiError && error.code === "request_not_found") {
+        list.setItems((items) => items.filter((item) => item.id !== request.id));
+        setNotice({ tone: "info", text: REQUEST_GONE });
       } else if (!handleAccess(error)) {
         setRemoved((current) => {
           const next = new Set(current);
@@ -77,7 +83,7 @@ export function RequestsTab({ context }: { context: ManageContext }) {
 
       {notice && <p className={notice.tone === "danger" ? "spAlert spAlertDanger spPanelAlert" : "spAlert spPanelAlert"} role={notice.tone === "danger" ? "alert" : "status"}>{notice.text}</p>}
 
-      {failed && !(list.error instanceof ApiError && (list.error.status === 403 || list.error.status === 401)) && (
+      {failed && !(list.error instanceof ApiError && list.error.status === 401) && (
         <div className="spAlert spAlertDanger spPanelAlert" role="alert">
           {membershipErrorMessage(list.error)}
           <button className="spBtn spBtnSecondary spBtnSm" onClick={list.reload} type="button">Try again</button>

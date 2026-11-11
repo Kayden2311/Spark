@@ -6,7 +6,7 @@ import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } f
 
 import { useAuth } from "../../../auth-context";
 import { PageHeader } from "../../../_ui/page-header";
-import { ApiError, communitiesApi, currentOf, isSignedOut, loginPath } from "../../_lib/api";
+import { communitiesApi, currentOf, isSignedOut, loginPath } from "../../_lib/api";
 import { useCommunity } from "../../_lib/use-communities";
 import type { CommunityDetail } from "../../types";
 import { MembersTab } from "./members-tab";
@@ -20,13 +20,17 @@ const VISIBILITY_LABELS: Record<CommunityDetail["visibility"], string> = { publi
 type Tab = "requests" | "members" | "settings";
 type Toast = { id: number; text: string; tone: "success" | "error" };
 
-/** Shared by the tabs: a toast, a sign-in redirect after a 401, and the switch to the restriction card on 403. */
+/**
+ * Shared by the tabs: a toast and a sign-in redirect after a 401. Only the first detail load decides between the
+ * page, the restriction card and "not available"; a 403 or 404 from a later read or write (a race, such as a
+ * teammate removing you) stays an inline error in that tab.
+ */
 export interface ManageContext {
   community: CommunityDetail;
   /** Community owners and host workspace owners/admins: they change roles and settings. Moderators do not. */
   canGovern: boolean;
   notify(text: string, tone?: Toast["tone"]): void;
-  /** Handles 401 and 403 for every tab; returns true when the error was handled here. */
+  /** Handles a 401 for every tab (redirect to sign in); returns true when the error was handled here. */
   handleAccess(error: unknown): boolean;
   update(change: (community: CommunityDetail) => CommunityDetail): void;
   /** Reloads the community quietly (after a change to your own role, the server decides what you may do). */
@@ -54,7 +58,6 @@ export function ManageCommunity({ slug }: { slug: string }) {
   const signedIn = !isLoading && isAuthenticated;
   const { community, status, error, retry, update } = useCommunity(slug, signedIn);
   const [tab, setTab] = useState<Tab>("requests");
-  const [denied, setDenied] = useState(false);
   // Set when a save hit a newer version; the Settings tab shows it until the next successful save.
   const [stale, setStale] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -62,9 +65,10 @@ export function ManageCommunity({ slug }: { slug: string }) {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const here = `/communities/${slug}/manage`;
 
+  const sessionEnded = status === "signed_out";
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) router.replace(loginPath(here));
-  }, [here, isAuthenticated, isLoading, router]);
+    if ((!isLoading && !isAuthenticated) || sessionEnded) router.replace(loginPath(here));
+  }, [here, isAuthenticated, isLoading, router, sessionEnded]);
 
   useEffect(() => {
     if (!toast) return;
@@ -77,11 +81,6 @@ export function ManageCommunity({ slug }: { slug: string }) {
     (problem: unknown) => {
       if (isSignedOut(problem)) {
         router.push(loginPath(here));
-        return true;
-      }
-      // Access was removed after the page loaded (for example the manager left): show the restriction card.
-      if (problem instanceof ApiError && (problem.status === 403 || problem.status === 404) && problem.code !== "member_not_found" && problem.code !== "request_not_found") {
-        setDenied(true);
         return true;
       }
       return false;
@@ -97,7 +96,7 @@ export function ManageCommunity({ slug }: { slug: string }) {
     }
   }, [handleAccess, retry, slug, update]);
 
-  if (!signedIn) return <div aria-busy="true" className="spManageLoading" role="status"><span className="spSrOnly">Checking your access…</span></div>;
+  if (!signedIn || sessionEnded) return <div aria-busy="true" className="spManageLoading" role="status"><span className="spSrOnly">Checking your access…</span></div>;
 
   if (status === "loading") {
     return (
@@ -122,7 +121,7 @@ export function ManageCommunity({ slug }: { slug: string }) {
       </section>
     );
   }
-  if (denied || !community.canManage) {
+  if (!community.canManage) {
     return <StateCard slug={community.slug} text={`${community.name} is run by its owners and moderators. You can still visit the community page.`} title={RESTRICTED_MESSAGE} />;
   }
 
@@ -196,6 +195,7 @@ export function ManageCommunity({ slug }: { slug: string }) {
       </div>
 
       {/* One live region stays mounted so screen readers announce each new message. */}
+      {/* wsToast is the restyled toast in _ui/app.css (also used by the workspace Members page). */}
       <div aria-live="polite" className="wsToastRegion" role="status">
         {toast && (
           <div className="wsToast" data-tone={toast.tone} key={toast.id}>

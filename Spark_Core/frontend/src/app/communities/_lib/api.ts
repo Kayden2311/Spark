@@ -149,14 +149,42 @@ export function loginPath(returnTo: string): string {
   return `/login?redirect=${encodeURIComponent(returnTo)}`;
 }
 
+/** The last-owner rule, in the same words on the community page (Leave) and in the Members tab. */
+export const LAST_OWNER_MESSAGE = "A community must keep at least one owner. Make someone else an owner first.";
+
+/** Days after a declined request before the same person may ask again (the API enforces it too). */
+export const REQUEST_COOLDOWN_DAYS = 14;
+const DAY_MS = 86_400_000;
+
+/** "You can request again on November 19, 2026", or a dateless fallback. */
+export function cooldownMessage(retryAfter: string | null): string {
+  const date = retryAfter ? formatDate(retryAfter) : null;
+  return date ? `You can request again on ${date}` : "Your last request was declined recently. You can request again later.";
+}
+
+/**
+ * When the viewer may ask to join again: the latest declined request for this community plus the cooldown,
+ * if that is still in the future. Null when nothing holds them back.
+ */
+export function cooldownEndsAt(requests: MyCommunityRequest[], slug: string, now = Date.now()): string | null {
+  let latest = Number.NEGATIVE_INFINITY;
+  for (const request of requests) {
+    if (request.community.slug !== slug || request.status !== "rejected" || !request.reviewedAt) continue;
+    const reviewed = Date.parse(request.reviewedAt);
+    if (!Number.isNaN(reviewed) && reviewed > latest) latest = reviewed;
+  }
+  const until = latest + REQUEST_COOLDOWN_DAYS * DAY_MS;
+  return Number.isFinite(until) && until > now ? new Date(until).toISOString() : null;
+}
+
 /** Copy for a failed join or request, with the cooldown date when the API sent one. */
 export function membershipErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.code === "request_cooldown") {
       const retryAfter = (error.body as { retryAfter?: unknown } | null)?.retryAfter;
-      const date = typeof retryAfter === "string" ? formatDate(retryAfter) : null;
-      return date ? `You can request again on ${date}` : "Your last request was declined recently. You can request again later.";
+      return cooldownMessage(typeof retryAfter === "string" ? retryAfter : null);
     }
+    if (error.code === "last_owner") return LAST_OWNER_MESSAGE;
     if (error.code === "community_frozen") return PAUSED_MESSAGE;
     if (error.code === "membership_suspended") return "Your membership in this community is suspended.";
   }

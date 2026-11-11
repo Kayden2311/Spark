@@ -161,4 +161,20 @@ describe("create community form", () => {
     expect(await screen.findByText("That address is taken. Try another one.")).toBeInTheDocument();
     expect(router.push).not.toHaveBeenCalled();
   });
+
+  it("explains the 10-community limit without offering an archive action", async () => {
+    serve("owner", (url, init) =>
+      url.pathname === "/api/v1/workspaces/w1/communities" && init.method === "POST"
+        ? json({ code: "too_many_communities", detail: "Too many communities." }, 409)
+        : undefined,
+    );
+    render(<WorkspaceLayout><NewCommunityPage /></WorkspaceLayout>);
+    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "Climate Builders");
+    await userEvent.type(screen.getByRole("textbox", { name: "Tagline" }), "Builders.");
+    await userEvent.type(screen.getByRole("textbox", { name: "Description" }), "Monthly.");
+    await userEvent.click(within(screen.getByRole("group", { name: "Topics" })).getByRole("button", { name: "Product" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create community" }));
+    expect(await screen.findByText("Northstar Labs has reached the limit of 10 communities, so it can't host another one.")).toBeInTheDocument();
+    expect(screen.queryByText(/archive/iu)).not.toBeInTheDocument();
+  });
 });

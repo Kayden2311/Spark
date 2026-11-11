@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { detail, json, stubFetch } from "./community-fixtures";
 import type { CommunityDetail } from "../src/app/communities/types";
+import { formatDate } from "../src/app/communities/format";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const notFound = vi.hoisted(() => vi.fn());
@@ -15,8 +16,9 @@ import { MAX_MESSAGE_LENGTH, RequestForm } from "../src/app/communities/[slug]/r
 
 const privateCommunity = detail({ visibility: "private" });
 
-function serve(community: CommunityDetail | null, onRequest?: (body: unknown) => Response) {
+function serve(community: CommunityDetail | null, onRequest?: (body: unknown) => Response, myRequests?: unknown[]) {
   return stubFetch((url, init) => {
+    if (url.pathname === "/api/v1/me/community-requests" && myRequests) return json({ items: myRequests });
     if (url.pathname === "/api/v1/communities/northstar-founders") {
       return community ? json(community) : json({ code: "community_not_found", detail: "Community not found." }, 404);
     }
@@ -82,6 +84,34 @@ describe("RequestForm", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Send request" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("You can request again on November 19, 2026");
     expect(router.push).not.toHaveBeenCalled();
+  });
+
+  it("shows the cooldown date up front for a recently declined request", async () => {
+    const reviewedAt = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const again = formatDate(new Date(Date.parse(reviewedAt) + 14 * 86_400_000).toISOString());
+    serve(detail({ visibility: "private", viewerStatus: "none" }), undefined, [
+      { id: "r-old", community: { slug: "northstar-founders", name: "Northstar Founders" }, status: "rejected", message: null, createdAt: "2026-10-01T00:00:00.000Z", reviewedAt },
+    ]);
+    render(<RequestForm slug="northstar-founders" />);
+    expect(await screen.findByText(`You can request again on ${again}`)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send request" })).not.toBeInTheDocument();
+  });
+
+  it("offers the form again once the cooldown is over", async () => {
+    const reviewedAt = new Date(Date.now() - 15 * 86_400_000).toISOString();
+    serve(detail({ visibility: "private", viewerStatus: "none" }), undefined, [
+      { id: "r-old", community: { slug: "northstar-founders", name: "Northstar Founders" }, status: "rejected", message: null, createdAt: "2026-10-01T00:00:00.000Z", reviewedAt },
+    ]);
+    render(<RequestForm slug="northstar-founders" />);
+    expect(await screen.findByRole("button", { name: "Send request" })).toBeInTheDocument();
+  });
+
+  it("never offers a request to someone who already manages the community", async () => {
+    serve(detail({ visibility: "private", viewerStatus: "none", canManage: true }));
+    render(<RequestForm slug="northstar-founders" />);
+    expect(await screen.findByRole("heading", { name: "You manage this community" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send request" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage community" })).toHaveAttribute("href", "/communities/northstar-founders/manage");
   });
 
   it("shows the existing pending request instead of the form", async () => {

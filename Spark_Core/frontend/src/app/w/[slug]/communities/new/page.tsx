@@ -67,7 +67,7 @@ export default function NewCommunityPage() {
       } else if (error instanceof ApiError && error.code === "slug_taken") {
         setErrors((current) => ({ ...current, slug: SLUG_TAKEN }));
       } else if (error instanceof ApiError && error.code === "too_many_communities") {
-        setProblem(`${workspace.name} already hosts the maximum of 10 communities. Archive one before creating another.`);
+        setProblem(`${workspace.name} has reached the limit of 10 communities, so it can't host another one.`);
       } else {
         setProblem(membershipErrorMessage(error));
       }

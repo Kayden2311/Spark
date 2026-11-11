@@ -11,6 +11,7 @@ const auth = { isAuthenticated: true, isLoading: false, user: { id: "u-owner" } 
 vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 
 import { ManageCommunity } from "../src/app/communities/[slug]/manage/manage-view";
+import { REQUEST_GONE } from "../src/app/communities/[slug]/manage/requests-tab";
 
 const RESTRICTED = "Only community owners and moderators can manage this community";
 
@@ -66,12 +67,71 @@ describe("community manage page", () => {
     expect(calls.some((call) => call.path.endsWith("/requests"))).toBe(false);
   });
 
-  it("refuses a manager whose access was removed (403 on the list)", async () => {
+  it("keeps the page when a list answers 403, with an inline error in that tab", async () => {
     serve(manager(), (url) =>
-      url.pathname === "/api/v1/communities/c-northstar/requests" ? json({ code: "insufficient_role", detail: "Nope." }, 403) : undefined,
+      url.pathname === "/api/v1/communities/c-northstar/requests" ? json({ code: "insufficient_role", detail: "You can't manage this community." }, 403) : undefined,
     );
     render(<ManageCommunity slug="northstar-founders" />);
-    expect(await screen.findByText(RESTRICTED)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("You can't manage this community.");
+    expect(screen.getByRole("tab", { name: "Requests" })).toBeInTheDocument();
+    expect(screen.queryByText(RESTRICTED)).not.toBeInTheDocument();
+  });
+
+  it("keeps the page when one decision answers 403 or 404, with an inline error", async () => {
+    serve(manager(), (url, init) => {
+      if (url.pathname === "/api/v1/communities/c-northstar/requests") return json({ items: [requestRow("r1", "Dana Requester"), requestRow("r2", "Eli Quiet")] });
+      if (url.pathname === "/api/v1/community-requests/r1/decision" && init.method === "POST") return json({ code: "insufficient_role", detail: "You can't decide requests here." }, 403);
+      if (url.pathname === "/api/v1/community-requests/r2/decision" && init.method === "POST") return json({ code: "community_not_found", detail: "Community not found." }, 404);
+      return undefined;
+    });
+    render(<ManageCommunity slug="northstar-founders" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve Dana Requester" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("You can't decide requests here.");
+    expect(screen.getByText("Dana Requester")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Approve Eli Quiet" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Community not found.");
+    expect(screen.getByText("Eli Quiet")).toBeInTheDocument();
+    expect(screen.queryByText(RESTRICTED)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "This community isn't available" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Members" })).toBeInTheDocument();
+  });
+
+  it("keeps the page when removing a member answers 403, with the error in the dialog", async () => {
+    serve(manager(), (url, init) => {
+      if (url.pathname === "/api/v1/communities/c-northstar/members" && (init.method ?? "GET") === "GET") {
+        return json({ items: [memberRow("u-owner", "Avery Owner", "owner"), memberRow("u-m", "Max Member", "member")] });
+      }
+      if (url.pathname === "/api/v1/communities/c-northstar/members/u-m" && init.method === "DELETE") return json({ code: "insufficient_role", detail: "You can't remove members here." }, 403);
+      return undefined;
+    });
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Members");
+    await userEvent.click(await screen.findByRole("button", { name: "Remove Max Member" }));
+    const dialog = await screen.findByRole("dialog", { name: "Remove Max Member?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("You can't remove members here.");
+    expect(screen.queryByText(RESTRICTED)).not.toBeInTheDocument();
+  });
+
+  it("sends the user to sign in when the detail load answers 401", async () => {
+    serve(null, (url) =>
+      url.pathname === "/api/v1/communities/northstar-founders" ? json({ code: "session_expired", detail: "Session expired or invalid." }, 401) : undefined,
+    );
+    render(<ManageCommunity slug="northstar-founders" />);
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/login?redirect=%2Fcommunities%2Fnorthstar-founders%2Fmanage"));
+    expect(screen.queryByText(RESTRICTED)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "We couldn't open this community" })).not.toBeInTheDocument();
+  });
+
+  it("sends the user to sign in when a decision answers 401", async () => {
+    serve(manager(), (url, init) => {
+      if (url.pathname === "/api/v1/communities/c-northstar/requests") return json({ items: [requestRow("r1", "Dana Requester")] });
+      if (url.pathname === "/api/v1/community-requests/r1/decision" && init.method === "POST") return json({ code: "session_expired", detail: "Session expired or invalid." }, 401);
+      return undefined;
+    });
+    render(<ManageCommunity slug="northstar-founders" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve Dana Requester" }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/login?redirect=%2Fcommunities%2Fnorthstar-founders%2Fmanage"));
   });
 
   it("says when the community is not available", async () => {
@@ -137,6 +197,43 @@ describe("community manage page", () => {
     await waitFor(() => expect(listCalls).toBe(2));
     expect(screen.queryByText("Dana Requester")).not.toBeInTheDocument();
     expect(screen.getByText("Eli Quiet")).toBeInTheDocument();
+  });
+
+  it("drops a request that no longer exists instead of putting it back", async () => {
+    serve(manager(), (url, init) => {
+      if (url.pathname === "/api/v1/communities/c-northstar/requests") return json({ items: [requestRow("r1", "Dana Requester"), requestRow("r2", "Eli Quiet")] });
+      if (url.pathname === "/api/v1/community-requests/r1/decision" && init.method === "POST") {
+        return json({ code: "request_not_found", detail: "Join request not found." }, 404);
+      }
+      return undefined;
+    });
+    render(<ManageCommunity slug="northstar-founders" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve Dana Requester" }));
+    expect(await screen.findByText(REQUEST_GONE)).toBeInTheDocument();
+    expect(screen.queryByText("Dana Requester")).not.toBeInTheDocument();
+    expect(screen.getByText("Eli Quiet")).toBeInTheDocument();
+    expect(screen.queryByText(RESTRICTED)).not.toBeInTheDocument();
+  });
+
+  it("refreshes the member count after someone else already decided", async () => {
+    let detailCalls = 0;
+    serve(null, (url, init) => {
+      if (url.pathname === "/api/v1/communities/northstar-founders" && (init.method ?? "GET") === "GET") {
+        detailCalls += 1;
+        return json(manager({ memberCount: detailCalls === 1 ? 5 : 6 }));
+      }
+      if (url.pathname === "/api/v1/communities/c-northstar/requests") return json({ items: detailCalls <= 1 ? [requestRow("r1", "Dana Requester")] : [] });
+      if (url.pathname === "/api/v1/community-requests/r1/decision" && init.method === "POST") {
+        return json({ code: "already_decided", detail: "This request was already decided." }, 409);
+      }
+      return undefined;
+    });
+    render(<ManageCommunity slug="northstar-founders" />);
+    expect(await screen.findByText(/5 members/u)).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Approve Dana Requester" }));
+    expect(await screen.findByText("Someone already decided this request")).toBeInTheDocument();
+    expect(await screen.findByText(/6 members/u)).toBeInTheDocument();
+    expect(detailCalls).toBe(2);
   });
 
   it("puts a request back when the decision fails for another reason", async () => {
