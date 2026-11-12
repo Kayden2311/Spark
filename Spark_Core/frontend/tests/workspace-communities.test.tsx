@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { card, json, stubFetch, type Route } from "./community-fixtures";
@@ -26,6 +26,9 @@ vi.mock("../src/app/auth-context", () => ({ useAuth: () => auth }));
 import WorkspaceLayout from "../src/app/w/[slug]/layout";
 import WorkspaceCommunitiesPage from "../src/app/w/[slug]/communities/page";
 import NewCommunityPage from "../src/app/w/[slug]/communities/new/page";
+
+// Sets a whole field value in one change event; per-keystroke typing re-renders the workspace layout each time and is slow.
+const fill = (field: HTMLElement, value: string) => fireEvent.change(field, { target: { value } });
 
 const workspace = (role: string) => ({ id: "w1", slug: "northstar-labs", name: "Northstar Labs", role, memberCount: 3, version: 1, createdAt: "2026-10-18T10:00:00.000Z" });
 
@@ -91,20 +94,20 @@ describe("create community form", () => {
   it("derives the address from the name and counts the tagline", async () => {
     serve("owner");
     render(<WorkspaceLayout><NewCommunityPage /></WorkspaceLayout>);
-    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "Climate Builders VN!");
-    expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("climate-builders-vn");
-    expect(screen.getByText("spark.app/communities/climate-builders-vn")).toBeInTheDocument();
+    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "Go VN!");
+    expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("go-vn");
+    expect(screen.getByText("spark.app/communities/go-vn")).toBeInTheDocument();
 
-    await userEvent.type(screen.getByRole("textbox", { name: "Tagline" }), "Hello");
-    expect(screen.getByText("5/90")).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("textbox", { name: "Tagline" }), "Hi");
+    expect(screen.getByText("2/90")).toBeInTheDocument();
   });
 
   it("needs one to four topics", async () => {
     const { calls } = serve("owner");
     render(<WorkspaceLayout><NewCommunityPage /></WorkspaceLayout>);
-    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "Climate Builders");
-    await userEvent.type(screen.getByRole("textbox", { name: "Tagline" }), "Builders of climate tech.");
-    await userEvent.type(screen.getByRole("textbox", { name: "Description" }), "We meet monthly.");
+    fill(await screen.findByRole("textbox", { name: "Name" }), "Climate Builders");
+    fill(screen.getByRole("textbox", { name: "Tagline" }), "Builders of climate tech.");
+    fill(screen.getByRole("textbox", { name: "Description" }), "We meet monthly.");
     await userEvent.click(screen.getByRole("button", { name: "Create community" }));
     expect(await screen.findByText("Pick 1 to 4 topics.")).toBeInTheDocument();
     expect(calls.some((call) => call.method === "POST")).toBe(false);
@@ -122,12 +125,12 @@ describe("create community form", () => {
         : undefined,
     );
     render(<WorkspaceLayout><NewCommunityPage /></WorkspaceLayout>);
-    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "  Climate Builders ");
-    await userEvent.type(screen.getByRole("textbox", { name: "Tagline" }), "Builders of climate tech.");
-    await userEvent.type(screen.getByRole("textbox", { name: "Description" }), "We meet monthly.");
+    fill(await screen.findByRole("textbox", { name: "Name" }), "  Climate Builders ");
+    fill(screen.getByRole("textbox", { name: "Tagline" }), "Builders of climate tech.");
+    fill(screen.getByRole("textbox", { name: "Description" }), "We meet monthly.");
     await userEvent.click(screen.getByRole("radio", { name: /Private/ }));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Country" }), "VN");
-    await userEvent.type(screen.getByRole("textbox", { name: "City" }), "Hanoi");
+    fill(screen.getByRole("textbox", { name: "City" }), "Hanoi");
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Stage" }), "pre_seed");
     await userEvent.click(within(screen.getByRole("group", { name: "Topics" })).getByRole("button", { name: "Climate Tech" }));
     await userEvent.click(screen.getByRole("button", { name: "Create community" }));
@@ -153,9 +156,9 @@ describe("create community form", () => {
         : undefined,
     );
     render(<WorkspaceLayout><NewCommunityPage /></WorkspaceLayout>);
-    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "Climate Builders");
-    await userEvent.type(screen.getByRole("textbox", { name: "Tagline" }), "Builders.");
-    await userEvent.type(screen.getByRole("textbox", { name: "Description" }), "Monthly.");
+    fill(await screen.findByRole("textbox", { name: "Name" }), "Climate Builders");
+    fill(screen.getByRole("textbox", { name: "Tagline" }), "Builders.");
+    fill(screen.getByRole("textbox", { name: "Description" }), "Monthly.");
     await userEvent.click(within(screen.getByRole("group", { name: "Topics" })).getByRole("button", { name: "Product" }));
     await userEvent.click(screen.getByRole("button", { name: "Create community" }));
     expect(await screen.findByText("That address is taken. Try another one.")).toBeInTheDocument();
@@ -169,9 +172,9 @@ describe("create community form", () => {
         : undefined,
     );
     render(<WorkspaceLayout><NewCommunityPage /></WorkspaceLayout>);
-    await userEvent.type(await screen.findByRole("textbox", { name: "Name" }), "Climate Builders");
-    await userEvent.type(screen.getByRole("textbox", { name: "Tagline" }), "Builders.");
-    await userEvent.type(screen.getByRole("textbox", { name: "Description" }), "Monthly.");
+    fill(await screen.findByRole("textbox", { name: "Name" }), "Climate Builders");
+    fill(screen.getByRole("textbox", { name: "Tagline" }), "Builders.");
+    fill(screen.getByRole("textbox", { name: "Description" }), "Monthly.");
     await userEvent.click(within(screen.getByRole("group", { name: "Topics" })).getByRole("button", { name: "Product" }));
     await userEvent.click(screen.getByRole("button", { name: "Create community" }));
     expect(await screen.findByText("Northstar Labs has reached the limit of 10 communities, so it can't host another one.")).toBeInTheDocument();
