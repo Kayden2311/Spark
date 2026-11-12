@@ -1,43 +1,52 @@
-import type { CommunitySummary } from "./types";
+/**
+ * Directory filters live in the URL (`?q=&topic=&country=&stage=`), so a filtered view survives a reload
+ * and can be shared. Values the API would reject are dropped here instead of turning into a 400.
+ */
 
-export const ALL_TOPICS = "All topics";
-export const ALL_VALUES = "all";
+export const TOPIC_SLUGS = ["b2b-saas", "climate-tech", "ai-data", "product", "fintech", "founders"] as const;
+export const STAGE_CODES = ["idea", "pre_seed", "seed", "series_a", "growth", "any"] as const;
+export const MAX_SEARCH_LENGTH = 100;
 
+/** An empty string means "any". */
 export interface CommunityFilters {
-  searchTerm: string;
-  category: string;
-  location: string;
+  q: string;
+  topic: string;
+  country: string;
   stage: string;
 }
 
-export const emptyFilters: CommunityFilters = {
-  searchTerm: "",
-  category: ALL_TOPICS,
-  location: ALL_VALUES,
-  stage: ALL_VALUES,
-};
+export const emptyFilters: CommunityFilters = { q: "", topic: "", country: "", stage: "" };
 
-export function hasActiveFilters(filters: CommunityFilters): boolean {
-  return (
-    filters.searchTerm.trim() !== "" ||
-    filters.category !== ALL_TOPICS ||
-    filters.location !== ALL_VALUES ||
-    filters.stage !== ALL_VALUES
-  );
+const FILTER_KEYS = ["q", "topic", "country", "stage"] as const;
+
+interface ParamReader {
+  get(name: string): string | null;
 }
 
-export function filterCommunities(items: CommunitySummary[], filters: CommunityFilters): CommunitySummary[] {
-  const term = filters.searchTerm.trim().toLowerCase();
-  return items.filter((item) => {
-    if (filters.category !== ALL_TOPICS && item.category !== filters.category) return false;
-    if (filters.location !== ALL_VALUES && item.location !== filters.location) return false;
-    if (filters.stage !== ALL_VALUES && item.stage !== filters.stage) return false;
-    if (!term) return true;
-    return (
-      item.name.toLowerCase().includes(term) ||
-      item.tagline.toLowerCase().includes(term) ||
-      item.category.toLowerCase().includes(term) ||
-      item.tags.some((tag) => tag.toLowerCase().includes(term))
-    );
-  });
+function oneOf(value: string | null, allowed: readonly string[]): string {
+  return value !== null && allowed.includes(value) ? value : "";
+}
+
+export function filtersFromParams(params: ParamReader): CommunityFilters {
+  const country = (params.get("country") ?? "").toUpperCase();
+  return {
+    q: (params.get("q") ?? "").slice(0, MAX_SEARCH_LENGTH),
+    topic: oneOf(params.get("topic"), TOPIC_SLUGS),
+    country: /^[A-Z]{2}$/.test(country) ? country : "",
+    stage: oneOf(params.get("stage"), STAGE_CODES),
+  };
+}
+
+/** The query string (without "?") for these filters; empty filters are left out. */
+export function filtersToSearch(filters: CommunityFilters): string {
+  const search = new URLSearchParams();
+  for (const key of FILTER_KEYS) {
+    const value = key === "q" ? filters.q.trim() : filters[key];
+    if (value) search.set(key, value);
+  }
+  return search.toString();
+}
+
+export function hasActiveFilters(filters: CommunityFilters): boolean {
+  return filtersToSearch(filters) !== "";
 }

@@ -8,6 +8,7 @@ import type { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 
 import type { AppConfig, AuthConfig } from "./config.js";
+import { registerCommunityRoutes } from "./routes/communities/index.js";
 import { registerAdminRoutes } from "./routes/admin/index.js";
 import { registerWorkspaceRoutes } from "./routes/workspace/index.js";
 import { registerOriginGuard } from "./routes/origin-guard.js";
@@ -217,6 +218,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     registerAuthRoutes(app, { pool: options.pool });
     registerAdminRoutes(app, { pool: options.pool, redis: options.redis, metrics });
     registerWorkspaceRoutes(app, { pool: options.pool });
+    registerCommunityRoutes(app, { pool: options.pool });
   }
   return app;
 }

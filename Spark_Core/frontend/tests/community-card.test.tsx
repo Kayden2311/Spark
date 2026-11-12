@@ -1,51 +1,44 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { CommunityCard, initialsOf } from "../src/app/communities/community-card";
-import { communitySummaries } from "../src/app/communities/community-summaries";
-import { formatCount, formatEventDate } from "../src/app/communities/format";
-import { communities } from "../src/app/communities/mock-data";
-import type { CommunitySummary } from "../src/app/communities/types";
-
-const sample: CommunitySummary = {
-  slug: "northstar-founders",
-  name: "Northstar Founders",
-  tagline: "Founders building B2B software.",
-  category: "B2B SaaS",
-  location: "Ho Chi Minh City",
-  stage: "Seed to Series A",
-  visibility: "private",
-  memberCount: 1250,
-  weeklyPosts: 42,
-  nextEventAt: "2026-10-22T12:00:00.000Z",
-  tags: ["GTM"],
-  featured: true,
-  image: { url: "/spark-community-discussion.png", alt: "Founders around a laptop" },
-};
+import { formatCount, formatDate, formatLocation } from "../src/app/communities/format";
+import { card } from "./community-fixtures";
 
 describe("CommunityCard", () => {
-  it("renders every structured field and links to the community", () => {
-    render(<CommunityCard community={sample} />);
+  it("renders the API card fields and links to the community", () => {
+    const { container } = render(<CommunityCard community={card({ visibility: "private", featured: true })} />);
     expect(screen.getByRole("link", { name: "Northstar Founders" })).toHaveAttribute("href", "/communities/northstar-founders");
-    expect(screen.getByAltText("Founders around a laptop")).toBeInTheDocument();
     expect(screen.getByText("Private")).toBeInTheDocument();
     expect(screen.getByText("Featured")).toBeInTheDocument();
-    expect(screen.getByText("B2B SaaS")).toBeInTheDocument();
-    expect(screen.getByText("Ho Chi Minh City")).toBeInTheDocument();
-    expect(screen.getByText("Seed to Series A")).toBeInTheDocument();
+    expect(screen.queryByText("Paused")).not.toBeInTheDocument();
+    expect(screen.getByText("Hanoi, Vietnam")).toBeInTheDocument();
+    expect(screen.getByText("Seed")).toBeInTheDocument();
+    expect(screen.queryByText("seed")).not.toBeInTheDocument();
+    expect(screen.getByText("Hosted by Northstar Labs")).toBeInTheDocument();
+    const tags = screen.getByRole("list", { name: "Topics" });
+    expect(within(tags).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["B2B SaaS", "Founders Circle"]);
     const members = screen.getByText("Members").parentElement!;
     expect(within(members).getByText("1.3K")).toBeInTheDocument();
-    expect(screen.getByText("Oct 22").closest("time")).toHaveAttribute("dateTime", sample.nextEventAt);
-  });
-
-  it("renders a generated cover when no image exists, without a featured badge or event", () => {
-    const { container } = render(
-      <CommunityCard community={{ ...sample, image: null, featured: false, visibility: "public", nextEventAt: null }} />,
-    );
+    // The first topic picks the tone of the generated cover.
+    expect(container.querySelector("article")).toHaveClass("summaryCard", "summaryTone-blue");
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText("NF")).toBeInTheDocument();
+  });
+
+  it("marks a frozen community as paused and falls back to a neutral tone", () => {
+    const { container } = render(<CommunityCard community={card({ frozen: true, topics: [], location: { countryCode: null, city: null } })} />);
+    expect(screen.getByText("Paused")).toBeInTheDocument();
     expect(screen.getByText("Public")).toBeInTheDocument();
-    expect(screen.queryByText("Featured")).not.toBeInTheDocument();
-    expect(screen.getByText("TBA")).toBeInTheDocument();
+    expect(screen.getByText("Remote")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Topics" })).not.toBeInTheDocument();
+    expect(container.querySelector("article")).toHaveClass("summaryTone-violet");
+  });
+
+  it("renders community text as plain text", () => {
+    render(<CommunityCard community={card({ name: "<b>Bold</b>", tagline: "<img src=x onerror=alert(1)>" })} />);
+    expect(screen.getByRole("link", { name: "<b>Bold</b>" })).toBeInTheDocument();
+    expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();
+    expect(document.querySelector("b")).toBeNull();
   });
 });
 
@@ -53,6 +46,7 @@ describe("helpers", () => {
   it("builds initials from up to two words", () => {
     expect(initialsOf("Early-Stage Founders Circle")).toBe("ES");
     expect(initialsOf("Product")).toBe("P");
+    expect(initialsOf("  ")).toBe("");
   });
 
   it("formats counts compactly", () => {
@@ -60,25 +54,14 @@ describe("helpers", () => {
     expect(formatCount(12400)).toBe("12.4K");
   });
 
-  it("formats event dates in a fixed time zone and tolerates bad input", () => {
-    expect(formatEventDate("2026-10-22T18:30:00.000Z")).toBe("Oct 23");
-    expect(formatEventDate("not-a-date")).toBe("TBA");
-  });
-});
-
-describe("communitySummaries fixture", () => {
-  it("has unique slugs that all have a detail page", () => {
-    const slugs = communitySummaries.map((c) => c.slug);
-    expect(new Set(slugs).size).toBe(slugs.length);
-    const detailSlugs = new Set(communities.map((c) => c.slug));
-    for (const slug of slugs) expect(detailSlugs.has(slug)).toBe(true);
+  it("formats locations from a country code and optional city", () => {
+    expect(formatLocation({ countryCode: "VN", city: null })).toBe("Vietnam");
+    expect(formatLocation({ countryCode: null, city: "Singapore" })).toBe("Singapore");
+    expect(formatLocation({ countryCode: null, city: null })).toBe("Remote");
   });
 
-  it("keeps API-shaped values: short taglines, bounded tags, ISO 8601 dates", () => {
-    for (const item of communitySummaries) {
-      expect(item.tagline.length).toBeLessThanOrEqual(90);
-      expect(item.tags.length).toBeLessThanOrEqual(4);
-      if (item.nextEventAt) expect(new Date(item.nextEventAt).toISOString()).toBe(item.nextEventAt);
-    }
+  it("formats a date for people and tolerates bad input", () => {
+    expect(formatDate("2026-11-19T12:00:00.000Z")).toBe("November 19, 2026");
+    expect(formatDate("not-a-date")).toBeNull();
   });
 });

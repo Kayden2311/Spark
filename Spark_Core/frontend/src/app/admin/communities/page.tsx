@@ -11,6 +11,7 @@ import { Sparkline } from "../_components/sparkline";
 import { Badge, EmptyState, ErrorBanner, FilterTabs, LoadMore, NoAccess, PageHeader, Panel, RangePicker, RowMenu, SkeletonRows } from "../_components/ui";
 import { adminApi, query, reloadIfStale } from "../_lib/api";
 import { canAccess } from "../_lib/access";
+import { stageLabel } from "../../communities/_lib/catalog";
 import { COMMUNITY_STATE, formatCount, humanize } from "../_lib/format";
 import { VIZ } from "../_lib/palette";
 import { useRange } from "../_lib/range";
@@ -111,7 +112,7 @@ function CommunitiesList() {
                         <span aria-hidden="true" className="admEntityMark">{community.name.slice(0, 1).toUpperCase()}</span>
                         <span className="admCellMain">
                           <span className="admCellTitle">{community.name}</span>
-                          <span className="admCellSub">/{community.slug} · {humanize(community.visibility)}{community.stage ? ` · ${community.stage}` : ""}</span>
+                          <span className="admCellSub">/{community.slug} · {humanize(community.visibility)}{community.stage ? ` · ${stageLabel(community.stage)}` : ""}</span>
                         </span>
                       </Link>
                     </td>

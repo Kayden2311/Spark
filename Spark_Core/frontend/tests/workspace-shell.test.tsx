@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LIST } from "./project-fixtures";
@@ -84,5 +84,27 @@ describe("workspace shell projects", () => {
     render(<WorkspaceLayout><p>Inside</p></WorkspaceLayout>);
     const nav = await screen.findByRole("navigation", { name: "Projects" });
     expect(await within(nav).findByRole("link", { name: "Website relaunch" })).toHaveAttribute("href", "/w/northstar-labs/p/WEB");
+  });
+});
+
+describe("workspace shell communities", () => {
+  it("links Communities to the workspace's communities and keeps a Browse communities link", () => {
+    render(<WorkspaceShell current="Communities" workspace={owner}><p>Inside</p></WorkspaceShell>);
+    const nav = screen.getByRole("navigation", { name: "Workspace navigation" });
+    expect(within(nav).getByRole("link", { name: "Communities" })).toHaveAttribute("href", "/w/northstar-labs/communities");
+    expect(within(nav).getByRole("link", { name: "Browse communities" })).toHaveAttribute("href", "/communities");
+  });
+
+  it("marks Communities as the section on the workspace communities page", async () => {
+    navigation.pathname = "/w/northstar-labs/communities";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const reply = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      if (url === "/api/v1/workspaces/by-slug/northstar-labs") return reply({ id: "w1", slug: "northstar-labs", name: "Northstar Labs", role: "owner", memberCount: 2, version: 1, createdAt: "2026-10-18T10:00:00.000Z" });
+      if (url === "/api/v1/workspaces/w1/projects") return reply({ items: [] });
+      return new Response(JSON.stringify({ code: "not_found" }), { status: 404 });
+    }));
+    render(<WorkspaceLayout><p>Inside</p></WorkspaceLayout>);
+    const nav = screen.getByRole("navigation", { name: "Workspace navigation" });
+    await waitFor(() => expect(within(nav).getByRole("link", { name: "Communities" })).toHaveAttribute("aria-current", "page"));
   });
 });

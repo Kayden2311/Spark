@@ -315,3 +315,41 @@ describe("notifications inbox", () => {
     expect(screen.getByRole("button", { name: "Close" }).querySelector(".sidebarMenuDot")).toBeNull();
   });
 });
+
+describe("community notifications", () => {
+  const host = { id: "w9", slug: "acme-host", name: "Acme Host" };
+  const community = (n: number, kind: string, title: string, link: string) =>
+    item(n, { kind, title, resourceType: "community", resourceId: "c1", link, workspace: host });
+
+  beforeEach(() => {
+    pages = [{
+      items: [
+        community(3, "community_request_received", "Dana Requester asked to join Climate Circle", "/communities/climate-circle/manage"),
+        community(2, "community_request_approved", "Your request to join Climate Circle was approved", "/communities/climate-circle"),
+        community(1, "community_request_rejected", "Your request to join Climate Circle was declined", "/communities/climate-circle"),
+      ],
+      nextCursor: null,
+    }];
+  });
+
+  it("labels the three community kinds without presenting the host as the reader's workspace", async () => {
+    render(<NotificationsPage />);
+    const rows = within(await screen.findByRole("list", { name: "Notifications" })).getAllByRole("listitem");
+    expect(within(rows[0]!).getByText("Join request")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Request approved")).toBeInTheDocument();
+    expect(within(rows[2]!).getByText("Request declined")).toBeInTheDocument();
+    for (const row of rows) {
+      expect(within(row).getByText("Community · hosted by Acme Host")).toBeInTheDocument();
+      expect(within(row).queryByText("AH")).toBeNull();
+    }
+  });
+
+  it("opens the manage page for a join request and the community for a decision", async () => {
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    await user.click(await screen.findByRole("button", { name: /asked to join Climate Circle/u }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/communities/climate-circle/manage"));
+    await user.click(screen.getByRole("button", { name: /was approved/u }));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/communities/climate-circle"));
+  });
+});

@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
 
+import { TOPIC_SLUGS as FIXED_TOPICS } from "../src/modules/communities/domain/catalog.js";
 import { localConnection } from "./database-support.js";
 
 /**
@@ -72,21 +73,68 @@ const iso = (ms: number) => new Date(Math.min(ms, NOW - 60_000)).toISOString();
 const FIRST = ["Minh", "Anh", "Linh", "Huy", "Thao", "Quang", "Duc", "Mai", "Khoa", "Trang", "Bao", "Nam", "Vy", "Long", "Hoa", "Tuan", "Ngoc", "Phuc", "Lan", "Son", "Alex", "Sam", "Priya", "Daniel", "Chloe", "Marcus", "Aisha", "Leo", "Nora", "Ethan", "Sofia", "Kenji", "Isla", "Omar", "Maya", "Lucas"];
 const LAST = ["Nguyen", "Tran", "Le", "Pham", "Hoang", "Vo", "Dang", "Bui", "Do", "Ngo", "Duong", "Ly", "Carter", "Patel", "Kim", "Silva", "Novak", "Rossi", "Okafor", "Lindqvist"];
 const COMMUNITIES = [
-  ["northstar-founders", "Northstar Founders", "B2B founders selling software across Southeast Asia.", "Seed", 1.0],
-  ["climate-builders", "Climate Builders", "Operators turning climate problems into practical products.", "Pre-Seed", 0.55],
-  ["product-practice", "Product Practice", "Product leaders sharpening discovery and delivery.", "Any", 0.85],
-  ["ai-applied", "AI Applied Engineers", "Engineers shipping agentic workflows and LLM products.", "Pre-Seed", 0.95],
-  ["fintech-hub", "FinTech Builders Hub", "Founders and compliance leads in payments and lending.", "Series A", 0.5],
-  ["first-time-founders", "First-time Founders Circle", "Peer support from idea to first raise.", "Idea", 0.75],
-  ["design-systems", "Design Systems Guild", "Designers and engineers building shared UI foundations.", "Any", 0.45],
-  ["growth-loops", "Growth Loops", "Growth leads comparing acquisition and retention experiments.", "Seed", 0.6],
-  ["devtools-makers", "DevTools Makers", "Builders of developer tools and infrastructure.", "Seed", 0.5],
-  ["health-innovators", "Health Innovators", "Founders working across digital health.", "Pre-Seed", 0.3],
-  ["edtech-lab", "EdTech Lab", "Educators and founders building learning products.", "Idea", 0.35],
-  ["remote-ops", "Remote Ops Collective", "Operations leads running distributed teams.", "Any", 0.4],
-  ["web3-skeptics", "Web3 Skeptics", "Pragmatic builders testing what actually works on-chain.", "Idea", 0.2],
-  ["hardware-hackers", "Hardware Hackers", "Founders shipping physical products.", "Seed", 0.25],
+  ["northstar-founders", "Northstar Founders", "B2B founders selling software across Southeast Asia.", "seed", 1.0],
+  ["climate-builders", "Climate Builders", "Operators turning climate problems into practical products.", "pre_seed", 0.55],
+  ["product-practice", "Product Practice", "Product leaders sharpening discovery and delivery.", "any", 0.85],
+  ["ai-applied", "AI Applied Engineers", "Engineers shipping agentic workflows and LLM products.", "pre_seed", 0.95],
+  ["fintech-hub", "FinTech Builders Hub", "Founders and compliance leads in payments and lending.", "series_a", 0.5],
+  ["first-time-founders", "First-time Founders Circle", "Peer support from idea to first raise.", "idea", 0.75],
+  ["design-systems", "Design Systems Guild", "Designers and engineers building shared UI foundations.", "any", 0.45],
+  ["growth-loops", "Growth Loops", "Growth leads comparing acquisition and retention experiments.", "seed", 0.6],
+  ["devtools-makers", "DevTools Makers", "Builders of developer tools and infrastructure.", "seed", 0.5],
+  ["health-innovators", "Health Innovators", "Founders working across digital health.", "pre_seed", 0.3],
+  ["edtech-lab", "EdTech Lab", "Educators and founders building learning products.", "idea", 0.35],
+  ["remote-ops", "Remote Ops Collective", "Operations leads running distributed teams.", "any", 0.4],
+  ["web3-skeptics", "Web3 Skeptics", "Pragmatic builders testing what actually works on-chain.", "idea", 0.2],
+  ["hardware-hackers", "Hardware Hackers", "Founders shipping physical products.", "seed", 0.25],
 ] as const;
+// Discovery profile per demo community: 1-4 of the fixed six topics, a country and a city.
+const COMMUNITY_PROFILES: Record<(typeof COMMUNITIES)[number][0], { topics: string[]; country: string; city: string }> = {
+  "northstar-founders": { topics: ["b2b-saas", "founders"], country: "SG", city: "Singapore" },
+  "climate-builders": { topics: ["climate-tech", "founders"], country: "DE", city: "Berlin" },
+  "product-practice": { topics: ["product"], country: "GB", city: "London" },
+  "ai-applied": { topics: ["ai-data", "product"], country: "US", city: "San Francisco" },
+  "fintech-hub": { topics: ["fintech", "b2b-saas"], country: "SG", city: "Singapore" },
+  "first-time-founders": { topics: ["founders"], country: "VN", city: "Ho Chi Minh City" },
+  "design-systems": { topics: ["product"], country: "NL", city: "Amsterdam" },
+  "growth-loops": { topics: ["b2b-saas", "product"], country: "US", city: "New York" },
+  "devtools-makers": { topics: ["ai-data", "b2b-saas"], country: "DE", city: "Munich" },
+  "health-innovators": { topics: ["ai-data", "founders"], country: "GB", city: "Manchester" },
+  "edtech-lab": { topics: ["product", "founders"], country: "VN", city: "Hanoi" },
+  "remote-ops": { topics: ["b2b-saas"], country: "PT", city: "Lisbon" },
+  "web3-skeptics": { topics: ["fintech"], country: "US", city: "Austin" },
+  "hardware-hackers": { topics: ["climate-tech", "founders"], country: "JP", city: "Tokyo" },
+};
+
+/**
+ * Fills in topics and location for demo communities that have none, so re-running the seed on a
+ * database seeded before discovery existed completes the profiles without duplicating anything.
+ * Values a user has since set (any fixed topic, or a country/city) are left alone.
+ */
+async function fillCommunityProfiles(client: pg.Client): Promise<number> {
+  const slugs = Object.keys(COMMUNITY_PROFILES);
+  const profiles = Object.values(COMMUNITY_PROFILES);
+  const located = await client.query(
+    `UPDATE spark.communities c SET country_code = p.country, city = p.city
+       FROM unnest($1::text[], $2::text[], $3::text[]) AS p(slug, country, city)
+      WHERE c.slug = 'demo-' || p.slug AND c.country_code IS NULL AND c.city IS NULL`,
+    [slugs, profiles.map((p) => p.country), profiles.map((p) => p.city)],
+  );
+  const pairs = slugs.flatMap((slug, index) => profiles[index]!.topics.map((topic) => [slug, topic] as const));
+  const tagged = await client.query(
+    `INSERT INTO spark.community_topics (tenant_id, community_id, topic_id)
+     SELECT c.tenant_id, c.id, t.id
+       FROM unnest($1::text[], $2::text[]) AS p(slug, topic)
+       JOIN spark.communities c ON c.slug = 'demo-' || p.slug
+       JOIN spark.topics t ON t.slug = p.topic
+      WHERE NOT EXISTS (SELECT 1 FROM spark.community_topics ct JOIN spark.topics fixed ON fixed.id = ct.topic_id
+        WHERE ct.tenant_id = c.tenant_id AND ct.community_id = c.id AND fixed.slug = ANY ($3::text[]))
+     ON CONFLICT (tenant_id, community_id, topic_id) DO NOTHING`,
+    [pairs.map(([slug]) => slug), pairs.map(([, topic]) => topic), FIXED_TOPICS],
+  );
+  return (located.rowCount ?? 0) + (tagged.rowCount ?? 0);
+}
+
 const TOPICS = ["pricing", "hiring", "fundraising", "onboarding", "churn", "roadmaps", "sales", "analytics", "community", "launch", "infra", "design"];
 const TITLES = [
   "How we priced our first enterprise deal", "Lessons from our first ten customer interviews", "What finally fixed our onboarding drop-off",
@@ -103,7 +151,12 @@ async function main() {
   try {
     await client.query("SET ROLE spark_owner");
     if ((await client.query("SELECT 1 FROM spark.workspaces WHERE slug = $1", [MARKER_SLUG])).rowCount) {
-      console.log("Demo data is already present; nothing to do. To start over: pnpm db:reset:local --yes, then db:migrate, db:seed and db:seed:demo.");
+      await client.query("BEGIN");
+      const filled = await fillCommunityProfiles(client);
+      await client.query("COMMIT");
+      console.log(filled
+        ? `Demo data is already present; filled in ${filled} missing community topics and locations.`
+        : "Demo data is already present; nothing to do. To start over: pnpm db:reset:local --yes, then db:migrate, db:seed and db:seed:demo.");
       return;
     }
     const admin = (await client.query<{ user_id: string }>("SELECT user_id FROM spark.user_emails WHERE normalized_email = 'admin@spark.app'")).rows[0]?.user_id;
@@ -185,12 +238,13 @@ async function main() {
       const owner = founders[index % founders.length]!;
       const createdAt = Math.max(owner.createdAt + DAY, NOW - int(110, 175) * DAY);
       const row = await client.query<{ id: string }>(
-        `INSERT INTO spark.communities (tenant_id, slug, name, description, stage, visibility, created_by_user_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        `INSERT INTO spark.communities (tenant_id, slug, name, tagline, description, stage, visibility, created_by_user_id, created_at)
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8) RETURNING id`,
         [owner.workspace, `demo-${slug}`, name, description, stage, index % 5 === 4 ? "private" : "public", owner.id, iso(createdAt)],
       );
       communities.push({ id: row.rows[0]!.id, tenant: owner.workspace, owner, createdAt, popularity, members: [{ member: owner, joined: createdAt }] });
     }
+    await fillCommunityProfiles(client);
     const membershipRows: { tenant: string; community: string; user: string; role: string; joined: number }[] = [];
     for (const community of communities) {
       membershipRows.push({ tenant: community.tenant, community: community.id, user: community.owner.id, role: "owner", joined: community.createdAt });

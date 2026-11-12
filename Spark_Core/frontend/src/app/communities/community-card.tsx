@@ -1,27 +1,37 @@
-import Image from "next/image";
 import Link from "next/link";
-import { formatCount, formatEventDate } from "./format";
-import type { CommunityCategory, CommunitySummary } from "./types";
+import { formatCount, formatLocation } from "./format";
+import type { CommunityCard as CommunityCardData, CommunityVisibility } from "./types";
 
-export const categoryTone: Record<CommunityCategory, string> = {
-  "B2B SaaS": "blue",
-  "Climate Tech": "green",
-  "AI & Data": "sky",
-  Product: "violet",
-  FinTech: "amber",
-  "Founders Circle": "rose",
+/** Cover tone per topic slug; the first topic picks the card's tone. */
+export const topicTone: Record<string, string> = {
+  "b2b-saas": "blue",
+  "climate-tech": "green",
+  "ai-data": "sky",
+  product: "violet",
+  fintech: "amber",
+  founders: "rose",
 };
+
+export function toneOf(community: Pick<CommunityCardData, "topics">): string {
+  const first = community.topics[0];
+  return (first && topicTone[first.slug]) || "violet";
+}
+
+export const VISIBILITY_LABELS: Record<CommunityVisibility, string> = { public: "Public", private: "Private", hidden: "Hidden" };
+
+/** How someone gets in, by visibility. */
+export const ACCESS_LABELS: Record<CommunityVisibility, string> = { public: "Open", private: "On request", hidden: "Invite only" };
 
 export function initialsOf(name: string): string {
   return name
     .split(/[\s-]+/)
     .filter(Boolean)
     .slice(0, 2)
-    .map((word) => word[0].toUpperCase())
+    .map((word) => word[0]!.toUpperCase())
     .join("");
 }
 
-function LockIcon() {
+export function LockIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <rect x="5" y="11" width="14" height="10" rx="2" />
@@ -30,7 +40,7 @@ function LockIcon() {
   );
 }
 
-function GlobeIcon() {
+export function GlobeIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="9" />
@@ -43,6 +53,14 @@ function StarIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="m12 3 2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.8l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z" />
+    </svg>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M9 6v12M15 6v12" />
     </svg>
   );
 }
@@ -64,47 +82,50 @@ function StageIcon() {
   );
 }
 
-export function CommunityCard({ community }: { community: CommunitySummary }) {
-  const isPrivate = community.visibility === "private";
+export function CommunityCard({ community }: { community: CommunityCardData }) {
+  const isPublic = community.visibility === "public";
 
   return (
-    <article className={`summaryCard summaryTone-${categoryTone[community.category]}`}>
+    <article className={`summaryCard summaryTone-${toneOf(community)}${community.frozen ? " summaryCardFrozen" : ""}`}>
       <div className="summaryCardMedia">
-        {community.image ? (
-          <Image alt={community.image.alt} fill sizes="(max-width: 720px) 100vw, (max-width: 1100px) 50vw, 33vw" src={community.image.url} />
-        ) : (
-          <span aria-hidden="true" className="summaryCardCover" />
-        )}
-        <span className={`summaryCardBadge${isPrivate ? " summaryCardBadgePrivate" : ""}`}>
-          {isPrivate ? <LockIcon /> : <GlobeIcon />}
-          {isPrivate ? "Private" : "Public"}
+        <span aria-hidden="true" className="summaryCardCover" />
+        <span className={`summaryCardBadge${isPublic ? "" : " summaryCardBadgePrivate"}`}>
+          {isPublic ? <GlobeIcon /> : <LockIcon />}
+          {VISIBILITY_LABELS[community.visibility] ?? "Private"}
         </span>
-        {community.featured && (
-          <span className="summaryCardFeatured">
-            <StarIcon />
-            Featured
+        {community.frozen ? (
+          <span className="summaryCardFeatured summaryCardPaused">
+            <PauseIcon />
+            Paused
           </span>
+        ) : (
+          community.featured && (
+            <span className="summaryCardFeatured">
+              <StarIcon />
+              Featured
+            </span>
+          )
         )}
       </div>
       <div className="summaryCardBody">
         <span aria-hidden="true" className="summaryCardLogo">{initialsOf(community.name)}</span>
-        <p className="summaryCardCategory">{community.category}</p>
+        <p className="summaryCardCategory">Hosted by {community.host.name}</p>
         <h3>
-          <Link className="summaryCardLink" href={`/communities/${community.slug}`}>
+          <Link className="summaryCardLink" href={`/communities/${encodeURIComponent(community.slug)}`}>
             {community.name}
           </Link>
         </h3>
         <p className="summaryCardTagline">{community.tagline}</p>
-        {community.tags.length > 0 && (
-          <ul className="summaryCardTags" aria-label="Focus areas">
-            {community.tags.slice(0, 3).map((tag) => <li key={tag}>{tag}</li>)}
+        {community.topics.length > 0 && (
+          <ul className="summaryCardTags" aria-label="Topics">
+            {community.topics.map((topic) => <li key={topic.slug}>{topic.name}</li>)}
           </ul>
         )}
         <p className="summaryCardMeta">
           <PinIcon />
-          <span>{community.location}</span>
+          <span>{formatLocation(community.location)}</span>
           <StageIcon />
-          <span>{community.stage}</span>
+          <span>{community.stage.label}</span>
         </p>
         <dl className="summaryCardStats">
           <div>
@@ -116,14 +137,8 @@ export function CommunityCard({ community }: { community: CommunitySummary }) {
             <dd>{formatCount(community.weeklyPosts)}</dd>
           </div>
           <div>
-            <dt>Next event</dt>
-            <dd>
-              {community.nextEventAt ? (
-                <time dateTime={community.nextEventAt}>{formatEventDate(community.nextEventAt)}</time>
-              ) : (
-                formatEventDate(null)
-              )}
-            </dd>
+            <dt>Access</dt>
+            <dd>{ACCESS_LABELS[community.visibility] ?? "On request"}</dd>
           </div>
         </dl>
       </div>

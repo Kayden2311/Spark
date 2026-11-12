@@ -161,8 +161,8 @@ try {
     try {
       const commId = (await client.query("SELECT gen_random_uuid() AS id")).rows[0].id;
       await client.query(
-        `INSERT INTO spark.communities (id, tenant_id, slug, name, description, stage, visibility, created_by_user_id)
-         VALUES ($1, $2, 'hyperdrive', 'Hyperdrive Founders', 'Pre-seed to Series A peer group for technical founders building hardtech and AI systems.', 'Pre-Seed', 'public', $3)`,
+        `INSERT INTO spark.communities (id, tenant_id, slug, name, tagline, description, stage, visibility, created_by_user_id)
+         VALUES ($1, $2, 'hyperdrive', 'Hyperdrive Founders', 'Technical founders building hardtech and AI systems.', 'Pre-seed to Series A peer group for technical founders building hardtech and AI systems.', 'pre_seed', 'public', $3)`,
         [commId, workspaceId, user1Id],
       );
 
@@ -202,8 +202,8 @@ try {
     try {
       const comm2Id = (await client.query("SELECT gen_random_uuid() AS id")).rows[0].id;
       await client.query(
-        `INSERT INTO spark.communities (id, tenant_id, slug, name, description, stage, visibility, created_by_user_id)
-         VALUES ($1, $2, 'zero-to-one', 'Zero-to-One SaaS', 'B2B software builders scaling from first 10 customers to repeatable revenue.', 'Seed', 'public', $3)`,
+        `INSERT INTO spark.communities (id, tenant_id, slug, name, tagline, description, stage, visibility, created_by_user_id)
+         VALUES ($1, $2, 'zero-to-one', 'Zero-to-One SaaS', 'From the first 10 customers to repeatable revenue.', 'B2B software builders scaling from first 10 customers to repeatable revenue.', 'seed', 'public', $3)`,
         [comm2Id, workspaceId, user1Id],
       );
 

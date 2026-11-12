@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 
 import { loadWorkerConfig } from "./config.js";
+import { poolConfig } from "./infrastructure/database/pool.js";
 import { assertWorkerRole } from "./infrastructure/database/roles.js";
 import { createSmtpSender } from "./modules/email/smtp-sender.js";
 import { dueRemindersJob } from "./modules/jobs/due-reminders.js";
@@ -38,12 +39,12 @@ function errorCode(error: unknown): string {
   return "unknown";
 }
 
-const pool = new Pool({
+const pool = new Pool(poolConfig({
   connectionString: config.workerDatabaseUrl,
   ssl: config.databaseSsl ? { rejectUnauthorized: true } : false,
   max: 2,
   application_name: "spark-worker",
-});
+}));
 pool.on("error", (error) => log("error", "PostgreSQL worker pool error", { code: errorCode(error) }));
 
 const sender = createSmtpSender(config.smtpUrl, config.emailFrom, { requireTls: config.smtpRequireTls });

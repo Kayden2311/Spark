@@ -3702,3 +3702,54 @@ button.sparkSecondary { font: inherit; font-size: .9rem; font-weight: 750; }
 @media (prefers-reduced-motion: reduce) {
   .appShell *, .appShell *::before, .appShell *::after, .wsOnboarding *, .wsOnboarding *::before, .wsOnboarding *::after, .wsSplash *, .wsModalLayer, .wsModalLayer *, .wsToast { scroll-behavior: auto !important; transition-duration: .01ms !important; animation: none !important; }
 }
+
+/* Live community directory and community page (C1): small additions in the landing-page language. */
+.summaryCardPaused { color: #334155; background: rgba(241, 245, 249, .94); }
+.summaryCardPaused svg { fill: none; stroke: currentColor; }
+.summaryCardFrozen .summaryCardCover { filter: grayscale(.65); opacity: .8; }
+.dirMine { width: min(1180px, calc(100% - 2rem)); margin: 0 auto 1.5rem; }
+.dirMine h2 { margin: 0 0 .75rem; color: #0f172a; font-size: 1rem; font-weight: 760; letter-spacing: -.01em; }
+.dirMine ul { display: flex; gap: .6rem; margin: 0; padding: 0 0 .25rem; overflow-x: auto; list-style: none; }
+.dirMineLink { display: inline-flex; align-items: center; gap: .55rem; min-height: 2.75rem; padding: .35rem .8rem .35rem .4rem; border: 1px solid #dce5f1; border-radius: .8rem; color: #0f172a; font-size: .88rem; font-weight: 680; text-decoration: none; white-space: nowrap; background: #fff; }
+.dirMineLink:hover { border-color: #93c5fd; background: #f8fbff; }
+.dirMineLink:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+.dirMineLogo { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .55rem; color: #fff; font-size: .72rem; font-weight: 800; background: linear-gradient(135deg, var(--tone-a), var(--tone-b)); }
+.dirMineRole { padding: .1rem .45rem; border-radius: .35rem; color: var(--tone-ink); font-size: .7rem; font-weight: 700; background: var(--tone-soft); }
+.dirMore { display: grid; justify-items: center; gap: .5rem; margin-top: 1.75rem; }
+.dirMore p { margin: 0; color: #b91c1c; font-size: .88rem; }
+.dirReset:disabled { cursor: wait; opacity: .7; }
+.dirLoading { grid-column: 1 / -1; margin: 0; padding: 3rem 0; color: #64748b; text-align: center; }
+.circleMonogramTone { background: linear-gradient(135deg, var(--tone-a), var(--tone-b)); }
+.circleTagPaused { color: #334155; background: #f1f5f9; border: 1px solid #e2e8f0; }
+.circleTagVisibility { display: inline-flex; align-items: center; gap: .3rem; color: #0f172a; background: #fff; border: 1px solid #dce5f1; }
+.circleTagVisibility svg { width: .8rem; height: .8rem; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.circleTagPrivate { color: #fff; background: #1e293b; border-color: #1e293b; }
+.circleHostLine { margin: .6rem 0 0; color: #64748b; font-size: .92rem; }
+.circleHostLine strong { color: #0f172a; }
+.circleStats { display: flex; gap: 2rem; margin: 0; padding: 0; list-style: none; }
+.circleStats li { display: grid; gap: .15rem; }
+.circleStats strong { color: #0f172a; font-size: 1.35rem; font-weight: 780; font-variant-numeric: tabular-nums; }
+.circleStats span { color: #64748b; font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.circleMembership { display: grid; justify-items: end; gap: .5rem; }
+.circleActionGroup { flex-wrap: wrap; }
+.circleCtaBtn { border: 0; font: inherit; font-weight: 750; cursor: pointer; }
+.circleCtaBtn:disabled { cursor: not-allowed; opacity: .55; box-shadow: none; transform: none; }
+.circleGhostBtn { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: .6rem 1.2rem; border: 1px solid #dce5f1; border-radius: .75rem; color: #1e293b; font: inherit; font-size: .9rem; font-weight: 700; text-decoration: none; background: #fff; cursor: pointer; }
+.circleGhostBtn:hover { border-color: #93c5fd; background: #f8fbff; }
+.circleGhostBtn:disabled { cursor: not-allowed; opacity: .55; }
+.circleCtaBtn:focus-visible, .circleGhostBtn:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+.circleDangerBtn { background: #b91c1c; box-shadow: 0 6px 18px rgba(185, 28, 28, .25); }
+.circleDangerBtn:hover { background: #991b1b; box-shadow: 0 10px 24px rgba(185, 28, 28, .32); }
+.circleStatePill { display: inline-flex; align-items: center; min-height: 2.75rem; padding: .5rem 1rem; border-radius: .75rem; color: #065f46; font-size: .9rem; font-weight: 720; background: #ecfdf5; }
+.circleConfirm { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; color: #0f172a; font-weight: 650; }
+.circleNotice { max-width: 26rem; margin: 0; color: #475569; font-size: .86rem; text-align: right; }
+.circleNoticeError { color: #b91c1c; }
+.circleAboutText { margin: 0; color: #334155; font-size: .98rem; line-height: 1.65; white-space: pre-line; overflow-wrap: anywhere; }
+.circleStateCard { display: grid; justify-items: start; gap: 1rem; }
+.circleToastRegion { position: fixed; z-index: 60; right: 1.25rem; bottom: 1.25rem; }
+.circleToast { padding: .8rem 1.1rem; border-radius: .75rem; color: #fff; font-size: .9rem; font-weight: 650; background: #0f172a; box-shadow: 0 18px 40px -18px rgba(15, 23, 42, .6); }
+@media (max-width: 720px) {
+  .circleMembership { justify-items: center; }
+  .circleNotice { text-align: center; }
+  .circleStats { justify-content: center; }
+}

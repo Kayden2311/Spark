@@ -97,11 +97,18 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 ## Epic B: Community discovery (US-01)
 
+Communities rules (product decisions of 2026-11-04, implemented in Phase 2 C1, migrations `0030` and `0031`):
+
+- **Who creates communities**: an owner or admin of a workspace creates a community, and that workspace hosts it (`POST /api/v1/workspaces/{workspaceId}/communities`, screen `/w/[slug]/communities/new`). The creator becomes the community owner. A workspace hosts at most 10 non-archived communities. The address (`slug`) is globally unique and cannot be changed later.
+- **Who manages them**: community managers are its active owners and moderators plus the host workspace's owners and admins. Only community owners and host workspace owners/admins change settings, visibility and roles; moderators review requests and add or remove plain members.
+- **How people join**: **public** communities are listed in the directory and anyone signed in joins instantly; **private** communities are listed and show their summary, but people request access and a manager approves; **hidden** communities are invisible to non-members (`404`, like a missing slug), and managers add people directly from the host workspace.
+- A community paused by Spark moderators (frozen) stays visible but refuses joins, requests, decisions and new members (`409 community_frozen`). Archived communities behave as missing.
+
 ### US-B1: Search public communities
 
 - **Actor**: Visitor, User
 - **Priority**: Must
-- **Status**: Mockup (`/communities`)
+- **Status**: Implemented (`GET /api/v1/communities?q&topic&country&stage&cursor&limit`, keyset pagination with opaque cursors, `limit` 1–50; migration `0030`; screen `/communities`, filters in the URL)
 - **Story**: As a Visitor, I want to search public communities by keyword so that I can find groups relevant to my startup.
 - **Acceptance criteria**:
   - Given a keyword, when I search, then only public communities that match are returned in a deterministic order.
@@ -114,7 +121,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Visitor, User
 - **Priority**: Must
-- **Status**: Mockup
+- **Status**: Implemented (`topic`, `country`, `stage` parameters of `GET /api/v1/communities`; options and counts from `GET /api/v1/communities/filters`; screen: the filter bar on `/communities`)
 - **Story**: As a Visitor, I want to narrow results by topic, location, and startup stage so that I see communities that fit my situation.
 - **Acceptance criteria**:
   - Given one or more filters, when applied, then results satisfy all active filters.
@@ -125,7 +132,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Visitor, User
 - **Priority**: Must
-- **Status**: Mockup (`/communities/[slug]`)
+- **Status**: Implemented (`GET /api/v1/communities/{slug}`, which also returns the viewer's status and `canManage`; screen `/communities/[slug]` with Join, Request access, Withdraw, Leave and Manage actions)
 - **Story**: As a Visitor, I want to see a community's description, topics, activity level, and access type so that I can decide whether to request access.
 - **Acceptance criteria**:
   - Given a public community, then its details load by slug.
@@ -138,7 +145,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: User
 - **Priority**: Must
-- **Status**: Planned (`/communities/[slug]/request`, `/request/sent`)
+- **Status**: Implemented (`POST /api/v1/communities/{communityId}/requests` with an optional `message` of up to 500 characters, `DELETE /api/v1/community-requests/{requestId}` to withdraw, `POST /api/v1/communities/{communityId}/join` for public communities; migration `0031`; screens `/communities/[slug]/request` and `/request/sent`)
 - **Story**: As a User, I want to request access to a private community so that its owner can admit me.
 - **Acceptance criteria**:
   - Given I am signed in, when I send a request with an optional message, then a pending request is created and I see the sent confirmation.
@@ -150,7 +157,7 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
 
 - **Actor**: Community Owner
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented (`GET /api/v1/communities/{communityId}/requests?status`, `POST /api/v1/community-requests/{requestId}/decision`; members: `GET`/`POST /api/v1/communities/{communityId}/members`, `PATCH`/`DELETE /api/v1/communities/{communityId}/members/{userId}`, `GET /api/v1/communities/{communityId}/member-candidates`; settings: `PATCH /api/v1/communities/{communityId}` with `If-Match`; migration `0031`; screen `/communities/[slug]/manage` with Requests, Members and Settings tabs)
 - **Story**: As a Community Owner, I want to approve or reject pending requests so that I control who joins.
 - **Acceptance criteria**:
   - Given pending requests for my community, then I see requester name, message, and date.
@@ -158,16 +165,18 @@ Each story uses: **As a** actor, **I want** goal, **so that** benefit. Acceptanc
   - Given I reject, then the request moves to rejected and no membership exists.
   - Given the request was already decided, then a second decision fails with a conflict and changes nothing.
   - Given I am not an owner of that community, then I receive `403` and the request list stays hidden.
+  - On the manage page, a decided request leaves the list at once; if a teammate decided it first, the list refreshes with "Someone already decided this request". Moderators also review requests; people who cannot manage see "Only community owners and moderators can manage this community".
 
 ### US-C3: Track my request
 
 - **Actor**: User
 - **Priority**: Should
-- **Status**: Planned
+- **Status**: Implemented (`GET /api/v1/me/community-requests`; notifications `community_request_approved` / `community_request_rejected` link to `/communities/<slug>`, and managers get `community_request_received` linking to `/communities/<slug>/manage`; these reach requesters who are not members of the host workspace)
 - **Story**: As a User, I want to see whether my request is pending, approved, or rejected so that I know what to do next.
 - **Acceptance criteria**:
   - Given a decision, then I receive a notification (see US-F1).
   - Given a rejected request, then I may not re-request until a documented cooldown ends.
+  - The cooldown is 14 days from the decision: a new request inside it answers `409 request_cooldown` with `retryAfter`, shown as "You can request again on <date>".
 
 ## Epic D: Posts and discussion (US-03)
 
