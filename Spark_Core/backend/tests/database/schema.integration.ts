@@ -527,7 +527,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(33);
+    expect(result.rows[0].count).toBe(34);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -1121,12 +1121,12 @@ describe("Local PostgreSQL schema", () => {
       "staff_grant_role", "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview", "staff_report_context",
       "staff_report_daily", "staff_report_preview", "staff_report_reasons", "staff_report_stats", "staff_report_top_communities", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign",
       "staff_revoke_role", "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count", "staff_user_sessions",
-      "ws_accept_invitation", "ws_add_community_member", "ws_cancel_event", "ws_complete_sprint", "ws_create_community", "ws_create_event", "ws_create_invitation", "ws_create_issue",
-      "ws_create_milestone", "ws_create_project", "ws_create_sprint", "ws_create_workspace", "ws_decide_community_request", "ws_get_notification_preferences", "ws_invitation_preview", "ws_join_community",
+      "ws_accept_invitation", "ws_add_community_member", "ws_cancel_event", "ws_complete_sprint", "ws_create_comment", "ws_create_community", "ws_create_event", "ws_create_invitation", "ws_create_issue",
+      "ws_create_milestone", "ws_create_post", "ws_create_project", "ws_create_sprint", "ws_create_workspace", "ws_decide_community_request", "ws_delete_comment", "ws_delete_post", "ws_get_notification_preferences", "ws_invitation_preview", "ws_join_community",
       "ws_leave_community", "ws_list_community_member_candidates", "ws_list_community_members", "ws_list_community_requests", "ws_list_members", "ws_list_my_community_requests", "ws_list_notifications", "ws_list_workspace_communities",
       "ws_mark_notification_read", "ws_mark_notifications_read", "ws_rebaseline_project", "ws_remove_community_member", "ws_remove_member", "ws_request_community_membership", "ws_resend_invitation", "ws_respond_event",
       "ws_revoke_invitation", "ws_save_phases", "ws_set_community_role", "ws_set_member_role", "ws_set_notification_preferences", "ws_start_sprint", "ws_switch_methodology", "ws_unread_notification_count",
-      "ws_update_community", "ws_update_event", "ws_update_issue", "ws_update_milestone", "ws_update_project", "ws_update_sprint", "ws_update_status", "ws_update_workspace",
+      "ws_update_comment", "ws_update_community", "ws_update_event", "ws_update_issue", "ws_update_milestone", "ws_update_post", "ws_update_project", "ws_update_sprint", "ws_update_status", "ws_update_workspace",
       "ws_withdraw_community_request",
     ]);
   });
@@ -6413,5 +6413,342 @@ describe("Community content reads", () => {
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname COLLATE "C"`, [namespace, exposed])).rows;
     expect(rows.map((row) => [row.proname, row.prosecdef, row.provolatile, row.proconfig, row.runtime, row.worker, row.auth]))
       .toEqual(exposed.map((name) => [name, true, "s", ['search_path=""'], true, false, false]));
+  });
+});
+
+type PostWrite = { title?: string | null; body?: string | null; key?: string | null; hash?: Buffer | null };
+type PostCreated = { outcome: string; post_id: string | null };
+type CommentCreated = { outcome: string; comment_id: string | null };
+type ContentUpdated = { outcome: string; version: number | null };
+const createPostCall = `SELECT * FROM ${fn("ws_create_post")}($1,$2,$3,$4,$5)`;
+const postArgs = (community: string, input: PostWrite) => [community, input.title === undefined ? "A post" : input.title, input.body === undefined ? "Post body" : input.body,
+  input.key ?? null, input.hash ?? null];
+const createPost = async (who: Account, community: string, input: PostWrite = {}) => (await asSession(who.token, createPostCall, postArgs(community, input))).rows[0] as PostCreated;
+const createCommentCall = `SELECT * FROM ${fn("ws_create_comment")}($1,$2,$3,$4)`;
+const commentArgs = (post: string, input: PostWrite) => [post, input.body === undefined ? "A comment" : input.body, input.key ?? null, input.hash ?? null];
+const createComment = async (who: Account, post: string, input: PostWrite = {}) => (await asSession(who.token, createCommentCall, commentArgs(post, input))).rows[0] as CommentCreated;
+const updatePost = async (who: Account, post: string, version: number, title: string | null, body: string | null) =>
+  (await asSession(who.token, `SELECT * FROM ${fn("ws_update_post")}($1,$2,$3,$4)`, [post, version, title, body])).rows[0] as ContentUpdated;
+const updateComment = async (who: Account, comment: string, version: number, body: string | null) =>
+  (await asSession(who.token, `SELECT * FROM ${fn("ws_update_comment")}($1,$2,$3)`, [comment, version, body])).rows[0] as ContentUpdated;
+const deletePost = (who: Account, post: string) => outcome(who, "ws_delete_post($1)", [post]);
+const deleteComment = (who: Account, comment: string) => outcome(who, "ws_delete_comment($1)", [comment]);
+const refusedPost = (result: string): PostCreated => ({ outcome: result, post_id: null });
+const refusedComment = (result: string): CommentCreated => ({ outcome: result, comment_id: null });
+const refusedUpdate = (result: string): ContentUpdated => ({ outcome: result, version: null });
+const invalid = (message: string) => ({ code: "22023", message });
+async function postRow(post: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT tenant_id,community_id,author_user_id,title,body,visibility,moderation_status,version,edited_at IS NOT NULL AS edited,deleted_at IS NOT NULL AS deleted
+    FROM ${table("posts")} WHERE id=$1`, [post])).rows[0];
+}
+async function commentRow(comment: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT post_id,author_user_id,body,moderation_status,version,edited_at IS NOT NULL AS edited,deleted_at IS NOT NULL AS deleted
+    FROM ${table("post_comments")} WHERE id=$1`, [comment])).rows[0];
+}
+async function postNotices(post: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT n.tenant_id,n.recipient_user_id,n.kind,n.title,n.body,n.resource_type,o.tenant_id AS outbox_tenant,o.processed_at IS NOT NULL AS processed
+    FROM ${table("notifications")} n JOIN ${table("outbox_events")} o ON o.id=n.outbox_event_id WHERE n.resource_id=$1 ORDER BY n.created_at,n.id`, [post])).rows;
+}
+async function setCommunity(community: string, assignments: string) {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`UPDATE ${table("communities")} SET ${assignments} WHERE id=$1`, [community]);
+}
+async function hideContent(kind: "posts" | "post_comments", id: string) {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`UPDATE ${table(kind)} SET moderation_status='hidden',version=version+1 WHERE id=$1`, [id]);
+}
+const postLink = (community: string, post: string) => `/communities/${communitySlug(community)}/posts/${post}`;
+const commentedNotices = async (who: Account) => (await listNotices(who)).filter((row) => row.kind === "post_commented");
+
+describe("Community content writes", () => {
+  it("creates posts for active members only", async () => {
+    const host = await hostWorkspace("Post create host");
+    const member = await account("Post member"), stranger = await account("Post stranger"), suspended = await account("Post suspended");
+    const pub = await communityFixture(host, { name: "Post Open" });
+    const priv = await communityFixture(host, { name: "Post Private", visibility: "private" });
+    const hid = await communityFixture(host, { name: "Post Hidden", visibility: "hidden" });
+    const frozen = await communityFixture(host, { name: "Post Frozen", frozen: true });
+    const archived = await communityFixture(host, { name: "Post Archived" });
+    for (const community of [pub, priv, hid, frozen, archived]) await joinCommunity(host, community, member);
+    await joinCommunity(host, pub, suspended);
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='suspended' WHERE community_id=$1 AND user_id=$2`, [pub, suspended.id]);
+    await setCommunity(archived, "archived_at=now()");
+
+    const created = await createPost(member, pub, { title: "  Hello  ", body: "  Body text  " });
+    expect(created).toEqual({ outcome: "created", post_id: expect.any(String) });
+    expect(await postRow(created.post_id!)).toEqual({ tenant_id: host.workspace, community_id: pub, author_user_id: member.id, title: "Hello", body: "Body text",
+      visibility: "members", moderation_status: "visible", version: 1, edited: false, deleted: false });
+    expect(await feedIds(member, pub)).toEqual([created.post_id]);
+    expect((await createPost(member, priv)).outcome).toBe("created");
+    expect((await createPost(member, hid)).outcome).toBe("created");
+    // Readable without an active membership: not_a_member (the private summary is public); unreadable: not_found.
+    expect(await createPost(stranger, pub)).toEqual(refusedPost("not_a_member"));
+    expect(await createPost(stranger, priv)).toEqual(refusedPost("not_a_member"));
+    expect(await createPost(suspended, pub)).toEqual(refusedPost("not_a_member"));
+    expect(await createPost(stranger, hid)).toEqual(refusedPost("not_found"));
+    expect(await createPost(member, archived)).toEqual(refusedPost("not_found"));
+    expect(await createPost(member, randomUUID())).toEqual(refusedPost("not_found"));
+    expect(await createPost(member, frozen)).toEqual(refusedPost("community_frozen"));
+    // Trimmed limits: title 1-150, body 1-10,000.
+    for (const title of ["x".repeat(151), "   ", null]) await expect(createPost(member, pub, { title })).rejects.toMatchObject(invalid("Invalid post title"));
+    for (const body of ["x".repeat(10001), "   ", null]) await expect(createPost(member, pub, { body })).rejects.toMatchObject(invalid("Invalid post body"));
+    expect((await createPost(member, pub, { title: `  ${"x".repeat(150)}  `, body: "y".repeat(10000) })).outcome).toBe("created");
+    await expect(createPost(member, pub, { key: "bad key", hash: randomBytes(32) })).rejects.toMatchObject(invalid("Invalid idempotency key"));
+    await expect(createPost(member, pub, { key: "good-key", hash: randomBytes(31) })).rejects.toMatchObject(invalid("Invalid idempotency key"));
+    expect(await countRows(`${table("posts")} WHERE community_id=$1`, [pub])).toBe(2);
+  });
+
+  it("replays posts by idempotency key", async () => {
+    const host = await hostWorkspace("Post retry host");
+    const member = await account("Post retry member"), other = await account("Post retry other");
+    const pub = await communityFixture(host, { name: "Retry Circle" });
+    const sibling = await communityFixture(host, { name: "Retry Sibling" });
+    const frozen = await communityFixture(host, { name: "Retry Frozen", frozen: true });
+    for (const community of [pub, sibling, frozen]) for (const who of [member, other]) await joinCommunity(host, community, who);
+    const key = `post:${randomUUID()}`, hash = randomBytes(32);
+    const args = postArgs(pub, { title: "Once", key, hash });
+    const { winner, loser, blocked } = await contend([member, member], createPostCall, [args, args]);
+    expect(blocked).toBe(true);
+    expect([winner.outcome, loser.outcome]).toEqual(["created", "replayed"]);
+    expect(loser.post_id).toBe(winner.post_id);
+    expect(await countRows(`${table("posts")} WHERE community_id=$1`, [pub])).toBe(1);
+    expect(await createPost(member, pub, { title: "Once", key, hash })).toEqual({ outcome: "replayed", post_id: winner.post_id });
+    expect(await createPost(member, pub, { title: "Changed", key, hash: randomBytes(32) })).toEqual(refusedPost("idempotency_conflict"));
+    // The same key in another community of the host workspace never replays a foreign post.
+    expect(await createPost(member, sibling, { title: "Once", key, hash })).toEqual(refusedPost("idempotency_conflict"));
+    // Keys are scoped to the actor.
+    const theirs = await createPost(other, pub, { title: "Once", key, hash });
+    expect(theirs.outcome).toBe("created");
+    expect(theirs.post_id).not.toBe(winner.post_id);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT tenant_id,operation,state,resource_id,response_status FROM ${table("idempotency_requests")} WHERE actor_user_id=$1 AND key=$2`, [member.id, key])).rows)
+      .toEqual([{ tenant_id: host.workspace, operation: "community.post.create", state: "completed", resource_id: winner.post_id, response_status: 201 }]);
+    // A refused create keeps no idempotency row.
+    const frozenKey = `frozen:${randomUUID()}`;
+    expect(await createPost(member, frozen, { key: frozenKey, hash })).toEqual(refusedPost("community_frozen"));
+    expect(await countRows(`${table("idempotency_requests")} WHERE key=$1`, [frozenKey])).toBe(0);
+    // Ruling R2: a replay still answers replayed with the original id after the post is gone; the API maps it to 404.
+    expect(await deletePost(member, winner.post_id!)).toBe("ok");
+    expect(await createPost(member, pub, { title: "Once", key, hash })).toEqual({ outcome: "replayed", post_id: winner.post_id });
+  });
+
+  it("edits own content with versions", async () => {
+    const host = await hostWorkspace("Edit host");
+    const author = await account("Edit author"), other = await account("Edit other"), modAuthor = await account("Edit moderator");
+    const pub = await communityFixture(host, { name: "Edit Circle" });
+    await joinCommunity(host, pub, author);
+    await joinCommunity(host, pub, other);
+    await joinCommunity(host, pub, modAuthor, "moderator");
+    const post = (await createPost(author, pub)).post_id!;
+    expect(await updatePost(author, post, 1, "  New title  ", null)).toEqual({ outcome: "ok", version: 2 });
+    expect(await postRow(post)).toMatchObject({ title: "New title", body: "Post body", version: 2, edited: true });
+    expect(await updatePost(author, post, 2, null, "  New body  ")).toEqual({ outcome: "ok", version: 3 });
+    expect(await postRow(post)).toMatchObject({ title: "New title", body: "New body", version: 3 });
+    expect((await postDetail(author, post)).map((row) => row.edited_at === null)).toEqual([false]);
+    expect(await updatePost(other, post, 3, "Mine", null)).toEqual(refusedUpdate("not_author"));
+    expect(await updatePost(author, post, 2, "Stale", null)).toEqual({ outcome: "version_mismatch", version: 3 });
+    expect(await updatePost(author, randomUUID(), 1, "Nobody", null)).toEqual(refusedUpdate("not_found"));
+    await expect(updatePost(author, post, 3, null, null)).rejects.toMatchObject(invalid("Invalid post patch"));
+    await expect(updatePost(author, post, 3, "x".repeat(151), null)).rejects.toMatchObject(invalid("Invalid post title"));
+    await expect(updatePost(author, post, 3, null, "   ")).rejects.toMatchObject(invalid("Invalid post body"));
+
+    const comment = (await createComment(other, post)).comment_id!;
+    expect(await updateComment(other, comment, 1, "  Edited  ")).toEqual({ outcome: "ok", version: 2 });
+    expect(await commentRow(comment)).toMatchObject({ body: "Edited", version: 2, edited: true });
+    expect(await updateComment(author, comment, 2, "Mine")).toEqual(refusedUpdate("not_author"));
+    expect(await updateComment(other, comment, 1, "Stale")).toEqual({ outcome: "version_mismatch", version: 2 });
+    expect(await updateComment(other, randomUUID(), 1, "Nobody")).toEqual(refusedUpdate("not_found"));
+    for (const body of [null, "   ", "x".repeat(2001)]) await expect(updateComment(other, comment, 2, body)).rejects.toMatchObject(invalid("Invalid comment body"));
+
+    await setCommunity(pub, "frozen_at=now()");
+    expect(await updatePost(author, post, 3, "Frozen", null)).toEqual(refusedUpdate("community_frozen"));
+    expect(await updateComment(other, comment, 2, "Frozen")).toEqual(refusedUpdate("community_frozen"));
+    await setCommunity(pub, "frozen_at=NULL");
+
+    // Hidden by moderation: a moderator author still reads it and gets content_hidden; other authors cannot read it.
+    const modPost = (await createPost(modAuthor, pub)).post_id!;
+    const modComment = (await createComment(modAuthor, post)).comment_id!;
+    await hideContent("posts", modPost);
+    await hideContent("post_comments", modComment);
+    expect(await updatePost(modAuthor, modPost, 2, "Again", null)).toEqual(refusedUpdate("content_hidden"));
+    expect(await updateComment(modAuthor, modComment, 2, "Again")).toEqual(refusedUpdate("content_hidden"));
+    const otherPost = (await createPost(other, pub)).post_id!;
+    await hideContent("posts", otherPost);
+    expect(await updatePost(other, otherPost, 2, "Again", null)).toEqual(refusedUpdate("not_found"));
+
+    // After leaving a public community the content is still readable but no longer editable.
+    const leaverPost = (await createPost(other, pub)).post_id!;
+    expect(await outcome(other, "ws_leave_community($1)", [pub])).toBe("ok");
+    expect(await updatePost(other, leaverPost, 1, "Left", null)).toEqual(refusedUpdate("not_a_member"));
+    expect(await updateComment(other, comment, 2, "Left")).toEqual(refusedUpdate("not_a_member"));
+    expect(await postRow(leaverPost)).toMatchObject({ title: "A post", version: 1, edited: false });
+  });
+
+  it("deletes own content and keeps records", async () => {
+    const host = await hostWorkspace("Delete host");
+    const author = await account("Delete author"), other = await account("Delete other"), reporter = await account("Delete reporter");
+    const pub = await communityFixture(host, { name: "Delete Circle" });
+    for (const who of [author, other, reporter]) await joinCommunity(host, pub, who);
+    const post = (await createPost(author, pub)).post_id!;
+    const comment = (await createComment(other, post)).comment_id!;
+    const own = (await createComment(author, post)).comment_id!;
+    await plantReport(host, pub, reporter.id, { post });
+    await owner.query(`INSERT INTO ${table("moderation_actions")} (tenant_id,community_id,post_id,actor_user_id,action,reason) VALUES ($1,$2,$3,$4,'restore','Looks fine')`,
+      [host.workspace, pub, post, host.owner.id]);
+
+    expect(await deleteComment(author, comment)).toBe("not_author");
+    expect(await deleteComment(other, comment)).toBe("ok");
+    expect(await deleteComment(other, comment)).toBe("ok");
+    expect(await commentRow(comment)).toMatchObject({ version: 2, deleted: true });
+    expect(await commentDetail(other, comment)).toEqual([]);
+    expect(await deleteComment(author, comment)).toBe("not_found");
+
+    expect(await deletePost(other, post)).toBe("not_author");
+    expect(await deletePost(author, post)).toBe("ok");
+    expect(await deletePost(author, post)).toBe("ok");
+    expect(await postRow(post)).toMatchObject({ version: 2, deleted: true });
+    expect(await feedIds(author, pub)).toEqual([]);
+    expect(await postDetail(author, post)).toEqual([]);
+    await expect(comments(author, post)).rejects.toMatchObject(postGone);
+    expect(await commentDetail(author, own)).toEqual([]);
+    expect(await deletePost(other, post)).toBe("not_found");
+    expect(await deletePost(author, randomUUID())).toBe("not_found");
+    expect(await countRows(`${table("content_reports")} WHERE post_id=$1`, [post])).toBe(1);
+    expect(await countRows(`${table("moderation_actions")} WHERE post_id=$1`, [post])).toBe(1);
+
+    // The author takes content back after leaving, in a frozen community and while it is hidden.
+    const later = (await createPost(other, pub)).post_id!;
+    const hidden = (await createPost(other, pub)).post_id!;
+    const laterComment = (await createComment(other, later)).comment_id!;
+    await hideContent("posts", hidden);
+    expect(await outcome(other, "ws_leave_community($1)", [pub])).toBe("ok");
+    await setCommunity(pub, "frozen_at=now()");
+    expect(await deleteComment(other, laterComment)).toBe("ok");
+    expect(await deletePost(other, later)).toBe("ok");
+    expect(await deletePost(other, hidden)).toBe("ok");
+    expect(await postRow(hidden)).toMatchObject({ version: 3, deleted: true });
+    // An archived community answers not_found, even to the author.
+    await setCommunity(pub, "frozen_at=NULL");
+    const last = (await createPost(author, pub)).post_id!;
+    await setCommunity(pub, "archived_at=now()");
+    expect(await deletePost(author, last)).toBe("not_found");
+    expect(await postRow(last)).toMatchObject({ deleted: false });
+  });
+
+  it("comments and notifies the post author", async () => {
+    const host = await hostWorkspace("Comment host");
+    const author = await account("Comment author"), commenter = await account("Comment writer"), moderator = await account("Comment moderator");
+    const stranger = await account("Comment stranger"), gone = await account("Comment gone");
+    const pub = await communityFixture(host, { name: "Comment Circle" });
+    const priv = await communityFixture(host, { name: "Comment Private", visibility: "private" });
+    for (const who of [author, commenter, gone]) await joinCommunity(host, pub, who);
+    await joinCommunity(host, pub, moderator, "moderator");
+    await joinCommunity(host, priv, author);
+    const post = (await createPost(author, pub)).post_id!;
+    const first = await createComment(commenter, post, { body: "  Nice post  " });
+    expect(first).toEqual({ outcome: "created", comment_id: expect.any(String) });
+    expect(await commentRow(first.comment_id!)).toEqual({ post_id: post, author_user_id: commenter.id, body: "Nice post", moderation_status: "visible", version: 1,
+      edited: false, deleted: false });
+    const notice = { tenant_id: host.workspace, recipient_user_id: author.id, kind: "post_commented", title: "Comment writer commented on your post in Comment Circle",
+      body: null, resource_type: "post", outbox_tenant: host.workspace, processed: true };
+    expect(await postNotices(post)).toEqual([notice]);
+    expect((await commentedNotices(author)).map((row) => [row.resource_id, row.link, row.body])).toEqual([[post, postLink(pub, post), null]]);
+    // The author's own comment notifies nobody.
+    expect((await createComment(author, post)).outcome).toBe("created");
+    expect(await postNotices(post)).toHaveLength(1);
+    // Membership and readability.
+    expect(await createComment(stranger, post)).toEqual(refusedComment("not_a_member"));
+    const privPost = (await createPost(author, priv)).post_id!;
+    expect(await createComment(stranger, privPost)).toEqual(refusedComment("not_found"));
+    expect(await createComment(commenter, randomUUID())).toEqual(refusedComment("not_found"));
+    for (const body of ["   ", null, "x".repeat(2001)]) await expect(createComment(commenter, post, { body })).rejects.toMatchObject(invalid("Invalid comment body"));
+    expect((await createComment(commenter, post, { body: "x".repeat(2000) })).outcome).toBe("created");
+    // Idempotent replay as for posts: one comment, one notification.
+    const key = `comment:${randomUUID()}`, hash = randomBytes(32);
+    const args = commentArgs(post, { body: "Once", key, hash });
+    const { winner, loser, blocked } = await contend([commenter, commenter], createCommentCall, [args, args]);
+    expect(blocked).toBe(true);
+    expect([winner.outcome, loser.outcome, loser.comment_id]).toEqual(["created", "replayed", winner.comment_id]);
+    expect(await createComment(commenter, post, { body: "Once", key, hash })).toEqual({ outcome: "replayed", comment_id: winner.comment_id });
+    expect(await createComment(commenter, post, { body: "Twice", key, hash: randomBytes(32) })).toEqual(refusedComment("idempotency_conflict"));
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT tenant_id,operation,state,resource_id FROM ${table("idempotency_requests")} WHERE actor_user_id=$1 AND key=$2`, [commenter.id, key])).rows)
+      .toEqual([{ tenant_id: host.workspace, operation: "community.comment.create", state: "completed", resource_id: winner.comment_id }]);
+    expect(await countRows(`${table("post_comments")} WHERE post_id=$1 AND body='Once'`, [post])).toBe(1);
+    expect(await postNotices(post)).toEqual([notice, notice, notice]);
+    // No notification for a deleted post author.
+    const orphan = (await createPost(gone, pub)).post_id!;
+    await owner.query(`UPDATE ${table("users")} SET status='deleted', deleted_at=now() WHERE id=$1`, [gone.id]);
+    expect((await createComment(commenter, orphan)).outcome).toBe("created");
+    expect(await postNotices(orphan)).toEqual([]);
+    // Frozen communities refuse comments.
+    await setCommunity(pub, "frozen_at=now()");
+    expect(await createComment(commenter, post)).toEqual(refusedComment("community_frozen"));
+    await setCommunity(pub, "frozen_at=NULL");
+    // A post hidden by moderation: moderators read it and get content_hidden; members cannot read it.
+    await hideContent("posts", post);
+    expect(await createComment(moderator, post)).toEqual(refusedComment("content_hidden"));
+    expect(await createComment(commenter, post)).toEqual(refusedComment("not_found"));
+    expect(await postNotices(post)).toHaveLength(3);
+  });
+
+  it("revokes content access when membership ends", async () => {
+    const host = await hostWorkspace("Revoke host");
+    const author = await account("Revoke author"), commenter = await account("Revoke commenter");
+    const priv = await communityFixture(host, { name: "Revoke Circle", visibility: "private" });
+    await joinCommunity(host, priv, author);
+    await joinCommunity(host, priv, commenter);
+    const post = (await createPost(author, priv)).post_id!;
+    const comment = (await createComment(commenter, post)).comment_id!;
+    expect((await commentedNotices(author)).map((row) => row.link)).toEqual([postLink(priv, post)]);
+    expect(await outcome(author, "ws_leave_community($1)", [priv])).toBe("ok");
+    expect(await postDetail(author, post)).toEqual([]);
+    await expect(comments(author, post)).rejects.toMatchObject(postGone);
+    expect(await commentDetail(author, comment)).toEqual([]);
+    expect((await commentedNotices(author)).map((row) => [row.resource_id, row.link, row.title])).toEqual([[post, null, "Revoke commenter commented on your post in Revoke Circle"]]);
+    // A later comment still reaches the author who left, without a link; deletion still works.
+    expect((await createComment(commenter, post)).outcome).toBe("created");
+    expect((await commentedNotices(author)).map((row) => row.link)).toEqual([null, null]);
+    expect(await deletePost(author, post)).toBe("ok");
+  });
+
+  it("shows post notifications outside the host workspace", async () => {
+    const host = await hostWorkspace("Outside host");
+    const author = await account("Outside author"), commenter = await account("Outside commenter");
+    const pub = await communityFixture(host, { name: "Outside Circle" });
+    await joinCommunity(host, pub, author);
+    await joinCommunity(host, pub, commenter);
+    const post = (await createPost(author, pub)).post_id!;
+    expect((await createComment(commenter, post)).outcome).toBe("created");
+    const inbox = await listNotices(author);
+    expect(inbox).toEqual([{ id: inbox[0]!.id, tenant_id: host.workspace, workspace_slug: await slugOf(host.workspace), workspace_name: "Outside host", kind: "post_commented",
+      title: "Outside commenter commented on your post in Outside Circle", body: null, resource_type: "post", resource_id: post, link: postLink(pub, post),
+      created_at: inbox[0]!.created_at, read_at: null }]);
+    expect(await unreadCount(author)).toBe(1);
+    expect(await markOne(commenter, inbox[0]!.id)).toBe("not_found");
+    expect(await markOne(author, inbox[0]!.id)).toBe("ok");
+    expect(await unreadCount(author)).toBe(0);
+    expect((await createComment(commenter, post)).outcome).toBe("created");
+    expect(await unreadCount(author)).toBe(1);
+    expect(await markAll(author, new Date(Date.now() + 60_000))).toBe(1);
+    expect(await unreadCount(author)).toBe(0);
+    // An archived community keeps the notification but drops its link.
+    await setCommunity(pub, "archived_at=now()");
+    expect((await listNotices(author)).map((row) => row.link)).toEqual([null, null]);
+  });
+
+  it("keeps the content write functions definers with an empty search_path", async () => {
+    const exposed = ["ws_create_comment", "ws_create_post", "ws_delete_comment", "ws_delete_post", "ws_list_notifications", "ws_mark_notification_read",
+      "ws_mark_notifications_read", "ws_unread_notification_count", "ws_update_comment", "ws_update_post"];
+    await owner.query("SET ROLE spark_owner");
+    const rows = (await owner.query(`SELECT p.proname, p.prosecdef, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname COLLATE "C"`, [namespace, exposed])).rows;
+    expect(rows.map((row) => [row.proname, row.prosecdef, row.proconfig, row.runtime, row.worker, row.auth])).toEqual(exposed.map((name) => [name, true, ['search_path=""'], true, false, false]));
+    const kinds = (await owner.query(`SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.conname='notifications_kind_allowed'`, [namespace])).rows[0].def as string;
+    for (const kind of ["post_commented", "community_request_rejected", "event_cancelled", "issue_assigned"]) expect(kinds).toContain(kind);
   });
 });
