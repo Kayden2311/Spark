@@ -527,7 +527,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(32);
+    expect(result.rows[0].count).toBe(33);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -765,7 +765,10 @@ describe("Local PostgreSQL schema", () => {
     expect((await asSession(sessionVisitor, `SELECT * FROM ${table("projects")}`)).rows).toHaveLength(0);
     expect((await asSession(sessionVisitor, `SELECT id FROM ${table("posts")} WHERE id=$1`, [privatePost])).rows).toEqual([{id:privatePost}]);
     expect((await asSession(sessionA, `SELECT id FROM ${table("communities")} WHERE id=$1`, [communityB])).rows).toHaveLength(0);
-    expect((await asSession(sessionA, `SELECT id FROM ${table("posts")} WHERE id=$1`, [publicPost])).rows).toEqual([]);
+    // Content of a public community is readable by everyone, signed out too (C2).
+    expect((await asSession(sessionA, `SELECT id FROM ${table("posts")} WHERE id=$1`, [publicPost])).rows).toEqual([{id:publicPost}]);
+    expect((await asSession(null, `SELECT id FROM ${table("posts")} WHERE id=$1`, [publicPost])).rows).toEqual([{id:publicPost}]);
+    expect((await asSession(null, `SELECT id FROM ${table("posts")} WHERE id=$1`, [privatePost])).rows).toEqual([]);
   });
   it("denies runtime writes, role escalation and sensitive table reads", async () => {
     for (const sensitive of ["password_credentials","auth_identities","sessions","account_tokens","content_reports","payment_events","promotion_orders","platform_role_assignments"]) {
@@ -1110,7 +1113,8 @@ describe("Local PostgreSQL schema", () => {
     const runtimeFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
-      "auth_revoke_session", "auth_session_principal", "can_manage_community", "can_read_community", "can_read_post", "community_by_slug", "community_filter_values", "discover_communities",
+      "auth_revoke_session", "auth_session_principal", "can_manage_community", "can_moderate_community", "can_read_community", "can_read_post", "community_by_slug", "community_comment",
+      "community_feed", "community_filter_values", "community_post", "community_post_comments", "discover_communities",
       "has_platform_role", "insight_flow", "insight_issue_states", "insight_members", "insight_sprint_burndown", "insight_sprint_outcomes", "is_community_member", "is_coworker",
       "is_session_user", "is_workspace_member", "my_communities", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts",
       "staff_billing_mrr_series", "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_daily", "staff_community_health", "staff_community_health_counts", "staff_community_series", "staff_engagement_heatmap",
@@ -6124,5 +6128,290 @@ describe("Community membership writes", () => {
       [name, !internal.includes(name), ['search_path=""'], !internal.includes(name), false, false]));
     const kinds = (await owner.query(`SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.conname='notifications_kind_allowed'`, [namespace])).rows[0].def as string;
     for (const kind of ["community_request_received", "community_request_approved", "community_request_rejected", "event_cancelled"]) expect(kinds).toContain(kind);
+  });
+});
+
+type PostInput = { title?: string; body?: string; createdAt?: string; moderation?: "visible" | "hidden"; deleted?: boolean; visibility?: "public" | "members" | "hidden" };
+// A post written by the table owner; createdAt is a timestamptz literal so tests control microseconds.
+async function plantPost(host: Host, community: string, author: string, input: PostInput = {}) {
+  const id = randomUUID();
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body,visibility,moderation_status,created_at,deleted_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,coalesce($9::timestamptz,now()),CASE WHEN $10::boolean THEN now() END)`,
+    [id, host.workspace, community, author, input.title ?? "A post", input.body ?? "Post body", input.visibility ?? "members", input.moderation ?? "visible",
+      input.createdAt ?? null, input.deleted ?? false]);
+  return id;
+}
+type CommentInput = { body?: string; createdAt?: string; moderation?: "visible" | "hidden"; deleted?: boolean };
+async function plantComment(host: Host, community: string, post: string, author: string, input: CommentInput = {}) {
+  const id = randomUUID();
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("post_comments")} (id,tenant_id,community_id,post_id,author_user_id,body,moderation_status,created_at,deleted_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,coalesce($8::timestamptz,now()),CASE WHEN $9::boolean THEN now() END)`,
+    [id, host.workspace, community, post, author, input.body ?? "Comment body", input.moderation ?? "visible", input.createdAt ?? null, input.deleted ?? false]);
+  return id;
+}
+async function plantReport(host: Host, community: string, reporter: string, target: { post?: string; comment?: string }, status = "open") {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,comment_id,reason_code,status,resolved_at)
+    VALUES ($1,$2,$3,$4,$5,'spam',$6::text,CASE WHEN $6::text IN ('resolved','dismissed') THEN now() END)`, [host.workspace, community, reporter, target.post ?? null, target.comment ?? null, status]);
+}
+type FeedRow = { id: string; community_id: string; author_id: string; author_name: string; author_avatar_url: string | null; title: string; excerpt: string; truncated: boolean;
+  created_at: Date; edited_at: Date | null; comment_count: string; moderation_status: string; version: number; viewer_is_author: boolean; viewer_reported: boolean; cursor_ts: string };
+const feedCall = `SELECT *, created_at::text AS cursor_ts FROM ${fn("community_feed")}($1,$2::timestamptz,$3,$4)`;
+const feed = async (who: Account | null, community: string, before: [string, string] | null = null, limit: unknown = 50) =>
+  (await asSession(who?.token ?? null, feedCall, [community, before?.[0] ?? null, before?.[1] ?? null, limit])).rows as FeedRow[];
+const feedIds = async (who: Account | null, community: string) => (await feed(who, community)).map((row) => row.id);
+const postDetail = async (who: Account | null, post: string) =>
+  (await asSession(who?.token ?? null, `SELECT * FROM ${fn("community_post")}($1)`, [post])).rows as Record<string, unknown>[];
+type CommentRow = { id: string; post_id: string; author_id: string; author_name: string; author_avatar_url: string | null; body: string; created_at: Date; edited_at: Date | null;
+  moderation_status: string; version: number; viewer_is_author: boolean; viewer_reported: boolean; cursor_ts: string };
+const commentsCall = `SELECT *, created_at::text AS cursor_ts FROM ${fn("community_post_comments")}($1,$2::timestamptz,$3,$4)`;
+const comments = async (who: Account | null, post: string, after: [string, string] | null = null, limit: unknown = 50) =>
+  (await asSession(who?.token ?? null, commentsCall, [post, after?.[0] ?? null, after?.[1] ?? null, limit])).rows as CommentRow[];
+const commentDetail = async (who: Account | null, comment: string) =>
+  (await asSession(who?.token ?? null, `SELECT * FROM ${fn("community_comment")}($1)`, [comment])).rows as Record<string, unknown>[];
+const canModerate = async (who: Account | null, community: string) =>
+  (await asSession(who?.token ?? null, `SELECT ${fn("can_moderate_community")}($1) AS allowed`, [community])).rows[0].allowed as boolean;
+const communityGone = { code: "P0002", message: "Community not found" };
+const membersOnly = { code: "42501", message: "Community members only" };
+const postGone = { code: "P0002", message: "Post not found" };
+
+describe("Community content reads", () => {
+  it("reads public community content without a session", async () => {
+    const host = await hostWorkspace("Open content host");
+    const stranger = await account("Open content stranger");
+    const pub = await communityFixture(host, { name: "Open Circle" });
+    const priv = await communityFixture(host, { name: "Closed Circle", visibility: "private" });
+    const hid = await communityFixture(host, { name: "Secret Circle", visibility: "hidden" });
+    const archived = await communityFixture(host, { name: "Old Circle" });
+    const post = await plantPost(host, pub, host.owner.id, { title: "Hello", body: "Public body" });
+    const comment = await plantComment(host, pub, post, host.owner.id, { body: "First" });
+    await plantPost(host, priv, host.owner.id);
+    await plantPost(host, hid, host.owner.id);
+    await plantPost(host, archived, host.owner.id);
+    await owner.query(`UPDATE ${table("communities")} SET archived_at=now() WHERE id=$1`, [archived]);
+    for (const who of [null, stranger]) {
+      const rows = await feed(who, pub);
+      expect(rows.map((row) => [row.id, row.title, row.excerpt, row.truncated, row.viewer_is_author, row.viewer_reported])).toEqual([[post, "Hello", "Public body", false, false, false]]);
+      expect((await postDetail(who, post)).map((row) => [row.id, row.community_slug, row.body, row.viewer_is_member, row.viewer_can_moderate, row.community_frozen]))
+        .toEqual([[post, communitySlug(pub), "Public body", false, false, false]]);
+      expect((await comments(who, post)).map((row) => [row.id, row.body])).toEqual([[comment, "First"]]);
+      expect((await commentDetail(who, comment)).map((row) => [row.id, row.post_id, row.community_id])).toEqual([[comment, post, pub]]);
+      await expect(feed(who, priv)).rejects.toMatchObject(membersOnly);
+      await expect(feed(who, hid)).rejects.toMatchObject(communityGone);
+      await expect(feed(who, archived)).rejects.toMatchObject(communityGone);
+      await expect(feed(who, randomUUID())).rejects.toMatchObject(communityGone);
+    }
+    // Row access follows the same rule for the runtime role.
+    expect((await asSession(null, `SELECT id FROM ${table("posts")} WHERE id=$1`, [post])).rows).toEqual([{ id: post }]);
+    expect((await asSession(null, `SELECT id FROM ${table("post_comments")} WHERE id=$1`, [comment])).rows).toEqual([{ id: comment }]);
+  });
+
+  it("reads private content as a member only", async () => {
+    const host = await hostWorkspace("Private content host");
+    const member = await account("Private member"), stranger = await account("Private stranger"), admin = await account("Private host admin");
+    await addMember(host.workspace, admin, "admin");
+    const priv = await communityFixture(host, { name: "Members Circle", visibility: "private" });
+    const hid = await communityFixture(host, { name: "Hidden Members Circle", visibility: "hidden" });
+    await joinCommunity(host, priv, member);
+    await joinCommunity(host, hid, member);
+    const post = await plantPost(host, priv, member.id, { title: "Inside" });
+    const comment = await plantComment(host, priv, post, host.owner.id);
+    const hiddenPost = await plantPost(host, hid, host.owner.id);
+    expect((await feed(member, priv)).map((row) => [row.id, row.viewer_is_author])).toEqual([[post, true]]);
+    expect(await feedIds(member, hid)).toEqual([hiddenPost]);
+    expect((await postDetail(member, post)).map((row) => [row.viewer_is_author, row.viewer_is_member, row.viewer_can_moderate])).toEqual([[true, true, false]]);
+    expect((await postDetail(host.owner, post)).map((row) => [row.viewer_is_author, row.viewer_is_member, row.viewer_can_moderate])).toEqual([[false, true, true]]);
+    // A signed-in non-member and a host workspace admin who is not a member get nothing.
+    for (const who of [stranger, admin]) {
+      await expect(feed(who, priv)).rejects.toMatchObject(membersOnly);
+      expect(await postDetail(who, post)).toEqual([]);
+      await expect(comments(who, post)).rejects.toMatchObject(postGone);
+      expect(await commentDetail(who, comment)).toEqual([]);
+      expect((await asSession(who.token, `SELECT id FROM ${table("posts")} WHERE id=$1`, [post])).rows).toEqual([]);
+    }
+    // The host admin sees that the hidden community exists (C1) but not its content; a stranger does not see it.
+    await expect(feed(admin, hid)).rejects.toMatchObject(membersOnly);
+    await expect(feed(stranger, hid)).rejects.toMatchObject(communityGone);
+    expect(await postDetail(admin, hiddenPost)).toEqual([]);
+    // Leaving revokes access at once.
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='left',left_at=now() WHERE community_id=$1 AND user_id=$2`, [priv, member.id]);
+    await expect(feed(member, priv)).rejects.toMatchObject(membersOnly);
+    expect(await postDetail(member, post)).toEqual([]);
+  });
+
+  it("shows moderated content to community moderators only", async () => {
+    const host = await hostWorkspace("Moderated host");
+    const member = await account("Moderated member"), moderator = await account("Community moderator"), admin = await account("Moderated host admin");
+    await addMember(host.workspace, admin, "admin");
+    const community = await communityFixture(host, { name: "Moderated Circle" });
+    await joinCommunity(host, community, member);
+    await joinCommunity(host, community, moderator, "moderator");
+    await joinCommunity(host, community, admin);
+    const visible = await plantPost(host, community, member.id, { title: "Visible" });
+    const hidden = await plantPost(host, community, member.id, { title: "Hidden", moderation: "hidden" });
+    const deleted = await plantPost(host, community, member.id, { title: "Deleted", deleted: true });
+    const legacy = await plantPost(host, community, member.id, { title: "Legacy hidden", visibility: "hidden" });
+    const hiddenComment = await plantComment(host, community, visible, member.id, { moderation: "hidden" });
+    const shownComment = await plantComment(host, community, visible, member.id);
+    const deletedComment = await plantComment(host, community, visible, member.id, { deleted: true });
+    const onHiddenPost = await plantComment(host, community, hidden, member.id);
+    for (const who of [null, member, admin]) {
+      expect(await feedIds(who, community)).toEqual([visible]);
+      expect(await postDetail(who, hidden)).toEqual([]);
+      expect((await comments(who, visible)).map((row) => row.id)).toEqual([shownComment]);
+      expect(await commentDetail(who, hiddenComment)).toEqual([]);
+      await expect(comments(who, hidden)).rejects.toMatchObject(postGone);
+      expect(await commentDetail(who, onHiddenPost)).toEqual([]);
+    }
+    for (const who of [moderator, host.owner]) {
+      const rows = await feed(who, community);
+      expect(rows.map((row) => [row.id, row.moderation_status]).sort()).toEqual([[hidden, "hidden"], [visible, "visible"]].sort());
+      expect((await postDetail(who, hidden)).map((row) => [row.moderation_status, row.viewer_can_moderate])).toEqual([["hidden", true]]);
+      expect((await comments(who, visible)).map((row) => [row.id, row.moderation_status]).sort()).toEqual([[hiddenComment, "hidden"], [shownComment, "visible"]].sort());
+      expect((await comments(who, hidden)).map((row) => row.id)).toEqual([onHiddenPost]);
+      expect((await commentDetail(who, hiddenComment)).map((row) => row.moderation_status)).toEqual(["hidden"]);
+    }
+    for (const who of [null, member, moderator, host.owner]) {
+      for (const gone of [deleted, legacy]) {
+        expect(await postDetail(who, gone)).toEqual([]);
+        await expect(comments(who, gone)).rejects.toMatchObject(postGone);
+      }
+      expect(await commentDetail(who, deletedComment)).toEqual([]);
+    }
+    // A host workspace admin gets no moderation from that role; frozen communities stay readable.
+    expect(await canModerate(admin, community)).toBe(false);
+    expect(await canModerate(member, community)).toBe(false);
+    expect(await canModerate(null, community)).toBe(false);
+    expect(await canModerate(moderator, community)).toBe(true);
+    expect(await canModerate(host.owner, community)).toBe(true);
+    await owner.query(`UPDATE ${table("communities")} SET frozen_at=now() WHERE id=$1`, [community]);
+    expect((await postDetail(member, visible)).map((row) => row.community_frozen)).toEqual([true]);
+    expect(await feedIds(member, community)).toEqual([visible]);
+    expect(await canModerate(moderator, community)).toBe(true);
+    await owner.query(`UPDATE ${table("communities")} SET frozen_at=NULL,archived_at=now() WHERE id=$1`, [community]);
+    expect(await canModerate(moderator, community)).toBe(false);
+    expect(await postDetail(moderator, visible)).toEqual([]);
+  });
+
+  it("pages the feed without gaps or duplicates", async () => {
+    const host = await hostWorkspace("Feed paging host");
+    const community = await communityFixture(host, { name: "Paging Circle" });
+    const times = ["2026-01-01 10:00:00.000001+00", "2026-01-01 10:00:00.000002+00", "2026-01-01 10:00:00.000002+00", "2026-01-01 10:00:00.000003+00",
+      "2026-01-02 09:00:00+00", "2026-01-03 09:00:00+00", "2026-01-04 09:00:00+00"];
+    for (const at of times) await plantPost(host, community, host.owner.id, { createdAt: at });
+    const expected = (await owner.query(`SELECT id FROM ${table("posts")} WHERE community_id=$1 ORDER BY created_at DESC, id DESC`, [community])).rows.map((row) => row.id);
+    expect(expected).toHaveLength(7);
+    const seen: string[] = [];
+    let cursor: [string, string] | null = null;
+    for (let page = 0; page < 5; page++) {
+      const rows: FeedRow[] = await feed(null, community, cursor, 3);
+      const shown = rows.slice(0, 3);
+      seen.push(...shown.map((row) => row.id));
+      if (rows.length <= 3) break;
+      expect(rows).toHaveLength(4);
+      cursor = [shown.at(-1)!.cursor_ts, shown.at(-1)!.id];
+    }
+    expect(seen).toEqual(expected);
+    for (const limit of [0, 51, null]) await expect(feed(null, community, null, limit)).rejects.toMatchObject({ code: "22023", message: "Invalid post limit" });
+    await expect(asSession(null, feedCall, [community, "2026-01-01 00:00:00+00", null, 3])).rejects.toMatchObject({ code: "22023", message: "Invalid post cursor" });
+    await expect(asSession(null, feedCall, [community, null, randomUUID(), 3])).rejects.toMatchObject({ code: "22023", message: "Invalid post cursor" });
+    // The excerpt is the first 400 characters.
+    const long = await plantPost(host, community, host.owner.id, { body: `${"x".repeat(400)}tail` });
+    const [first] = await feed(null, community, null, 1);
+    expect([first!.id, first!.excerpt, first!.truncated]).toEqual([long, "x".repeat(400), true]);
+  });
+
+  it("pages comments oldest first", async () => {
+    const host = await hostWorkspace("Comment paging host");
+    const member = await account("Comment paging member");
+    const community = await communityFixture(host, { name: "Comment Circle", visibility: "private" });
+    await joinCommunity(host, community, member);
+    const post = await plantPost(host, community, host.owner.id);
+    const times = ["2026-02-01 10:00:00.000001+00", "2026-02-01 10:00:00.000002+00", "2026-02-01 10:00:00.000002+00", "2026-02-01 10:00:00.000003+00",
+      "2026-02-02 09:00:00+00", "2026-02-03 09:00:00+00", "2026-02-04 09:00:00+00"];
+    for (const at of times) await plantComment(host, community, post, member.id, { createdAt: at });
+    const expected = (await owner.query(`SELECT id FROM ${table("post_comments")} WHERE post_id=$1 ORDER BY created_at, id`, [post])).rows.map((row) => row.id);
+    expect(expected).toHaveLength(7);
+    const seen: string[] = [];
+    let cursor: [string, string] | null = null;
+    for (let page = 0; page < 5; page++) {
+      const rows: CommentRow[] = await comments(member, post, cursor, 3);
+      const shown = rows.slice(0, 3);
+      seen.push(...shown.map((row) => row.id));
+      if (rows.length <= 3) break;
+      expect(rows).toHaveLength(4);
+      cursor = [shown.at(-1)!.cursor_ts, shown.at(-1)!.id];
+    }
+    expect(seen).toEqual(expected);
+    for (const limit of [0, 51, null]) await expect(comments(member, post, null, limit)).rejects.toMatchObject({ code: "22023", message: "Invalid comment limit" });
+    await expect(asSession(member.token, commentsCall, [post, "2026-01-01 00:00:00+00", null, 3])).rejects.toMatchObject({ code: "22023", message: "Invalid comment cursor" });
+    await expect(asSession(member.token, commentsCall, [post, null, randomUUID(), 3])).rejects.toMatchObject({ code: "22023", message: "Invalid comment cursor" });
+    await expect(comments(member, randomUUID())).rejects.toMatchObject(postGone);
+    // Comments of a post hidden by moderation are unreadable for members.
+    const hiddenPost = await plantPost(host, community, member.id, { moderation: "hidden" });
+    await plantComment(host, community, hiddenPost, member.id);
+    await expect(comments(member, hiddenPost)).rejects.toMatchObject(postGone);
+    expect(await comments(host.owner, hiddenPost)).toHaveLength(1);
+  });
+
+  it("counts and flags for the viewer", async () => {
+    const host = await hostWorkspace("Flags host");
+    const member = await account("Flags member"), reporter = await account("Flags reporter"), gone = await account("Flags leaver");
+    const community = await communityFixture(host, { name: "Flags Circle" });
+    for (const who of [member, reporter, gone]) await joinCommunity(host, community, who);
+    const post = await plantPost(host, community, gone.id, { title: "By a former member" });
+    await plantComment(host, community, post, member.id, { createdAt: "2026-03-01 10:00:00+00" });
+    await plantComment(host, community, post, member.id, { createdAt: "2026-03-01 10:01:00+00" });
+    await plantComment(host, community, post, member.id, { moderation: "hidden" });
+    await plantComment(host, community, post, member.id, { deleted: true });
+    const reported = await plantComment(host, community, post, gone.id, { createdAt: "2026-03-01 10:02:00+00" });
+    await plantReport(host, community, reporter.id, { post });
+    await plantReport(host, community, member.id, { post }, "dismissed");
+    await plantReport(host, community, reporter.id, { comment: reported }, "reviewing");
+    await owner.query(`UPDATE ${table("users")} SET avatar_url='https://example.com/a.png', status='deleted', deleted_at=now() WHERE id=$1`, [gone.id]);
+    const counts = async (who: Account | null) => (await feed(who, community)).map((row) => [row.comment_count, row.viewer_reported, row.author_name, row.author_avatar_url]);
+    expect(await counts(reporter)).toEqual([["3", true, "Former member", null]]);
+    expect(await counts(member)).toEqual([["3", false, "Former member", null]]);
+    expect(await counts(host.owner)).toEqual([["3", false, "Former member", null]]);
+    expect(await counts(null)).toEqual([["3", false, "Former member", null]]);
+    expect((await postDetail(reporter, post)).map((row) => [row.comment_count, row.viewer_reported, row.author_name, row.author_avatar_url])).toEqual([["3", true, "Former member", null]]);
+    expect((await postDetail(member, post)).map((row) => row.viewer_reported)).toEqual([false]);
+    const flagged = (await comments(reporter, post)).map((row) => [row.id === reported, row.viewer_reported, row.author_name]);
+    expect(flagged).toEqual([[false, false, "Flags member"], [false, false, "Flags member"], [true, true, "Former member"]]);
+    expect((await commentDetail(reporter, reported)).map((row) => [row.viewer_reported, row.author_name, row.author_avatar_url])).toEqual([[true, "Former member", null]]);
+    expect((await commentDetail(member, reported)).map((row) => row.viewer_reported)).toEqual([false]);
+    // Projections never carry an email or a reporter column.
+    for (const row of [...await feed(reporter, community), ...await postDetail(reporter, post), ...await comments(reporter, post), ...await commentDetail(reporter, reported)]) {
+      expect(Object.keys(row).some((key) => key.includes("email") || key.includes("reporter"))).toBe(false);
+    }
+  });
+
+  it("adds edited_at and body length checks", async () => {
+    const columns = (await owner.query(`SELECT table_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema=$1 AND column_name='edited_at' AND table_name IN ('posts','post_comments') ORDER BY table_name`, [namespace])).rows;
+    expect(columns).toEqual([{ table_name: "post_comments", data_type: "timestamp with time zone", is_nullable: "YES" }, { table_name: "posts", data_type: "timestamp with time zone", is_nullable: "YES" }]);
+    const checks = (await owner.query(`SELECT conname,convalidated FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND conname IN ('posts_body_length','post_comments_body_length') ORDER BY conname`, [namespace])).rows;
+    expect(checks).toEqual([{ conname: "post_comments_body_length", convalidated: false }, { conname: "posts_body_length", convalidated: false }]);
+    const host = await hostWorkspace("Length host");
+    const community = await communityFixture(host, { name: "Length Circle" });
+    const post = await plantPost(host, community, host.owner.id);
+    for (const body of ["   ", "x".repeat(10001)]) {
+      await reject(`INSERT INTO ${table("posts")} (tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,'Title',$4)`, [host.workspace, community, host.owner.id, body], "23514");
+    }
+    for (const body of ["   ", "x".repeat(2001)]) {
+      await reject(`INSERT INTO ${table("post_comments")} (tenant_id,community_id,post_id,author_user_id,body) VALUES ($1,$2,$3,$4,$5)`, [host.workspace, community, post, host.owner.id, body], "23514");
+    }
+    await plantPost(host, community, host.owner.id, { body: "x".repeat(10000) });
+    await plantComment(host, community, post, host.owner.id, { body: "x".repeat(2000) });
+  });
+
+  it("keeps the content read functions definers with an empty search_path", async () => {
+    const exposed = ["can_moderate_community", "can_read_post", "community_comment", "community_feed", "community_post", "community_post_comments"];
+    const rows = (await owner.query(`SELECT p.proname, p.prosecdef, p.provolatile, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname COLLATE "C"`, [namespace, exposed])).rows;
+    expect(rows.map((row) => [row.proname, row.prosecdef, row.provolatile, row.proconfig, row.runtime, row.worker, row.auth]))
+      .toEqual(exposed.map((name) => [name, true, "s", ['search_path=""'], true, false, false]));
   });
 });

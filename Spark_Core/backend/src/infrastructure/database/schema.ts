@@ -96,9 +96,11 @@ export const communityJoinRequests = spark.table("community_join_requests", {
 export const posts = spark.table("posts", {
   ...community(), authorUserId: ref("author_user_id").notNull(), title: text("title").notNull(), body: text("body").notNull(),
   visibility: state("visibility", ["public", "members", "hidden"]).notNull().default("members"), moderationStatus: state("moderation_status", ["visible", "hidden"]).notNull().default("visible"), version: version(), deletedAt: instant("deleted_at"),
+  editedAt: instant("edited_at"),
 }).enableRLS();
 export const postComments = spark.table("post_comments", {
   ...community(), postId: ref("post_id").notNull(), authorUserId: ref("author_user_id").notNull(), body: text("body").notNull(), moderationStatus: state("moderation_status", ["visible", "hidden"]).notNull().default("visible"), version: version(), deletedAt: instant("deleted_at"),
+  editedAt: instant("edited_at"),
 }).enableRLS();
 export const contentReports = spark.table("content_reports", {
   ...community(), reporterUserId: ref("reporter_user_id").notNull(), postId: ref("post_id"), commentId: ref("comment_id"), reasonCode: text("reason_code").notNull(), details: text("details"),
