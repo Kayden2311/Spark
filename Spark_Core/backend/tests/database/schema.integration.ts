@@ -6298,8 +6298,10 @@ describe("Community content reads", () => {
   it("pages the feed without gaps or duplicates", async () => {
     const host = await hostWorkspace("Feed paging host");
     const community = await communityFixture(host, { name: "Paging Circle" });
-    const times = ["2026-01-01 10:00:00.000001+00", "2026-01-01 10:00:00.000002+00", "2026-01-01 10:00:00.000002+00", "2026-01-01 10:00:00.000003+00",
-      "2026-01-02 09:00:00+00", "2026-01-03 09:00:00+00", "2026-01-04 09:00:00+00"];
+    // Newest first with limit 3, the tied pair is rows 3 and 4: the tie splits across pages 1 and 2, so a
+    // cursor comparing created_at alone would skip the second tied row.
+    const times = ["2026-01-01 10:00:00.000001+00", "2026-01-01 10:00:00.000002+00", "2026-01-01 10:00:00.000003+00",
+      "2026-01-02 09:00:00.000004+00", "2026-01-02 09:00:00.000004+00", "2026-01-03 09:00:00+00", "2026-01-04 09:00:00+00"];
     for (const at of times) await plantPost(host, community, host.owner.id, { createdAt: at });
     const expected = (await owner.query(`SELECT id FROM ${table("posts")} WHERE community_id=$1 ORDER BY created_at DESC, id DESC`, [community])).rows.map((row) => row.id);
     expect(expected).toHaveLength(7);
@@ -6329,7 +6331,8 @@ describe("Community content reads", () => {
     const community = await communityFixture(host, { name: "Comment Circle", visibility: "private" });
     await joinCommunity(host, community, member);
     const post = await plantPost(host, community, host.owner.id);
-    const times = ["2026-02-01 10:00:00.000001+00", "2026-02-01 10:00:00.000002+00", "2026-02-01 10:00:00.000002+00", "2026-02-01 10:00:00.000003+00",
+    // Oldest first with limit 3, the tied pair is rows 3 and 4: the tie splits across pages 1 and 2.
+    const times = ["2026-02-01 10:00:00.000001+00", "2026-02-01 10:00:00.000002+00", "2026-02-01 10:00:00.000003+00", "2026-02-01 10:00:00.000003+00",
       "2026-02-02 09:00:00+00", "2026-02-03 09:00:00+00", "2026-02-04 09:00:00+00"];
     for (const at of times) await plantComment(host, community, post, member.id, { createdAt: at });
     const expected = (await owner.query(`SELECT id FROM ${table("post_comments")} WHERE post_id=$1 ORDER BY created_at, id`, [post])).rows.map((row) => row.id);
