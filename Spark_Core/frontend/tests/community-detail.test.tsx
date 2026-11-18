@@ -224,7 +224,8 @@ describe("community page", () => {
     serve(detail({ frozen: true }));
     render(<CommunityView slug="northstar-founders" />);
     expect(await screen.findByRole("button", { name: "Join" })).toBeDisabled();
-    expect(screen.getAllByText("This community is paused by Spark moderators.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("This community is paused by Spark moderators.")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Leave" })).not.toBeInTheDocument();
   });
 
   it("uses the not-found page for a hidden or unknown community", async () => {

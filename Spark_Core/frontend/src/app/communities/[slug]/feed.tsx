@@ -7,7 +7,7 @@ import { useAuth } from "../../auth-context";
 import { ConfirmDialog } from "../_components/confirm-dialog";
 import type { ModerateAction } from "../_components/content-menu";
 import { ApiError, loginPath, messageOf, PAUSED_MESSAGE } from "../_lib/api";
-import { appendUnique, contentApi, summaryOf, type PostDetail, type PostSummary } from "../_lib/content-api";
+import { appendUnique, contentApi, GONE_MESSAGE, summaryOf, type PostDetail, type PostSummary } from "../_lib/content-api";
 import type { CommunityDetail } from "../types";
 import { Composer } from "./composer";
 import { PostCard } from "./post-card";
@@ -160,7 +160,7 @@ export function Feed({ community, notify, onReport, onModerate }: FeedProps) {
       <div className="circleSectionHeading">
         <div>
           <span className="circleKicker">Discussions</span>
-          <h2 id="discussions-title">Community discussions</h2>
+          <h2 id="discussions-title" tabIndex={-1}>Community discussions</h2>
         </div>
       </div>
       {compose}
@@ -169,12 +169,19 @@ export function Feed({ community, notify, onReport, onModerate }: FeedProps) {
         <ConfirmDialog
           confirmLabel="Delete post"
           message="Delete this post? This can't be undone."
+          fallbackFocus={() => document.getElementById("discussions-title")}
           onClose={() => setDeleting(null)}
           onConfirm={async () => {
-            await contentApi.deletePost(deleting.id);
+            try {
+              await contentApi.deletePost(deleting.id);
+              notify("Post deleted");
+            } catch (failure) {
+              // Already gone: drop it from the list and say so instead of leaving a dead card.
+              if (!(failure instanceof ApiError && failure.status === 404)) throw failure;
+              notify(GONE_MESSAGE);
+            }
             remove(deleting.id);
             setDeleting(null);
-            notify("Post deleted");
           }}
         />
       )}

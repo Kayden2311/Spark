@@ -6,7 +6,7 @@ import { Byline } from "../../../_components/byline";
 import { ConfirmDialog } from "../../../_components/confirm-dialog";
 import { ContentMenu, type ModerateAction } from "../../../_components/content-menu";
 import { TextField } from "../../../_components/text-field";
-import { loginPath, messageOf, PAUSED_MESSAGE } from "../../../_lib/api";
+import { ApiError, loginPath, messageOf, PAUSED_MESSAGE } from "../../../_lib/api";
 import {
   appendUnique,
   CHANGED_ELSEWHERE,
@@ -14,6 +14,7 @@ import {
   contentApi,
   contentErrorMessage,
   currentOf,
+  GONE_MESSAGE,
   SubmissionKey,
   type CommentItem,
 } from "../../../_lib/content-api";
@@ -50,6 +51,9 @@ export function Comments({ postId, community, signedIn, postHidden, returnTo, co
   const key = `${attempt}:${postId}`;
   const [settled, setSettled] = useState<Settled>({ key: "", items: [], nextCursor: null, error: null });
   const [more, setMore] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: false, error: null });
+  // Set when a new comment was not appended because older ones are still unloaded.
+  const [postedLater, setPostedLater] = useState(false);
+  const [gone, setGone] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -74,6 +78,7 @@ export function Comments({ postId, community, signedIn, postHidden, returnTo, co
       const page = await contentApi.comments(postId, cursor);
       setSettled((previous) => (previous.key === key ? { ...previous, items: appendUnique(previous.items, page.items), nextCursor: page.nextCursor } : previous));
       setMore({ key, loading: false, error: null });
+      setPostedLater(false);
     } catch (error) {
       setMore({ key, loading: false, error: messageOf(error) });
     }
@@ -91,7 +96,9 @@ export function Comments({ postId, community, signedIn, postHidden, returnTo, co
       compose = (
         <CommentComposer
           onCreated={(created) => {
-            change((list) => appendUnique(list, [created]));
+            // With older comments still unloaded the new one would sit out of order; Show more brings it in.
+            if (cursor) setPostedLater(true);
+            else change((list) => appendUnique(list, [created]));
             onCountChange(1);
           }}
           postId={postId}
@@ -140,6 +147,7 @@ export function Comments({ postId, community, signedIn, postHidden, returnTo, co
               change((all) => all.filter((existing) => existing.id !== item.id));
               onCountChange(-1);
             }}
+            onGone={() => setGone(true)}
             onModerate={onModerate}
             onReport={onReport}
           />
@@ -153,11 +161,21 @@ export function Comments({ postId, community, signedIn, postHidden, returnTo, co
       <div className="circleSectionHeading">
         <div>
           <span className="circleKicker">Discussion</span>
-          <h2 id="comments-title">Comments</h2>
+          <h2 id="comments-title" tabIndex={-1}>Comments</h2>
         </div>
         <span className="circleCount">{commentCountLabel(count)}</span>
       </div>
       {compose}
+      {gone && (
+        <p className="circleFeedNote" role="status">
+          {GONE_MESSAGE}
+        </p>
+      )}
+      {postedLater && (
+        <p className="circleFeedNote" role="status">
+          Comment posted — it will appear after the earlier comments.
+        </p>
+      )}
       {list}
       {current && cursor && (
         <div className="circleShowMore">
@@ -220,11 +238,13 @@ interface RowProps {
   comment: CommentItem;
   onChanged: (comment: CommentItem) => void;
   onDeleted: () => void;
+  /** The comment was already gone when the delete ran. */
+  onGone: () => void;
   onReport?: (comment: CommentItem) => void;
   onModerate?: (comment: CommentItem, action: ModerateAction) => void;
 }
 
-function CommentRow({ comment, onChanged, onDeleted, onReport, onModerate }: RowProps) {
+function CommentRow({ comment, onChanged, onDeleted, onGone, onReport, onModerate }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
   const [saving, setSaving] = useState(false);
@@ -305,9 +325,15 @@ function CommentRow({ comment, onChanged, onDeleted, onReport, onModerate }: Row
         <ConfirmDialog
           confirmLabel="Delete comment"
           message="Delete this comment? This can't be undone."
+          fallbackFocus={() => document.getElementById("comments-title")}
           onClose={() => setConfirming(false)}
           onConfirm={async () => {
-            await contentApi.deleteComment(comment.id);
+            try {
+              await contentApi.deleteComment(comment.id);
+            } catch (failure) {
+              if (!(failure instanceof ApiError && failure.status === 404)) throw failure;
+              onGone();
+            }
             onDeleted();
           }}
         />

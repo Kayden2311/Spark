@@ -153,6 +153,8 @@ export function currentOf<T>(error: unknown): T | null {
   return current && typeof current === "object" ? (current as T) : null;
 }
 
+export const GONE_MESSAGE = FALLBACK_MESSAGES[404]!;
+
 export const CHANGED_ELSEWHERE = "This was changed elsewhere — reloaded the latest version";
 
 /** Copy for a failed content write; a frozen community uses the same words as everywhere else. */

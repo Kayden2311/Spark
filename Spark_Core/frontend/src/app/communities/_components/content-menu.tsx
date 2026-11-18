@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { rememberFocus } from "../_lib/focus-return";
 import type { ContentViewer } from "../_lib/content-api";
 
 export type ModerateAction = "hide" | "restore";
@@ -26,6 +27,7 @@ export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onMode
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const menuId = useId();
 
   const items: Item[] = [];
@@ -57,7 +59,26 @@ export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onMode
     };
   }, [open]);
 
+  // Opening the menu puts focus on its first item.
+  useEffect(() => {
+    if (open) list.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open]);
+
   if (!visible) return null;
+
+  const onListKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const entries = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    const at = entries.indexOf(document.activeElement as HTMLElement);
+    const go = (index: number) => {
+      event.preventDefault();
+      entries[(index + entries.length) % entries.length]?.focus();
+    };
+    if (event.key === "ArrowDown") go(at + 1);
+    else if (event.key === "ArrowUp") go(at < 0 ? entries.length - 1 : at - 1);
+    else if (event.key === "Home") go(0);
+    else if (event.key === "End") go(entries.length - 1);
+    else if (event.key === "Tab") setOpen(false);
+  };
 
   return (
     <div className="circleMenu" ref={root}>
@@ -78,12 +99,13 @@ export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onMode
         </svg>
       </button>
       {open && (
-        <div className="circleMenuList" id={menuId} role="menu">
+        <div className="circleMenuList" id={menuId} onKeyDown={onListKey} ref={list} role="menu">
           {items.map((item) => (
             <button
               className={`circleMenuItem${item.label === "Delete" ? " circleMenuItemDanger" : ""}`}
               key={item.label}
               onClick={() => {
+                if (item.label !== "Edit") rememberFocus(trigger.current);
                 setOpen(false);
                 item.run();
               }}

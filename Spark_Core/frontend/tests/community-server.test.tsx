@@ -72,6 +72,14 @@ describe("community page (server)", () => {
     expect(notFound).toHaveBeenCalledTimes(1);
   });
 
+  it("answers not found for a slug that cannot exist without asking the API", async () => {
+    const fetchMock = stubApi(() => json({ id: "c1" }));
+    for (const slug of ["Bad_Slug", "a", "-x-", "x".repeat(41), "../etc"]) {
+      await expect(CommunityPage({ params: Promise.resolve({ slug }) })).rejects.toThrow("NEXT_HTTP_ERROR_FALLBACK;404");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("renders the client view for a readable community", async () => {
     const fetchMock = stubApi(() => json({ id: "c1" }));
     const element = await CommunityPage({ params: Promise.resolve({ slug: "northstar-founders" }) });

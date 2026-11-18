@@ -9,7 +9,7 @@ import { ACCESS_LABELS, GlobeIcon, initialsOf, LockIcon, toneOf, VISIBILITY_LABE
 import { formatCount, formatDate, formatLocation } from "../format";
 import { SiteFooter, SiteHeader } from "../site-chrome";
 import type { CommunityDetail } from "../types";
-import { ApiError, communitiesApi, cooldownMessage, isSignedOut, LAST_OWNER_MESSAGE, loginPath, membershipErrorMessage, messageOf, PAUSED_MESSAGE } from "../_lib/api";
+import { ApiError, communitiesApi, cooldownMessage, isSignedOut, LAST_OWNER_MESSAGE, loginPath, membershipErrorMessage, messageOf } from "../_lib/api";
 import { clearFlash, peekFlash } from "../_lib/flash";
 import { useCommunity, useRequestCooldown } from "../_lib/use-communities";
 import { Feed } from "./feed";
@@ -184,7 +184,6 @@ function MembershipActions({ community, onChange, notify }: ActionsProps) {
           </Link>
         )}
       </div>
-      {paused && <p className="circleNotice">{PAUSED_MESSAGE}</p>}
       {notice && <p className="circleNotice">{notice}</p>}
       {error && (
         <p className="circleNotice circleNoticeError" role="alert">

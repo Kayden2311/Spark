@@ -13,6 +13,7 @@ import { SiteFooter, SiteHeader } from "../../../site-chrome";
 import { ApiError, loginPath, messageOf } from "../../../_lib/api";
 import {
   CHANGED_ELSEWHERE,
+  GONE_MESSAGE,
   contentApi,
   contentErrorMessage,
   currentOf,
@@ -175,8 +176,13 @@ export function PostView({ slug, postId, initial = null, startEditing = false, o
             message="Delete this post? This can't be undone."
             onClose={() => setConfirmingDelete(false)}
             onConfirm={async () => {
-              await contentApi.deletePost(post.id);
-              setFlash("Post deleted");
+              try {
+                await contentApi.deletePost(post.id);
+                setFlash("Post deleted");
+              } catch (failure) {
+                if (!(failure instanceof ApiError && failure.status === 404)) throw failure;
+                setFlash(GONE_MESSAGE);
+              }
               router.push(base);
             }}
           />

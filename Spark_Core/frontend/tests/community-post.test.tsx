@@ -161,6 +161,69 @@ describe("post page", () => {
       expect(items[1]).toHaveTextContent("Nice one");
     });
 
+    it("appends a new comment when everything is loaded", async () => {
+      serve({
+        pages: () => ({ items: [comment({ id: "m1", body: "First" })], nextCursor: null }),
+        extra: (url, init) => (url.pathname === COMMENTS && init.method === "POST" ? json(comment({ id: "m9", body: "Last", viewer: MINE }), 201) : undefined),
+      });
+      renderPost();
+      await screen.findByText("First");
+      await userEvent.type(screen.getByLabelText("Add a comment"), "Last");
+      await userEvent.click(screen.getByRole("button", { name: "Comment" }));
+      await screen.findByText("Last");
+      expect(screen.queryByText("Comment posted — it will appear after the earlier comments.")).not.toBeInTheDocument();
+    });
+
+    it("keeps a new comment out of the list while older ones are unloaded, and Show more brings it in once", async () => {
+      const created = comment({ id: "m9", body: "Newest", viewer: MINE });
+      serve({
+        post: postDetail({ commentCount: 2 }),
+        pages: (url) =>
+          url.searchParams.get("cursor") === "c-2"
+            ? { items: [comment({ id: "m2", body: "Second" }), created], nextCursor: null }
+            : { items: [comment({ id: "m1", body: "First" })], nextCursor: "c-2" },
+        extra: (url, init) => (url.pathname === COMMENTS && init.method === "POST" ? json(created, 201) : undefined),
+      });
+      renderPost();
+      await screen.findByText("First");
+      await userEvent.type(screen.getByLabelText("Add a comment"), "Newest");
+      await userEvent.click(screen.getByRole("button", { name: "Comment" }));
+
+      const note = await screen.findByText("Comment posted — it will appear after the earlier comments.");
+      expect(note).toHaveAttribute("role", "status");
+      expect(screen.queryByText("Newest")).not.toBeInTheDocument();
+      expect(screen.getByText("3 comments")).toBeInTheDocument();
+      expect(screen.getByLabelText("Add a comment")).toHaveValue("");
+
+      await userEvent.click(screen.getByRole("button", { name: "Show more" }));
+      await screen.findByText("Newest");
+      expect(screen.getAllByText("Newest")).toHaveLength(1);
+      expect(screen.queryByText("Comment posted — it will appear after the earlier comments.")).not.toBeInTheDocument();
+      const list = screen.getByRole("list", { name: "Comments" });
+      expect(within(list).getAllByRole("listitem").map((item) => item.querySelector(".circleCommentBody")?.textContent)).toEqual(["First", "Second", "Newest"]);
+    });
+
+    it("returns focus on Escape, then moves it to the comments heading after a delete that answers 404", async () => {
+      serve({
+        post: postDetail({ commentCount: 1 }),
+        pages: () => ({ items: [comment({ id: "m1", body: "Mine", viewer: MINE })], nextCursor: null }),
+        extra: (url, init) => (url.pathname === "/api/v1/comments/m1" && init.method === "DELETE" ? json({ code: "comment_not_found", detail: "Comment not found." }, 404) : undefined),
+      });
+      renderPost();
+      await screen.findByText("Mine");
+      const trigger = screen.getByRole("button", { name: "More actions" });
+      await userEvent.click(trigger);
+      await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      await userEvent.keyboard("{Escape}");
+      expect(trigger).toHaveFocus();
+      await userEvent.click(trigger);
+      await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      await userEvent.click(screen.getByRole("button", { name: "Delete comment" }));
+      await waitFor(() => expect(screen.queryByText("Mine")).not.toBeInTheDocument());
+      expect(screen.getByRole("heading", { name: "Comments" })).toHaveFocus();
+      expect(screen.getByText("This is no longer available.")).toBeInTheDocument();
+    });
+
     it("reuses the key when the same comment is retried", async () => {
       let attempts = 0;
       const { calls } = serve({
@@ -358,6 +421,20 @@ describe("post page", () => {
 
       await waitFor(() => expect(router.push).toHaveBeenCalledWith("/communities/northstar-founders"));
       expect(peekFlash()).toBe("Post deleted");
+    });
+
+    it("goes back with the unavailable message when the post is already gone", async () => {
+      serve({
+        post: postDetail({ viewer: MINE }),
+        extra: (url, init) => (url.pathname === POST && init.method === "DELETE" ? json({ code: "post_not_found", detail: "Post not found." }, 404) : undefined),
+      });
+      renderPost();
+      await screen.findByRole("heading", { level: 1 });
+      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      await userEvent.click(screen.getByRole("button", { name: "Delete post" }));
+      await waitFor(() => expect(router.push).toHaveBeenCalledWith("/communities/northstar-founders"));
+      expect(peekFlash()).toBe("This is no longer available.");
     });
 
     it("keeps the dialog open with the error when the delete fails", async () => {

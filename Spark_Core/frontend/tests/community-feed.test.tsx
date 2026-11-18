@@ -267,6 +267,62 @@ describe("community feed", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
+    it("returns focus to the menu button on Cancel and Escape, and traps Tab inside the dialog", async () => {
+      serve(member(), [post({ viewer: AUTHOR })]);
+      render(<CommunityView slug="northstar-founders" />);
+      await screen.findByRole("link", { name: "Hello founders" });
+      const trigger = screen.getByRole("button", { name: "More actions" });
+      const openDialog = async () => {
+        await userEvent.click(trigger);
+        await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      };
+      await openDialog();
+      const dialog = screen.getByRole("dialog");
+      const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+      const confirm = within(dialog).getByRole("button", { name: "Delete post" });
+      expect(cancel).toHaveFocus();
+      await userEvent.tab();
+      expect(confirm).toHaveFocus();
+      await userEvent.tab();
+      expect(cancel).toHaveFocus();
+      await userEvent.tab({ shift: true });
+      expect(confirm).toHaveFocus();
+      await userEvent.click(cancel);
+      expect(trigger).toHaveFocus();
+
+      await openDialog();
+      await userEvent.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    it("moves focus to the feed heading after a delete removes the card", async () => {
+      serve(member(), [post({ id: "p1", viewer: AUTHOR })], (url, init) =>
+        url.pathname === "/api/v1/posts/p1" && init.method === "DELETE" ? new Response(null, { status: 204 }) : undefined,
+      );
+      render(<CommunityView slug="northstar-founders" />);
+      await screen.findByRole("link", { name: "Hello founders" });
+      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      await userEvent.click(screen.getByRole("button", { name: "Delete post" }));
+      await waitFor(() => expect(screen.queryByRole("article")).not.toBeInTheDocument());
+      expect(screen.getByRole("heading", { name: "Community discussions" })).toHaveFocus();
+    });
+
+    it("drops a post that is already gone and says so when the delete answers 404", async () => {
+      serve(member(), [post({ id: "p1", viewer: AUTHOR })], (url, init) =>
+        url.pathname === "/api/v1/posts/p1" && init.method === "DELETE" ? json({ code: "post_not_found", detail: "Post not found." }, 404) : undefined,
+      );
+      render(<CommunityView slug="northstar-founders" />);
+      await screen.findByRole("link", { name: "Hello founders" });
+      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      await userEvent.click(screen.getByRole("button", { name: "Delete post" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.queryByRole("article")).not.toBeInTheDocument();
+      expect(screen.getByText("This is no longer available.")).toBeInTheDocument();
+    });
+
     it("cancels the delete confirmation without deleting", async () => {
       const { calls } = serve(member(), [post({ viewer: AUTHOR })]);
       render(<CommunityView slug="northstar-founders" />);
@@ -345,6 +401,32 @@ describe("More actions menu", () => {
 
     rerender(<ContentMenu hidden={false} onModerate={onModerate} viewer={viewer({ canReport: false })} />);
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+  });
+
+  it("focuses the first item on open and moves with the arrow, Home and End keys", async () => {
+    render(<ContentMenu hidden={false} onDelete={vi.fn()} onEdit={vi.fn()} onModerate={vi.fn()} viewer={viewer({ ...AUTHOR, canModerate: true })} />);
+    await open();
+    const [edit, remove, hide] = screen.getAllByRole("menuitem");
+    expect(edit).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(remove).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(hide).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(edit).toHaveFocus();
+    await userEvent.keyboard("{ArrowUp}");
+    expect(hide).toHaveFocus();
+    await userEvent.keyboard("{Home}");
+    expect(edit).toHaveFocus();
+    await userEvent.keyboard("{End}");
+    expect(hide).toHaveFocus();
+  });
+
+  it("closes on Tab", async () => {
+    render(<ContentMenu hidden={false} onReport={vi.fn()} viewer={viewer()} />);
+    await open();
+    await userEvent.tab();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("closes on Escape", async () => {
