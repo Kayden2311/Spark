@@ -2,9 +2,11 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 
 import { createMemberGuard } from "../workspace/guard.js";
+import { registerCommentRoutes } from "./comments.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { registerManagementRoutes } from "./management.js";
 import { registerMembershipRoutes } from "./membership.js";
+import { registerPostRoutes } from "./posts.js";
 
 export interface CommunityPluginOptions {
   readonly pool: Pool;
@@ -20,4 +22,6 @@ export function registerCommunityRoutes(app: FastifyInstance, options: Community
   registerDiscoveryRoutes(app, options.pool);
   registerMembershipRoutes(app, guard);
   registerManagementRoutes(app, guard);
+  registerPostRoutes(app, options.pool, guard);
+  registerCommentRoutes(app, options.pool, guard);
 }
