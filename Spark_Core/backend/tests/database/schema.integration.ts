@@ -527,7 +527,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(34);
+    expect(result.rows[0].count).toBe(35);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -853,7 +853,7 @@ describe("Local PostgreSQL schema", () => {
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$5),($3,$4,'password',$5),($6,$7,'password',$5)`, [adminUser, adminToken, contentUser, contentToken, future(), suspendedUser, suspendedToken]);
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,created_at,expires_at) VALUES ($1,$2,'password',now()-interval '2 hours',now()-interval '1 hour')`, [adminUser, expiredToken]);
     await owner.query(`INSERT INTO ${table("post_comments")} (id,tenant_id,community_id,post_id,author_user_id,body) VALUES ($1,$2,$3,$4,$5,'Reported comment')`, [comment, tenantA, communityA, privatePost, userA]);
-    await owner.query(`INSERT INTO ${table("content_reports")} (id,tenant_id,community_id,reporter_user_id,post_id,comment_id,reason_code) VALUES ($1,$3,$4,$5,$6,NULL,'spam'),($2,$3,$4,$5,NULL,$7,'abuse')`, [postReport, commentReport, tenantA, communityA, visitor, privatePost, comment]);
+    await owner.query(`INSERT INTO ${table("content_reports")} (id,tenant_id,community_id,reporter_user_id,post_id,comment_id,reason_code) VALUES ($1,$3,$4,$5,$6,NULL,'spam'),($2,$3,$4,$5,NULL,$7,'harassment')`, [postReport, commentReport, tenantA, communityA, visitor, privatePost, comment]);
     await owner.query(`INSERT INTO ${table("promotion_placements")} (id,code,name,description) VALUES ($1,$2,'Placement','Test placement')`, [placement, `placement-${placement}`]);
     await owner.query(`INSERT INTO ${table("promotion_campaigns")} (id,tenant_id,community_id,name,headline,description,placement_id,submitted_by_user_id,review_status,requested_start_at) VALUES ($1,$3,$4,'Approve me','Headline','Body',$5,$6,'pending',$7),($2,$3,$4,'Reject me','Headline','Body',$5,$6,'pending',$7)`, [approveCampaign, rejectCampaign, tenantA, communityA, placement, userA, future()]);
 
@@ -1114,7 +1114,7 @@ describe("Local PostgreSQL schema", () => {
       WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
       "auth_revoke_session", "auth_session_principal", "can_manage_community", "can_moderate_community", "can_read_community", "can_read_post", "community_by_slug", "community_comment",
-      "community_feed", "community_filter_values", "community_post", "community_post_comments", "discover_communities",
+      "community_feed", "community_filter_values", "community_post", "community_post_comments", "community_report_queue", "discover_communities",
       "has_platform_role", "insight_flow", "insight_issue_states", "insight_members", "insight_sprint_burndown", "insight_sprint_outcomes", "is_community_member", "is_coworker",
       "is_session_user", "is_workspace_member", "my_communities", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts",
       "staff_billing_mrr_series", "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_daily", "staff_community_health", "staff_community_health_counts", "staff_community_series", "staff_engagement_heatmap",
@@ -1124,7 +1124,7 @@ describe("Local PostgreSQL schema", () => {
       "ws_accept_invitation", "ws_add_community_member", "ws_cancel_event", "ws_complete_sprint", "ws_create_comment", "ws_create_community", "ws_create_event", "ws_create_invitation", "ws_create_issue",
       "ws_create_milestone", "ws_create_post", "ws_create_project", "ws_create_sprint", "ws_create_workspace", "ws_decide_community_request", "ws_delete_comment", "ws_delete_post", "ws_get_notification_preferences", "ws_invitation_preview", "ws_join_community",
       "ws_leave_community", "ws_list_community_member_candidates", "ws_list_community_members", "ws_list_community_requests", "ws_list_members", "ws_list_my_community_requests", "ws_list_notifications", "ws_list_workspace_communities",
-      "ws_mark_notification_read", "ws_mark_notifications_read", "ws_rebaseline_project", "ws_remove_community_member", "ws_remove_member", "ws_request_community_membership", "ws_resend_invitation", "ws_respond_event",
+      "ws_mark_notification_read", "ws_mark_notifications_read", "ws_moderate_content", "ws_rebaseline_project", "ws_remove_community_member", "ws_remove_member", "ws_report_content", "ws_request_community_membership", "ws_resend_invitation", "ws_respond_event",
       "ws_revoke_invitation", "ws_save_phases", "ws_set_community_role", "ws_set_member_role", "ws_set_notification_preferences", "ws_start_sprint", "ws_switch_methodology", "ws_unread_notification_count",
       "ws_update_comment", "ws_update_community", "ws_update_event", "ws_update_issue", "ws_update_milestone", "ws_update_post", "ws_update_project", "ws_update_sprint", "ws_update_status", "ws_update_workspace",
       "ws_withdraw_community_request",
@@ -1410,10 +1410,10 @@ describe("Local PostgreSQL schema", () => {
     expect([before[at(18)]!.closed, before[at(17)]!.closed]).toEqual(["0", "0"]);
     await insightReport(fixture, community, "spam", "resolved", utcDay(20, 10), utcDay(18, 10));
     await insightReport(fixture, community, "spam", "dismissed", utcDay(20, 12), utcDay(18, 16));
-    await insightReport(fixture, community, "abuse", "open", utcDay(19, 8));
-    await insightReport(fixture, community, "abuse", "resolved", utcDay(19, 9), utcDay(17, 9));
+    await insightReport(fixture, community, "harassment", "open", utcDay(19, 8));
+    await insightReport(fixture, community, "harassment", "resolved", utcDay(19, 9), utcDay(17, 9));
     // Opened before the range, closed inside it: part of the backlog from the first day.
-    await insightReport(fixture, community, "abuse", "resolved", utcDay(40, 9), utcDay(17, 10));
+    await insightReport(fixture, community, "harassment", "resolved", utcDay(40, 9), utcDay(17, 10));
     const after = await daily();
     expect(after).toHaveLength(30);
     expect(after[29]!.day).toBe(utcDay(0).toISOString().slice(0, 10));
@@ -1434,7 +1434,11 @@ describe("Local PostgreSQL schema", () => {
   it("groups open reports by reason and community", async () => {
     const fixture = await insightFixture();
     const busy = await insightCommunity(fixture, "Busy Reports"), calm = await insightCommunity(fixture, "Calm Reports");
-    const reasonA = `reason-${randomUUID()}`, reasonB = `reason-${randomUUID()}`;
+    // Reasons are a closed set (0034), so the counts are compared with the queue before these reports.
+    const reasonA = "misinformation", reasonB = "self_promotion";
+    const openByReason = async () => new Map((await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_reasons")}()`)).rows
+      .map((row) => [row.reason as string, Number(row.open_count)]));
+    const before = await openByReason();
     for (let index = 0; index < 3; index++) await insightReport(fixture, busy, reasonA);
     await insightReport(fixture, busy, reasonB, "reviewing");
     await insightReport(fixture, calm, reasonB);
@@ -1442,8 +1446,9 @@ describe("Local PostgreSQL schema", () => {
     await insightReport(fixture, calm, reasonA, "dismissed", new Date(), new Date());
     await insightReport(fixture, calm, reasonA, "resolved", new Date(), new Date());
     const reasons = (await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_reasons")}()`)).rows;
-    expect(reasons.find((row) => row.reason === reasonA)).toEqual({ reason: reasonA, open_count: "3" });
-    expect(reasons.find((row) => row.reason === reasonB)).toEqual({ reason: reasonB, open_count: "2" });
+    const after = await openByReason();
+    expect((after.get(reasonA) ?? 0) - (before.get(reasonA) ?? 0)).toBe(3);
+    expect((after.get(reasonB) ?? 0) - (before.get(reasonB) ?? 0)).toBe(2);
     const reasonCounts = reasons.map((row) => Number(row.open_count));
     expect(reasonCounts).toEqual([...reasonCounts].sort((a, b) => b - a));
     const top = (await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_top_communities")}(20)`)).rows;
@@ -6753,5 +6758,282 @@ describe("Community content writes", () => {
     expect(rows.map((row) => [row.proname, row.prosecdef, row.proconfig, row.runtime, row.worker, row.auth])).toEqual(exposed.map((name) => [name, true, ['search_path=""'], true, false, false]));
     const kinds = (await owner.query(`SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.conname='notifications_kind_allowed'`, [namespace])).rows[0].def as string;
     for (const kind of ["post_commented", "community_request_rejected", "event_cancelled", "issue_assigned"]) expect(kinds).toContain(kind);
+  });
+});
+
+type Reported = { outcome: string; report_id: string | null };
+type Moderated = { outcome: string; moderation_status: string | null; reports_closed: number | null };
+const reportCall = `SELECT * FROM ${fn("ws_report_content")}($1,$2,$3,$4)`;
+const moderateCall = `SELECT * FROM ${fn("ws_moderate_content")}($1,$2,$3,$4)`;
+const reportContent = async (who: Account, kind: string, target: string, reason: unknown = "spam", details: unknown = null) =>
+  (await asSession(who.token, reportCall, [kind, target, reason, details])).rows[0] as Reported;
+const moderateContent = async (who: Account, kind: string, target: string, action: unknown, reason: unknown = "Breaks the guidelines") =>
+  (await asSession(who.token, moderateCall, [kind, target, action, reason])).rows[0] as Moderated;
+const refusedReport = (result: string): Reported => ({ outcome: result, report_id: null });
+const refusedModeration = (result: string): Moderated => ({ outcome: result, moderation_status: null, reports_closed: null });
+async function reportsOn(target: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id,reporter_user_id,reason_code,details,status,resolved_at IS NOT NULL AS closed FROM ${table("content_reports")}
+    WHERE post_id=$1 OR comment_id=$1 ORDER BY created_at,id`, [target])).rows as { id: string; reporter_user_id: string; reason_code: string; details: string | null; status: string; closed: boolean }[];
+}
+async function moderationOn(target: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT report_id,actor_user_id,action,reason,post_id,comment_id FROM ${table("moderation_actions")}
+    WHERE post_id=$1 OR comment_id=$1 ORDER BY created_at,report_id NULLS LAST`, [target])).rows;
+}
+// Runs two different statements on two sessions: the second must block on the first's locks until it commits.
+async function contendBoth(accounts: [Account, Account], first: [string, unknown[]], second: [string, unknown[]]) {
+  const clients = await sessionPair(accounts);
+  try {
+    const winner = (await clients[0].query(first[0], first[1])).rows[0];
+    const pid = await backendPid(clients[1]);
+    const pending = clients[1].query(second[0], second[1]);
+    const blocked = await waitUntilBlocked(pid);
+    await clients[0].query("COMMIT");
+    const loser = (await pending).rows[0];
+    await clients[1].query("COMMIT");
+    return { winner, loser, blocked };
+  } finally { await closePair(clients); }
+}
+const queueCall = `SELECT * FROM ${fn("community_report_queue")}($1)`;
+const accessDenied = { code: "42501", message: "Community access denied" };
+
+describe("Community reports and moderation", () => {
+  it("reports visible content once per reporter", async () => {
+    const host = await hostWorkspace("Report host");
+    const author = await account("Report author"), outsider = await account("Report outsider"), member = await account("Report member");
+    const pub = await communityFixture(host, { name: "Report Open" });
+    const priv = await communityFixture(host, { name: "Report Private", visibility: "private" });
+    for (const community of [pub, priv]) for (const who of [author, member]) await joinCommunity(host, community, who);
+    const pubPost = await plantPost(host, pub, author.id);
+    const privPost = await plantPost(host, priv, author.id);
+    const comment = await plantComment(host, pub, pubPost, author.id);
+    const hiddenPost = await plantPost(host, pub, author.id, { moderation: "hidden" });
+    const deletedPost = await plantPost(host, pub, author.id, { deleted: true });
+
+    // Two concurrent reports by one reporter: one row, the second answers with the first's id.
+    const { winner, loser, blocked } = await contendBoth([outsider, outsider], [reportCall, ["post", pubPost, "spam", null]], [reportCall, ["post", pubPost, "harassment", "Again"]]);
+    expect(blocked).toBe(true);
+    expect([winner.outcome, loser.outcome]).toEqual(["reported", "already_reported"]);
+    expect(loser.report_id).toBe(winner.report_id);
+    expect(await reportsOn(pubPost)).toEqual([{ id: winner.report_id, reporter_user_id: outsider.id, reason_code: "spam", details: null, status: "open", closed: false }]);
+    expect(await reportContent(outsider, "post", pubPost, "off_topic")).toEqual({ outcome: "already_reported", report_id: winner.report_id });
+
+    // Readability decides: a private post is not_found to a non-member, as are hidden, deleted and unknown targets.
+    expect(await reportContent(outsider, "post", privPost)).toEqual(refusedReport("not_found"));
+    expect((await reportContent(member, "post", privPost)).outcome).toBe("reported");
+    for (const target of [hiddenPost, deletedPost, randomUUID()]) expect(await reportContent(member, "post", target)).toEqual(refusedReport("not_found"));
+    expect(await reportContent(member, "comment", pubPost)).toEqual(refusedReport("not_found"));
+    expect(await reportContent(author, "post", pubPost)).toEqual(refusedReport("own_content"));
+    expect(await reportContent(author, "comment", comment)).toEqual(refusedReport("own_content"));
+    // `other` with blank details stores NULL; details are trimmed.
+    const onComment = await reportContent(outsider, "comment", comment, "other", "   ");
+    expect(onComment).toEqual({ outcome: "reported", report_id: expect.any(String) });
+    expect((await reportContent(member, "comment", comment, "misinformation", `  ${"d".repeat(1000)}  `)).outcome).toBe("reported");
+    expect((await reportsOn(comment)).map((row) => [row.reporter_user_id, row.reason_code, row.details])).toEqual([[outsider.id, "other", null], [member.id, "misinformation", "d".repeat(1000)]]);
+
+    // Input checks.
+    await expect(reportContent(member, "user", pubPost)).rejects.toMatchObject(invalid("Invalid report target"));
+    await expect(reportContent(member, "post", pubPost, "abuse")).rejects.toMatchObject(invalid("Invalid report reason"));
+    await expect(reportContent(member, "post", pubPost, null)).rejects.toMatchObject(invalid("Invalid report reason"));
+    await expect(reportContent(member, "post", pubPost, "spam", "x".repeat(1001))).rejects.toMatchObject(invalid("Invalid report details"));
+    await expect(asSession(null, reportCall, ["post", pubPost, "spam", null])).rejects.toMatchObject({ code: "28000" });
+    // The reason check binds the table too.
+    await reject(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,reason_code) VALUES ($1,$2,$3,$4,'abuse')`, [host.workspace, pub, member.id, pubPost], "23514");
+
+    // Once the report is closed the same reporter can report again.
+    expect((await moderateContent(host.owner, "post", pubPost, "dismiss")).outcome).toBe("ok");
+    const again = await reportContent(outsider, "post", pubPost, "harassment");
+    expect(again).toEqual({ outcome: "reported", report_id: expect.any(String) });
+    expect(again.report_id).not.toBe(winner.report_id);
+    expect((await reportsOn(pubPost)).map((row) => [row.reporter_user_id, row.status])).toEqual([[outsider.id, "dismissed"], [outsider.id, "open"]]);
+  });
+
+  it("moderates community content with a record", async () => {
+    const host = await hostWorkspace("Moderation host");
+    const moderator = await account("Moderation moderator"), member = await account("Moderation member"), author = await account("Moderation author");
+    const first = await account("Moderation reporter one"), second = await account("Moderation reporter two"), hostAdmin = await account("Moderation host admin");
+    await addMember(host.workspace, hostAdmin, "admin");
+    const priv = await communityFixture(host, { name: "Moderated Private", visibility: "private" });
+    await joinCommunity(host, priv, moderator, "moderator");
+    for (const who of [member, author, first, second]) await joinCommunity(host, priv, who);
+    const post = await plantPost(host, priv, author.id);
+    const reports = [(await reportContent(first, "post", post, "spam")).report_id, (await reportContent(second, "post", post, "harassment", "Rude")).report_id];
+    const reason = "Breaks the guidelines";
+
+    await expect(moderateContent(moderator, "post", post, "delete")).rejects.toMatchObject(invalid("Invalid moderation action"));
+    for (const bad of ["  ab  ", null, "x".repeat(501)]) await expect(moderateContent(moderator, "post", post, "hide", bad)).rejects.toMatchObject(invalid("Invalid moderation reason"));
+    await expect(moderateContent(moderator, "user", post, "hide")).rejects.toMatchObject(invalid("Invalid report target"));
+    await expect(asSession(null, moderateCall, ["post", post, "hide", reason])).rejects.toMatchObject({ code: "28000" });
+    expect(await moderateContent(member, "post", post, "hide")).toEqual(refusedModeration("forbidden"));
+    // Host workspace admins get no content rights from that role: the private post is not found.
+    expect(await moderateContent(hostAdmin, "post", post, "hide")).toEqual(refusedModeration("not_found"));
+    expect(await moderateContent(moderator, "post", randomUUID(), "hide")).toEqual(refusedModeration("not_found"));
+    expect(await moderationOn(post)).toEqual([]);
+
+    expect(await moderateContent(moderator, "post", post, "hide", `  ${reason}  `)).toEqual({ outcome: "ok", moderation_status: "hidden", reports_closed: 2 });
+    expect(await postRow(post)).toMatchObject({ moderation_status: "hidden", version: 2, edited: false });
+    expect((await reportsOn(post)).map((row) => [row.id, row.status, row.closed])).toEqual([[reports[0], "resolved", true], [reports[1], "resolved", true]]);
+    const hideRows = await moderationOn(post);
+    expect(hideRows).toHaveLength(2);
+    expect(hideRows).toEqual(expect.arrayContaining(reports.map((report) => ({ report_id: report, actor_user_id: moderator.id, action: "hide", reason, post_id: post, comment_id: null }))));
+    // Hidden content is readable only by moderators: the member now gets not_found.
+    expect(await moderateContent(member, "post", post, "restore")).toEqual(refusedModeration("not_found"));
+    expect(await moderateContent(moderator, "post", post, "hide")).toEqual({ outcome: "unchanged", moderation_status: "hidden", reports_closed: 0 });
+    expect(await moderateContent(moderator, "post", post, "dismiss")).toEqual({ outcome: "unchanged", moderation_status: "hidden", reports_closed: 0 });
+
+    expect(await moderateContent(host.owner, "post", post, "restore", "Reviewed again")).toEqual({ outcome: "ok", moderation_status: "visible", reports_closed: 0 });
+    expect(await moderateContent(host.owner, "post", post, "restore", "Reviewed again")).toEqual({ outcome: "unchanged", moderation_status: "visible", reports_closed: 0 });
+    expect(await postRow(post)).toMatchObject({ moderation_status: "visible", version: 3, edited: false });
+    expect((await moderationOn(post)).slice(2)).toEqual([{ report_id: null, actor_user_id: host.owner.id, action: "restore", reason: "Reviewed again", post_id: post, comment_id: null }]);
+
+    // Dismiss closes the open reports and keeps the content visible; nothing open: unchanged.
+    const reopened = (await reportContent(first, "post", post, "off_topic")).report_id;
+    expect(await moderateContent(moderator, "post", post, "dismiss", "Within guidelines")).toEqual({ outcome: "ok", moderation_status: "visible", reports_closed: 1 });
+    expect((await reportsOn(post)).at(-1)).toMatchObject({ id: reopened, status: "dismissed", closed: true });
+    expect((await moderationOn(post)).at(-1)).toEqual({ report_id: reopened, actor_user_id: moderator.id, action: "dismiss_report", reason: "Within guidelines", post_id: post, comment_id: null });
+    expect(await moderateContent(moderator, "post", post, "dismiss")).toEqual({ outcome: "unchanged", moderation_status: "visible", reports_closed: 0 });
+    expect(await postRow(post)).toMatchObject({ moderation_status: "visible", version: 3 });
+    expect(await moderationOn(post)).toHaveLength(4);
+
+    // A hide with no open reports writes one row without a report; it works while the community is frozen.
+    await setCommunity(priv, "frozen_at=now()");
+    expect(await moderateContent(moderator, "post", post, "hide")).toEqual({ outcome: "ok", moderation_status: "hidden", reports_closed: 0 });
+    expect((await moderationOn(post)).at(-1)).toEqual({ report_id: null, actor_user_id: moderator.id, action: "hide", reason, post_id: post, comment_id: null });
+    expect(await moderateContent(moderator, "post", post, "restore")).toMatchObject({ outcome: "ok", moderation_status: "visible" });
+    await setCommunity(priv, "frozen_at=NULL");
+
+    // Comments: only the comment changes.
+    const comment = await plantComment(host, priv, post, author.id);
+    const onComment = (await reportContent(member, "comment", comment, "spam")).report_id;
+    expect(await moderateContent(member, "comment", comment, "hide")).toEqual(refusedModeration("forbidden"));
+    expect(await moderateContent(moderator, "comment", comment, "hide")).toEqual({ outcome: "ok", moderation_status: "hidden", reports_closed: 1 });
+    expect(await commentRow(comment)).toMatchObject({ moderation_status: "hidden", version: 2, edited: false });
+    expect(await postRow(post)).toMatchObject({ moderation_status: "visible", version: 5 });
+    expect(await moderationOn(comment)).toEqual([{ report_id: onComment, actor_user_id: moderator.id, action: "hide", reason, post_id: null, comment_id: comment }]);
+    expect(await moderateContent(moderator, "post", comment, "hide")).toEqual(refusedModeration("not_found"));
+
+    // A deleted target and an archived community are not found.
+    const gone = await plantPost(host, priv, author.id, { deleted: true });
+    expect(await moderateContent(moderator, "post", gone, "hide")).toEqual(refusedModeration("not_found"));
+    await setCommunity(priv, "archived_at=now()");
+    expect(await moderateContent(moderator, "post", post, "hide")).toEqual(refusedModeration("not_found"));
+  });
+
+  it("serializes concurrent moderation", async () => {
+    const host = await hostWorkspace("Race host");
+    const moderator = await account("Race moderator"), editor = await account("Race moderator author"), author = await account("Race author"), reporter = await account("Race reporter");
+    const pub = await communityFixture(host, { name: "Race Circle" });
+    await joinCommunity(host, pub, moderator, "moderator");
+    await joinCommunity(host, pub, editor, "moderator");
+    for (const who of [author, reporter]) await joinCommunity(host, pub, who);
+    const post = await plantPost(host, pub, author.id);
+    const report = (await reportContent(reporter, "post", post)).report_id;
+
+    const hide = (target: string): [string, unknown[]] => [moderateCall, ["post", target, "hide", "Spam link"]];
+    const race = await contendBoth([host.owner, moderator], hide(post), hide(post));
+    expect(race.blocked).toBe(true);
+    expect([race.winner.outcome, race.loser.outcome]).toEqual(["ok", "unchanged"]);
+    expect(race.winner.reports_closed).toBe(1);
+    expect(await moderationOn(post)).toEqual([{ report_id: report, actor_user_id: host.owner.id, action: "hide", reason: "Spam link", post_id: post, comment_id: null }]);
+    expect(await postRow(post)).toMatchObject({ moderation_status: "hidden", version: 2 });
+
+    // An author edit with the version read before a concurrent hide never lands.
+    const updateCall = `SELECT * FROM ${fn("ws_update_post")}($1,$2,$3,$4)`;
+    const own = await plantPost(host, pub, editor.id);
+    const edit = await contendBoth([moderator, editor], hide(own), [updateCall, [own, 1, "Edited title", null]]);
+    expect(edit.blocked).toBe(true);
+    expect(edit.winner.outcome).toBe("ok");
+    expect(["content_hidden", "version_mismatch"]).toContain(edit.loser.outcome);
+    // A plain member author no longer reads the hidden post at all.
+    const plain = await plantPost(host, pub, author.id);
+    const plainEdit = await contendBoth([moderator, author], hide(plain), [updateCall, [plain, 1, "Edited title", null]]);
+    expect(plainEdit.blocked).toBe(true);
+    expect(plainEdit.loser.outcome).not.toBe("ok");
+    for (const target of [own, plain]) expect(await postRow(target)).toMatchObject({ title: "A post", moderation_status: "hidden", version: 2, edited: false });
+
+    // A report racing a hide waits for it and then no longer reads the hidden post.
+    const raced = await plantPost(host, pub, author.id);
+    const reportRace = await contendBoth([moderator, reporter], hide(raced), [reportCall, ["post", raced, "spam", null]]);
+    expect(reportRace.blocked).toBe(true);
+    expect(reportRace.loser).toEqual(refusedReport("not_found"));
+    expect(await reportsOn(raced)).toEqual([]);
+  });
+
+  it("lists the community report queue without reporters", async () => {
+    const host = await hostWorkspace("Queue host");
+    const moderator = await account("Queue moderator"), member = await account("Queue member"), author = await account("Queue author"), stranger = await account("Queue stranger");
+    const hostAdmin = await account("Queue host admin");
+    await addMember(host.workspace, hostAdmin, "admin");
+    const reporters: Account[] = [];
+    for (let index = 1; index <= 5; index++) reporters.push(await account(`Queue reporter ${index}`));
+    const pub = await communityFixture(host, { name: "Queue Circle" });
+    const hid = await communityFixture(host, { name: "Queue Hidden", visibility: "hidden" });
+    await joinCommunity(host, pub, moderator, "moderator");
+    await joinCommunity(host, pub, member);
+    await joinCommunity(host, pub, author);
+    const post = await plantPost(host, pub, author.id, { title: "Reported post", body: "b".repeat(420) });
+    const other = await plantPost(host, pub, member.id, { title: "Other post" });
+    const comment = await plantComment(host, pub, other, author.id, { body: "Reported comment" });
+    const deleted = await plantPost(host, pub, author.id);
+    const doomed = await plantPost(host, pub, author.id);
+    const orphan = await plantComment(host, pub, doomed, author.id);
+    const closed = await plantPost(host, pub, author.id);
+
+    const plan: [Account, string, string | null][] = [[reporters[0]!, "spam", "First detail"], [reporters[1]!, "spam", null], [reporters[2]!, "harassment", "Third detail"],
+      [reporters[3]!, "spam", "Fourth detail"], [reporters[4]!, "harassment", "Fifth detail"]];
+    for (const [who, reason, details] of plan) expect((await reportContent(who, "post", post, reason, details)).outcome).toBe("reported");
+    expect((await reportContent(reporters[0]!, "post", deleted)).outcome).toBe("reported");
+    expect((await reportContent(reporters[0]!, "comment", orphan)).outcome).toBe("reported");
+    expect((await reportContent(reporters[0]!, "post", closed)).outcome).toBe("reported");
+    expect((await moderateContent(moderator, "post", closed, "dismiss")).outcome).toBe("ok");
+    expect((await reportContent(reporters[1]!, "comment", comment, "off_topic", "Not about the post")).outcome).toBe("reported");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("posts")} SET deleted_at=now(),version=version+1 WHERE id = ANY($1::uuid[])`, [[deleted, doomed]]);
+
+    const result = await asSession(moderator.token, queueCall, [pub]);
+    const columns = result.fields.map((field) => field.name);
+    expect(columns).toEqual(["target_kind", "target_id", "post_id", "post_title", "excerpt", "author_name", "moderation_status", "open_reports", "reasons", "latest_details",
+      "first_reported_at", "last_reported_at"]);
+    expect(columns.some((name) => name.includes("reporter"))).toBe(false);
+    for (const who of reporters) expect(JSON.stringify(result.rows)).not.toContain(who.id);
+    const timeless = (rows: Record<string, unknown>[]) => rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => !key.endsWith("_reported_at"))));
+    expect(timeless(result.rows)).toEqual([
+      { target_kind: "comment", target_id: comment, post_id: other, post_title: "Other post", excerpt: "Reported comment", author_name: "Queue author", moderation_status: "visible",
+        open_reports: "1", reasons: [{ reason: "off_topic", count: 1 }], latest_details: ["Not about the post"] },
+      { target_kind: "post", target_id: post, post_id: post, post_title: "Reported post", excerpt: "b".repeat(400), author_name: "Queue author", moderation_status: "visible",
+        open_reports: "5", reasons: [{ reason: "spam", count: 3 }, { reason: "harassment", count: 2 }], latest_details: ["Fifth detail", "Fourth detail", "Third detail"] },
+    ]);
+    const [newest, oldest] = result.rows as { first_reported_at: Date; last_reported_at: Date }[];
+    expect(newest!.last_reported_at.getTime()).toBeGreaterThan(oldest!.last_reported_at.getTime());
+    expect(oldest!.first_reported_at.getTime()).toBeLessThan(oldest!.last_reported_at.getTime());
+    // Hidden content stays listed for moderators with its status; a deleted author shows as a former member.
+    expect((await reportContent(reporters[2]!, "post", other)).outcome).toBe("reported");
+    await hideContent("posts", other);
+    await owner.query(`UPDATE ${table("users")} SET deleted_at=now() WHERE id=$1`, [member.id]);
+    const after = (await asSession(host.owner.token, queueCall, [pub])).rows;
+    expect(after.map((row) => [row.target_kind, row.target_id, row.author_name, row.moderation_status])).toEqual([
+      ["post", other, "Former member", "hidden"], ["comment", comment, "Queue author", "visible"], ["post", post, "Queue author", "visible"]]);
+
+    // Owners and moderators only, with the C1 messages.
+    for (const who of [author, stranger, hostAdmin]) await expect(asSession(who.token, queueCall, [pub])).rejects.toMatchObject(accessDenied);
+    await expect(asSession(null, queueCall, [pub])).rejects.toMatchObject(accessDenied);
+    await expect(asSession(stranger.token, queueCall, [hid])).rejects.toMatchObject(notFound);
+    await expect(asSession(moderator.token, queueCall, [randomUUID()])).rejects.toMatchObject(notFound);
+    expect((await asSession(host.owner.token, queueCall, [hid])).rows).toEqual([]);
+    await setCommunity(pub, "archived_at=now()");
+    await expect(asSession(moderator.token, queueCall, [pub])).rejects.toMatchObject(notFound);
+  });
+
+  it("keeps the report and moderation functions definers with an empty search_path", async () => {
+    const exposed = ["community_report_queue", "staff_resolve_report", "ws_moderate_content", "ws_report_content"];
+    await owner.query("SET ROLE spark_owner");
+    const rows = (await owner.query(`SELECT p.proname, p.prosecdef, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname COLLATE "C"`, [namespace, exposed])).rows;
+    expect(rows.map((row) => [row.proname, row.prosecdef, row.proconfig, row.runtime, row.worker, row.auth])).toEqual(exposed.map((name) => [name, true, ['search_path=""'], true, false, false]));
+    const check = (await owner.query(`SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace
+      WHERE n.nspname=$1 AND c.conname='content_reports_reason_allowed'`, [namespace])).rows[0].def as string;
+    for (const reason of ["spam", "harassment", "off_topic", "misinformation", "self_promotion", "other"]) expect(check).toContain(`'${reason}'`);
   });
 });

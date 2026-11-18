@@ -239,6 +239,13 @@
       "when": 1792470000000,
       "tag": "0033_community_content_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792556400000,
+      "tag": "0034_content_reports",
+      "breakpoints": true
     }
   ]
 }

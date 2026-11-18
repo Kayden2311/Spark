@@ -183,7 +183,7 @@ try {
       // Create a content report for this post
       await client.query(
         `INSERT INTO spark.content_reports (id, tenant_id, community_id, reporter_user_id, post_id, reason_code, details, status)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'Potential spam / solicitation', 'Unsolicited bot investment links in technical channel.', 'open')`,
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, 'spam', 'Unsolicited bot investment links in technical channel.', 'open')`,
         [workspaceId, commId, user1Id, postId],
       );
 
