@@ -21,6 +21,7 @@ function serve(community: CommunityDetail | null, extra?: (url: URL, init: Reque
   return stubFetch((url, init) => {
     const handled = extra?.(url, init);
     if (handled) return handled;
+    if (url.pathname.endsWith("/posts") && (init.method ?? "GET") === "GET") return json({ items: [], nextCursor: null });
     if (url.pathname === "/api/v1/communities/northstar-founders" && (init.method ?? "GET") === "GET") {
       return community ? json(community, 200, { ETag: `"v${community.version}"` }) : json({ code: "community_not_found", detail: "Community not found." }, 404);
     }
@@ -41,7 +42,7 @@ describe("community page", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders the hero, stats, about and the discussion placeholder as plain text", async () => {
+  it("renders the hero, stats, about and the discussions section as plain text", async () => {
     serve(detail({ visibility: "private", featured: true, description: "<script>alert(1)</script> We meet weekly.", weeklyPosts: 7 }));
     render(<CommunityView slug="northstar-founders" />);
 
@@ -58,7 +59,8 @@ describe("community page", () => {
     expect(within(stats).getByText("7")).toBeInTheDocument();
     expect(screen.getByText("<script>alert(1)</script> We meet weekly.")).toBeInTheDocument();
     expect(document.querySelector("main script")).toBeNull();
-    expect(screen.getByText("Discussions open in the next update")).toBeInTheDocument();
+    expect(screen.queryByText("Discussions open in the next update")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Community discussions" })).toBeInTheDocument();
   });
 
   it("sends signed-out visitors of a public community to sign in and back", async () => {
@@ -222,7 +224,7 @@ describe("community page", () => {
     serve(detail({ frozen: true }));
     render(<CommunityView slug="northstar-founders" />);
     expect(await screen.findByRole("button", { name: "Join" })).toBeDisabled();
-    expect(screen.getByText("This community is paused by Spark moderators.")).toBeInTheDocument();
+    expect(screen.getAllByText("This community is paused by Spark moderators.").length).toBeGreaterThan(0);
   });
 
   it("uses the not-found page for a hidden or unknown community", async () => {

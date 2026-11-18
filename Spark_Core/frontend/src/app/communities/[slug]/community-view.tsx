@@ -10,7 +10,9 @@ import { formatCount, formatDate, formatLocation } from "../format";
 import { SiteFooter, SiteHeader } from "../site-chrome";
 import type { CommunityDetail } from "../types";
 import { ApiError, communitiesApi, cooldownMessage, isSignedOut, LAST_OWNER_MESSAGE, loginPath, membershipErrorMessage, messageOf, PAUSED_MESSAGE } from "../_lib/api";
+import { clearFlash, peekFlash } from "../_lib/flash";
 import { useCommunity, useRequestCooldown } from "../_lib/use-communities";
+import { Feed } from "./feed";
 
 type Toast = { id: number; text: string };
 
@@ -195,7 +197,12 @@ function MembershipActions({ community, onChange, notify }: ActionsProps) {
 
 export function CommunityView({ slug }: { slug: string }) {
   const { community, status, error, retry, update } = useCommunity(slug);
-  const [toast, setToast] = useState<Toast | null>(null);
+  // A message left by a page we came from, such as "Post deleted" after leaving the post page.
+  const [toast, setToast] = useState<Toast | null>(() => {
+    const text = peekFlash();
+    return text ? { id: 1, text } : null;
+  });
+  useEffect(() => clearFlash(), []);
 
   useEffect(() => {
     if (!toast) return;
@@ -293,15 +300,7 @@ export function CommunityView({ slug }: { slug: string }) {
               <p className="circleAboutText">{community.description}</p>
             </section>
 
-            <section className="circleSectionCard" aria-labelledby="discussions-title">
-              <div className="circleSectionHeading">
-                <div>
-                  <span className="circleKicker">Discussions</span>
-                  <h2 id="discussions-title">Community discussions</h2>
-                </div>
-              </div>
-              <p className="circleAboutText">Discussions open in the next update</p>
-            </section>
+            <Feed community={community} notify={notify} />
           </div>
 
           <aside className="circleAsideCol">
