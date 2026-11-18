@@ -6,6 +6,7 @@ import { registerCommentRoutes } from "./comments.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { registerManagementRoutes } from "./management.js";
 import { registerMembershipRoutes } from "./membership.js";
+import { registerModerationRoutes } from "./moderation.js";
 import { registerPostRoutes } from "./posts.js";
 
 export interface CommunityPluginOptions {
@@ -24,4 +25,5 @@ export function registerCommunityRoutes(app: FastifyInstance, options: Community
   registerManagementRoutes(app, guard);
   registerPostRoutes(app, options.pool, guard);
   registerCommentRoutes(app, options.pool, guard);
+  registerModerationRoutes(app, guard);
 }
