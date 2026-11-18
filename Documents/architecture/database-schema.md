@@ -336,6 +336,53 @@ The runtime role still has no write privilege on any community table. Every chan
 - **Notifications.** `notifications_kind_allowed` adds `community_request_received`, `community_request_approved` and `community_request_rejected` (`resource_type 'community'`, `resource_id` = community, `tenant_id` = host workspace). A request notifies every active community owner and moderator ("<user> asked to join <community>"). A decision notifies the requester ("Your request to join <community> was approved" or "… was declined"). Each write first inserts its `outbox_events` row (`aggregate_type 'community_join_request'`, events `community_join_request.created|approved|rejected`, `processed_at = now()`): these notifications are in-app only, with no email in C1. The `0028` read functions are redefined: a row is visible when the actor is the recipient and either the row's workspace is an active workspace of the actor or `resource_type = 'community'`. A requester outside the host workspace therefore lists, counts and marks their community notifications. Community links: `/communities/{slug}/manage` for `community_request_received`, `/communities/{slug}` for the decisions, and NULL once the community is archived.
 - **Internal helpers** (invoker rights with an empty search path, not executable by `spark_app`): `check_community_field(field, value)`, `check_community_topics(topics)`, `lock_community(id)` and `community_actor_access(tenant, community, visibility, actor)`. The last one returns the actor's membership status and role and the flags `member`, `manager`, `administrator` and `visible`.
 
+## Community content reads (`0032_community_content_reads.sql`)
+
+**Content access rule.** A post or comment is readable when its community is readable (not archived, host workspace active), the post is not deleted, its legacy `visibility` is not `hidden`, and the community is `public` (everyone, signed out too) or the viewer is an active member. Content hidden by moderation (`moderation_status = 'hidden'`) is readable only by the community's active `owner`s and `moderator`s. Host workspace owners and admins get no content or moderation rights from that role.
+
+- **Fields.** `posts.edited_at` and `post_comments.edited_at` (nullable). `posts_body_length` (trimmed 1-10,000) and `post_comments_body_length` (trimmed 1-2,000) are `NOT VALID`: they bind new and updated rows without rejecting older data.
+- **Helpers.** `can_moderate_community(community)` (STABLE definer, executable by `spark_app`) is true for an active owner or moderator of a non-archived community of an active host workspace, false without a live session. `can_read_post(tenant, post)` keeps its signature and applies the rule above to the session actor; the `post_read` and `comment_read` policies use it.
+- **Reads** (STABLE `SECURITY DEFINER SET search_path = ''`, executable by `spark_app`, working with or without a session; none returns an email or a reporter). Authors of deleted users read `Former member` with no avatar.
+  - `community_feed(community, before_created, before_id, limit)`: newest first by `(created_at, id)`, keyset cursor, up to `limit + 1` rows. `excerpt` is the first 400 characters with `truncated`; `comment_count` counts visible, non-deleted comments; also `viewer_is_author`, `viewer_reported`, `edited_at`, `version`. Hidden posts are listed only for moderators. An unreadable community raises `P0002`; a private or hidden community the viewer is not an active member of raises `42501`.
+  - `community_post(post)`: one post with its full body and the viewer flags; no row when unreadable.
+  - `community_post_comments(post, after_created, after_id, limit)`: oldest first, keyset, up to `limit + 1` rows; an unreadable post raises `P0002 Post not found`; hidden comments only for moderators.
+  - `community_comment(comment)`: one comment with its community; no row when unreadable.
+- **Limits.** Input violations raise `22023` (`Invalid post cursor|limit`, `Invalid comment cursor|limit`); limits are 1-50.
+
+## Community content writes (`0033_community_content_writes.sql`)
+
+`spark.ws_*` definers (`SECURITY DEFINER SET search_path = ''`, `spark_app` only) with closed outcome sets; the runtime role has no `INSERT` or `UPDATE` path to posts or comments outside them. Text is trimmed with `btrim`. Writing needs an active membership (any role) and a non-frozen community; readability follows the `0032` rule (an unreadable target answers `not_found`).
+
+- **Locks.** Host workspace `FOR SHARE`, community `FOR SHARE` (`lock_community_content`; the `community_open` trigger takes it too), post, comment. Membership changes lock the community row `FOR UPDATE`, so they serialize with content writes while writes in one community do not serialize with each other.
+- **Writes.**
+  - `ws_create_post(community, title, body, idempotency_key, request_hash)` → `created | not_found | not_a_member | community_frozen` with `post_id`. Title 1-150, body 1-10,000 (`Invalid post title|body`). The optional key is scoped to (host workspace, actor, `community.post.create`) and kept 24 hours: same hash replays the original id, another hash is a conflict (`Invalid idempotency key` for a bad key or hash).
+  - `ws_update_post(post, expected_version, title, body)` → `ok | not_found | not_author | not_a_member | community_frozen | content_hidden | version_mismatch`. NULL leaves a field unchanged; both NULL raises `Invalid post patch`. Sets `edited_at`.
+  - `ws_delete_post(post)`: soft delete by the author at any time; a second delete is `ok`; a non-author who can read gets `not_author`.
+  - `ws_create_comment(post, body, idempotency_key, request_hash)` → also `content_hidden` when the post is hidden. Body 1-2,000 (`Invalid comment body`). Operation `community.comment.create`. When the post author is not the actor and is active, one outbox row (processed at once: in-app only) and one `post_commented` notification are written; the title carries no post or comment text.
+  - `ws_update_comment(comment, expected_version, body)` and `ws_delete_comment(comment)`: the same outcomes and order as for posts.
+- **Notifications.** `notifications_kind_allowed` adds `post_commented` (`resource_type 'post'`). The `0031` read functions `ws_list_notifications`, `ws_unread_notification_count`, `ws_mark_notification_read` and `ws_mark_notifications_read` are redefined so post rows are visible outside the host workspace like community rows; the link points to the post only while the recipient can read it.
+- **Internal helpers:** `lock_community_content(community)` and `is_active_community_member(tenant, community, actor)`.
+
+## Content reports and community moderation (`0034_content_reports.sql`)
+
+Reporting a post or comment, moderating it with a record, and the per-community report queue. The runtime role has no write path to `content_reports` or `moderation_actions` outside these definers; `staff_resolve_report` (`0009`) is unchanged.
+
+- **Reason set.** `content_reports_reason_allowed` (`NOT VALID`, so the legacy free-text seed code stays) limits `reason_code` to `spam`, `harassment`, `off_topic`, `misinformation`, `self_promotion`, `other`.
+- **Locks.** As in `0033`: host workspace and community `FOR SHARE`, post, comment, reports. A report takes the post and comment `FOR SHARE` (reports do not serialize with each other, and the partial unique indexes make one reporter's report idempotent); a moderation takes them `FOR UPDATE`.
+- **Functions** (definers, `spark_app` only).
+  - `ws_report_content(kind, target, reason, details)` → `reported | already_reported | not_found | own_content` with `report_id`. Needs read access, not membership; frozen communities can still be reported. Details are trimmed, at most 1,000, blank stored as NULL (`Invalid report target|reason|details`). A reporter with an open or reviewing report on the target gets that report's id back.
+  - `ws_moderate_content(kind, target, action, reason)` → `ok | unchanged | not_found | forbidden`. Community owners and moderators only; works while frozen; reason trimmed 3-500 (`Invalid moderation action|reason`). `hide` sets the status to `hidden` and resolves every open report with one `hide` record each (or one record without a report); `dismiss` dismisses every open report (`dismiss_report` records); `restore` sets `visible` and never closes reports. A status change bumps `version` and never sets `edited_at`.
+  - `community_report_queue(community)`: the open and reviewing reports for owners and moderators, one row per target, newest first, at most 100, with `reasons [{reason, count}]` and up to three `latest_details`. Never returns a reporter. An invisible community raises `P0002 Community not found`; a visible one the viewer does not moderate raises `42501 Community access denied`.
+
+## Community leftovers (`0035_community_fixes.sql`)
+
+`CREATE OR REPLACE` with unchanged signatures; closes the issues C1 parked.
+
+- `community_cards`: `member_count` counts active memberships of users with `deleted_at IS NULL`. `weekly_posts` counts posts that are not deleted, `moderation_status = 'visible'` and `visibility <> 'hidden'`, plus comments that are not deleted and visible whose post meets the same rule.
+- `discoverable_communities`: hidden communities are also discoverable by the active `owner`s and `admin`s of their active host workspace (not just their members).
+- `ws_add_community_member`: when it approves the user's pending request it also writes the outbox row (`community_join_request.approved`) and the `community_request_approved` notification, with the same text as `ws_decide_community_request`.
+- `ws_update_community`: a visibility change from `private` to `public` approves every pending request in the same transaction, after the community row lock and in request order. Each approval inserts or re-activates the membership as `member` (a suspended membership stays suspended), sets `reviewed_by_user_id` to the actor and `reviewed_at` to `now()`, writes the outbox row and the notification, and records the audit `community.request_approved`. Other visibility changes leave requests pending.
+
 ## Scope and assumptions
 
 Context defines community discovery, membership, posts, workspaces, tasks, notifications, and moderation (US-01 through US-07). The user additionally requests Google/other login providers, startup connections, Jira-like Kanban, schedule control, subscriptions, and promotions. These extensions do not silently change the existing MVP definition.

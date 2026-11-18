@@ -527,7 +527,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(35);
+    expect(result.rows[0].count).toBe(36);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -7035,5 +7035,116 @@ describe("Community reports and moderation", () => {
     const check = (await owner.query(`SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace
       WHERE n.nspname=$1 AND c.conname='content_reports_reason_allowed'`, [namespace])).rows[0].def as string;
     for (const reason of ["spam", "harassment", "off_topic", "misinformation", "self_promotion", "other"]) expect(check).toContain(`'${reason}'`);
+  });
+});
+
+describe("Community leftovers", () => {
+  it("counts members without deleted users", async () => {
+    const host = await hostWorkspace("Count host");
+    const member = await account("Count member"), gone = await account("Count gone");
+    const community = await communityFixture(host, { name: "Count Open" });
+    await joinCommunity(host, community, member);
+    await joinCommunity(host, community, gone);
+    expect((await bySlug(null, communitySlug(community)))[0]!.member_count).toBe("3");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("users")} SET status='deleted', deleted_at=now() WHERE id=$1`, [gone.id]);
+    expect((await bySlug(null, communitySlug(community)))[0]!.member_count).toBe("2");
+    const found = await discover(null, { query: "Count Open" });
+    expect(cardIds(found)).toEqual([community]);
+    expect(found[0]!.member_count).toBe("2");
+  });
+
+  it("counts weekly activity on live content only", async () => {
+    const host = await hostWorkspace("Weekly host");
+    const author = await account("Weekly author");
+    const community = await communityFixture(host, { name: "Weekly Open" });
+    await joinCommunity(host, community, author);
+    const live = await plantPost(host, community, author.id);
+    const deleted = await plantPost(host, community, author.id, { deleted: true });
+    const moderated = await plantPost(host, community, author.id, { moderation: "hidden" });
+    const legacyHidden = await plantPost(host, community, author.id, { visibility: "hidden" });
+    await plantPost(host, community, author.id, { createdAt: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString() });
+    // Counted: the live post and two comments on it. Not counted: dead comments and comments on dead posts.
+    await plantComment(host, community, live, author.id);
+    await plantComment(host, community, live, author.id);
+    await plantComment(host, community, live, author.id, { deleted: true });
+    await plantComment(host, community, live, author.id, { moderation: "hidden" });
+    for (const post of [deleted, moderated, legacyHidden]) await plantComment(host, community, post, author.id);
+    expect((await bySlug(null, communitySlug(community)))[0]!.weekly_posts).toBe("3");
+  });
+
+  it("lists hidden communities for their host admins", async () => {
+    const host = await hostWorkspace("Hidden host");
+    const admin = await account("Hidden admin"), plain = await account("Hidden plain"), removed = await account("Hidden removed"), outsider = await account("Hidden outsider");
+    await addMember(host.workspace, admin, "admin");
+    await addMember(host.workspace, plain, "member");
+    await addMember(host.workspace, removed, "admin");
+    await leave(host.workspace, removed);
+    const hid = await communityFixture(host, { name: "Hidden Roster", visibility: "hidden" });
+    expect(cardIds(await discover(host.owner.token, { query: "Hidden Roster" }))).toEqual([hid]);
+    expect(cardIds(await discover(admin.token, { query: "Hidden Roster" }))).toEqual([hid]);
+    for (const who of [plain, removed, outsider]) expect(cardIds(await discover(who.token, { query: "Hidden Roster" }))).toEqual([]);
+    expect(cardIds(await discover(null, { query: "Hidden Roster" }))).toEqual([]);
+  });
+
+  it("notifies when adding a member approves their request", async () => {
+    const host = await hostWorkspace("Added host");
+    const requester = await account("Added requester");
+    await addMember(host.workspace, requester, "member");
+    const priv = await communityFixture(host, { name: "Added Private", visibility: "private" });
+    const request = (await requestAccess(requester, priv)).request_id!;
+    expect(await outcome(host.owner, "ws_add_community_member($1,$2)", [priv, requester.id])).toBe("ok");
+    expect((await requestRows(priv))[0]).toMatchObject({ id: request, status: "approved", reviewed_by_user_id: host.owner.id });
+    const inbox = (await listNotices(requester)).filter((row) => row.kind === "community_request_approved");
+    expect(inbox).toMatchObject([{ title: "Your request to join Added Private was approved", resource_type: "community", resource_id: priv }]);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT o.event_type,o.aggregate_id,o.processed_at IS NOT NULL AS processed FROM ${table("notifications")} n JOIN ${table("outbox_events")} o ON o.id=n.outbox_event_id
+      WHERE n.recipient_user_id=$1 AND n.kind='community_request_approved'`, [requester.id])).rows).toEqual([{ event_type: "community_join_request.approved", aggregate_id: request, processed: true }]);
+    // Adding someone without a request creates no notification.
+    const plain = await account("Added plain");
+    await addMember(host.workspace, plain, "member");
+    expect(await outcome(host.owner, "ws_add_community_member($1,$2)", [priv, plain.id])).toBe("ok");
+    expect((await listNotices(plain)).filter((row) => row.kind === "community_request_approved")).toEqual([]);
+  });
+
+  it("approves pending requests when a community becomes public", async () => {
+    const host = await hostWorkspace("Opening host");
+    const fresh = await account("Opening fresh"), returning = await account("Opening returning"), suspended = await account("Opening suspended"), rejected = await account("Opening rejected");
+    const priv = await communityFixture(host, { name: "Opening Private", visibility: "private" });
+    await joinCommunity(host, priv, returning);
+    await joinCommunity(host, priv, suspended);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='left', left_at=now() WHERE community_id=$1 AND user_id=$2`, [priv, returning.id]);
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='suspended' WHERE community_id=$1 AND user_id=$2`, [priv, suspended.id]);
+    for (const who of [fresh, returning, suspended]) {
+      await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id) VALUES ($1,$2,$3)`, [host.workspace, priv, who.id]);
+    }
+    await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id,status,reviewed_by_user_id,reviewed_at) VALUES ($1,$2,$3,'rejected',$4,now())`,
+      [host.workspace, priv, rejected.id, host.owner.id]);
+    // Changing something else keeps the requests pending.
+    expect(await updateCommunity(host.owner, priv, 1, { tagline: "New line" })).toEqual({ outcome: "ok", settings_version: 2 });
+    expect((await requestRows(priv)).filter((row) => row.status === "pending")).toHaveLength(3);
+    expect(await updateCommunity(host.owner, priv, 2, { visibility: "public" })).toEqual({ outcome: "ok", settings_version: 3 });
+    const rows = await requestRows(priv);
+    for (const who of [fresh, returning, suspended]) {
+      expect(rows.find((row) => row.user_id === who.id)).toMatchObject({ status: "approved", reviewed_by_user_id: host.owner.id, reviewed_at: expect.any(Date) });
+    }
+    expect(rows.find((row) => row.user_id === rejected.id)).toMatchObject({ status: "rejected" });
+    const roster = await memberships(priv);
+    expect(roster.find((row) => row.user_id === fresh.id)).toEqual({ user_id: fresh.id, role: "member", status: "active" });
+    expect(roster.find((row) => row.user_id === returning.id)).toEqual({ user_id: returning.id, role: "member", status: "active" });
+    expect(roster.find((row) => row.user_id === suspended.id)).toEqual({ user_id: suspended.id, role: "member", status: "suspended" });
+    expect(roster.map((row) => row.user_id)).not.toContain(rejected.id);
+    for (const who of [fresh, returning, suspended]) {
+      expect((await listNotices(who)).filter((row) => row.kind === "community_request_approved")).toMatchObject([{ title: "Your request to join Opening Private was approved", resource_id: priv }]);
+    }
+    expect((await listNotices(rejected)).filter((row) => row.kind === "community_request_approved")).toEqual([]);
+    // Only private to public approves: a request made while private survives a detour through hidden.
+    expect(await updateCommunity(host.owner, priv, 3, { visibility: "private" })).toMatchObject({ outcome: "ok" });
+    const late = await account("Opening late");
+    expect((await requestAccess(late, priv)).outcome).toBe("requested");
+    expect(await updateCommunity(host.owner, priv, 4, { visibility: "hidden" })).toMatchObject({ outcome: "ok" });
+    expect(await updateCommunity(host.owner, priv, 5, { visibility: "public" })).toMatchObject({ outcome: "ok" });
+    expect((await requestRows(priv)).find((row) => row.user_id === late.id)).toMatchObject({ status: "pending" });
   });
 });
