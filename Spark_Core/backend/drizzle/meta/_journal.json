@@ -253,6 +253,13 @@
       "when": 1792642800000,
       "tag": "0035_community_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792729200000,
+      "tag": "0036_report_fixes",
+      "breakpoints": true
     }
   ]
 }

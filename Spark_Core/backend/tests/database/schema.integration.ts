@@ -527,7 +527,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(36);
+    expect(result.rows[0].count).toBe(37);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -7023,6 +7023,59 @@ describe("Community reports and moderation", () => {
     expect((await asSession(host.owner.token, queueCall, [hid])).rows).toEqual([]);
     await setCommunity(pub, "archived_at=now()");
     await expect(asSession(moderator.token, queueCall, [pub])).rejects.toMatchObject(notFound);
+  });
+
+  it("closes legacy reports and keeps staff and community moderation deadlock-free", async () => {
+    const host = await hostWorkspace("Staff lock host");
+    const moderator = await account("Lock moderator"), author = await account("Lock author"), reporter = await account("Lock reporter"), staff = await account("Lock staff");
+    const other = await account("Lock other reporter");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'content_moderator',$1)`, [staff.id]);
+    const pub = await communityFixture(host, { name: "Staff Lock Circle" });
+    await joinCommunity(host, pub, moderator, "moderator");
+    for (const who of [author, reporter, other]) await joinCommunity(host, pub, who);
+    const staffResolve = (report: string): [string, unknown[]] => [`SELECT ${fn("staff_resolve_report")}($1,'hide','Policy violation') AS outcome`, [report]];
+    const hide = (target: string): [string, unknown[]] => [moderateCall, ["post", target, "hide", "Spam link"]];
+
+    // 0036 normalizes legacy free-text reason codes to 'other' and validates the check, so such rows can be closed.
+    const state = async () => (await owner.query(`SELECT c.convalidated FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace
+      WHERE n.nspname=$1 AND c.conname='content_reports_reason_allowed'`, [namespace])).rows[0].convalidated as boolean;
+    expect(await state()).toBe(true);
+    // A pre-0034 row cannot be inserted now, so the check is dropped, a legacy row planted, the migration's
+    // backfill statement run and the check restored (validated).
+    const legacyPost = await plantPost(host, pub, author.id);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`ALTER TABLE ${table("content_reports")} DROP CONSTRAINT content_reports_reason_allowed`);
+    let legacy: string;
+    try {
+      legacy = (await owner.query(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,reason_code)
+        VALUES ($1,$2,$3,$4,'Potential spam / solicitation') RETURNING id`, [host.workspace, pub, reporter.id, legacyPost])).rows[0].id;
+      await owner.query(`UPDATE ${table("content_reports")} SET reason_code='other'
+        WHERE reason_code NOT IN ('spam','harassment','off_topic','misinformation','self_promotion','other')`);
+    } finally {
+      await owner.query(`ALTER TABLE ${table("content_reports")} ADD CONSTRAINT content_reports_reason_allowed
+        CHECK (reason_code IN ('spam','harassment','off_topic','misinformation','self_promotion','other'))`);
+    }
+    expect(await state()).toBe(true);
+    expect((await reportsOn(legacyPost))[0]).toMatchObject({ id: legacy, reason_code: "other" });
+    expect((await asSession(staff.token, ...staffResolve(legacy))).rows[0].outcome).toBe("ok");
+    expect((await reportsOn(legacyPost))[0]).toMatchObject({ status: "resolved" });
+
+    // Moderator first, staff second: staff waits on the post, then finds the report closed.
+    const first = await plantPost(host, pub, author.id);
+    const firstReport = (await reportContent(reporter, "post", first)).report_id!;
+    const a = await contendBoth([moderator, staff], hide(first), staffResolve(firstReport));
+    expect(a.blocked).toBe(true);
+    expect(a.winner.outcome).toBe("ok");
+    expect(a.loser.outcome).toBe("already_closed");
+    // Staff first, moderator second: the moderator waits, then has nothing left to change.
+    const second = await plantPost(host, pub, author.id);
+    const secondReport = (await reportContent(other, "post", second)).report_id!;
+    const b = await contendBoth([staff, moderator], staffResolve(secondReport), hide(second));
+    expect(b.blocked).toBe(true);
+    expect(b.winner.outcome).toBe("ok");
+    expect(b.loser).toEqual({ outcome: "unchanged", moderation_status: "hidden", reports_closed: 0 });
+    for (const target of [first, second]) expect(await postRow(target)).toMatchObject({ moderation_status: "hidden", version: 2 });
   });
 
   it("keeps the report and moderation functions definers with an empty search_path", async () => {
