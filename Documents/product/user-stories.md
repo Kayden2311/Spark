@@ -184,7 +184,7 @@ Communities rules (product decisions of 2026-11-04, implemented in Phase 2 C1, m
 
 - **Actor**: Community Member
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented in Phase 2 C2 (`GET /api/v1/communities/{communityId}/posts?cursor&limit`, `GET /api/v1/posts/{postId}`, `GET /api/v1/posts/{postId}/comments?cursor&limit`; migrations `0032` and `0035`; screens `/communities/[slug]` (the Discussions feed) and `/communities/[slug]/posts/[postId]`). Posts come newest first and comments oldest first, 1-50 per page (default 20) with opaque cursors (`400 invalid_cursor`); the feed shows a 400-character excerpt with "Read more". Public communities are readable signed out (a call of the C2 design); a private community answers `401` without a session and `403 members_only` to a non-member, a hidden or unknown community `404 community_not_found`, and an unreadable or deleted post or comment the same `404 post_not_found` / `comment_not_found` as an unknown id. Posts hidden by moderation show only to community owners and moderators, labelled "Hidden". Responses are `Cache-Control: no-store` (`private, no-store` with a session).
 - **Story**: As a Community Member, I want to read my community's posts so that I stay informed.
 - **Acceptance criteria**:
   - Given I am a member, then the feed lists posts newest first with cursor pagination.
@@ -195,7 +195,7 @@ Communities rules (product decisions of 2026-11-04, implemented in Phase 2 C1, m
 
 - **Actor**: Community Member
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented in Phase 2 C2 (`POST /api/v1/communities/{communityId}/posts` with an optional `Idempotency-Key`: `201` with `Location` and `ETag`, a replay adds `Idempotent-Replayed: true`, another body under the same key is `409 idempotency_key_reused`; title 1-150 and body 1-10,000 characters, trimmed, plain text; 10 posts per 10 minutes; migration `0033`; the composer on `/communities/[slug]`). Refusals: `403 not_a_member`, `409 community_frozen` (a frozen or archived community takes no posts; the page shows "This community is paused by Spark moderators" instead of the composer). A double click on Post sends one key, so one post appears.
 - **Story**: As a Community Member, I want to publish a post so that I can share updates or ask for help.
 - **Acceptance criteria**:
   - Given valid title and body, when I submit, then the post appears in the feed.
@@ -206,7 +206,7 @@ Communities rules (product decisions of 2026-11-04, implemented in Phase 2 C1, m
 
 - **Actor**: Community Member
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented in Phase 2 C2 (`POST /api/v1/posts/{postId}/comments`, same `Idempotency-Key`, `Location`, `ETag` and replay rules as posts, body 1-2,000 characters, 30 comments per 10 minutes; migration `0033`; the comment thread on `/communities/[slug]/posts/[postId]`). Refusals: `403 not_a_member`, `409 community_frozen`, `409 content_hidden` (the post is hidden by moderation), `404 post_not_found`. Comments are flat. A comment by someone other than the post author gives the author an in-app `post_commented` notification ("<name> commented on your post in <community>", no text from the post or comment; "New comment" in `/notifications`) that opens the post while the recipient can still read it.
 - **Story**: As a Community Member, I want to comment on a post so that I can join the discussion.
 - **Acceptance criteria**:
   - Given I can view the post, when I comment, then the comment appears in order under the post.
@@ -217,7 +217,7 @@ Communities rules (product decisions of 2026-11-04, implemented in Phase 2 C1, m
 
 - **Actor**: Community Member
 - **Priority**: Could
-- **Status**: Planned
+- **Status**: Implemented in Phase 2 C2 (`PATCH /api/v1/posts/{postId}` and `PATCH /api/v1/comments/{commentId}` with `If-Match` (`428` without it, `400 invalid_if_match` when malformed, `412 version_mismatch` with `current` when stale); `DELETE /api/v1/posts/{postId}` and `DELETE /api/v1/comments/{commentId}` answer `204`; 30 a minute; migration `0033`; the "More actions" menu on post cards, the post page and each comment). Only the author edits, and only while still an active member, the community is not frozen and moderators have not hidden the item (`403 not_author`, `403 not_a_member`, `409 community_frozen`, `409 content_hidden`); an edited item shows "Edited". The author deletes at any time, including after leaving or while the community is frozen. Delete is a soft delete: the item leaves lists and detail (deleting a post removes its comments from view with it), while reports and moderation records stay. Moderators cannot edit other people's content.
 - **Story**: As an author, I want to edit or delete my post or comment so that I can correct mistakes.
 - **Acceptance criteria**:
   - Given I am the author, then I can edit or delete within policy; others cannot.
@@ -501,7 +501,7 @@ Communities rules (product decisions of 2026-11-04, implemented in Phase 2 C1, m
 
 - **Actor**: Reporter
 - **Priority**: Must
-- **Status**: Planned
+- **Status**: Implemented in Phase 2 C2 (`POST /api/v1/posts/{postId}/reports` and `POST /api/v1/comments/{commentId}/reports` with `reason` (`spam`, `harassment`, `off_topic`, `misinformation`, `self_promotion` or `other`) and optional `details` of up to 1,000 characters; `201 {"report": {"id", "status": "open"}}` for a new report, `200` with the same shape when the caller already has an open one; 20 per 10 minutes; migration `0034`; the "Report" item in the content menu with a reason dialog). Any signed-in user who can read the target and is not its author may report, including non-members of a public community and while the community is frozen; reporting your own content is `409 own_content`; an unreadable target is `404`. No `Idempotency-Key`: the open-report uniqueness makes a repeat return the existing report. No response carries the reporter: there is no endpoint to read a report back, the community queue shows none, and the reporter only sees "You reported this". Reports also reach the platform staff queue (`/admin/reports`).
 - **Story**: As a Reporter, I want to report a post or comment so that moderators can review it.
 - **Acceptance criteria**:
   - Given I can view the content, when I submit a reason, then a report is created.
@@ -512,7 +512,7 @@ Communities rules (product decisions of 2026-11-04, implemented in Phase 2 C1, m
 
 - **Actor**: Content Moderator
 - **Priority**: Must
-- **Status**: Implemented: `/admin/reports` and `/api/v1/admin/reports` (`0009_platform_governance`). Authorized scope is platform-wide, because platform roles are global; per-community moderator scopes are not modelled yet.
+- **Status**: Implemented: `/admin/reports` and `/api/v1/admin/reports` (`0009_platform_governance`). Authorized scope is platform-wide, because platform roles are global. Community-scoped moderation is implemented in Phase 2 C2 (migration `0034`): active owners and moderators of a community (host workspace owners and admins get no content rights from that role) read `GET /api/v1/communities/{communityId}/reports` (one entry per reported post or comment with its open-report count, reasons, up to three latest details and no reporter; `403 insufficient_role` for others) on the Reports tab of `/communities/[slug]/manage`, and act with `POST /api/v1/posts/{postId}/moderation` or `POST /api/v1/comments/{commentId}/moderation` (`action` `hide`, `dismiss` or `restore`, plus a `reason` of 3 to 500 characters; `200 {moderation, reportsClosed, changed}`, 30 a minute, allowed while the community is frozen). Hide closes the item's open reports as resolved, dismiss ("Keep") closes them as dismissed and leaves the item visible, restore makes hidden content visible again without closing reports. Moderators also hide or restore from the feed and the post page.
 - **Story**: As a Content Moderator, I want to see and resolve reports within my authorized scope so that harmful content is handled.
 - **Acceptance criteria**:
   - Given reports outside my scope, then they are not listed and cannot be fetched by id.
@@ -523,7 +523,7 @@ Communities rules (product decisions of 2026-11-04, implemented in Phase 2 C1, m
 
 - **Actor**: Content Moderator, Community Moderator, Campaign Moderator, Platform Admin
 - **Priority**: Must
-- **Status**: Implemented for platform staff actions: every action in `/admin` writes one row to the append-only `spark.platform_audit_events` in the same transaction, shown in `/admin/audit`. Community-owner moderation does not exist yet.
+- **Status**: Implemented for platform staff actions: every action in `/admin` writes one row to the append-only `spark.platform_audit_events` in the same transaction, shown in `/admin/audit`. Community moderation (Phase 2 C2) writes one row per affected report, or one without a report, to the append-only `spark.moderation_actions` (actor, target, action, reason, time) in the same transaction as the change; staff and community moderators set the same `moderation_status`, so `moderation_actions` (and, for staff, `platform_audit_events`) say who did it.
 - **Story**: As a moderator, I want every action recorded so that decisions are accountable.
 - **Acceptance criteria**:
   - Each moderation action stores actor, target, reason, and timestamp in the same transaction as the action.

@@ -62,14 +62,14 @@ Role hierarchy notes: a Community Member and a Workspace Member are Users with e
 | UC-08 | Create workspace | User | US-E1 | Mockup |
 | UC-09 | Decide membership request | Community Owner | US-C2 | Implemented (`POST /api/v1/community-requests/{requestId}/decision`, `/communities/[slug]/manage`) |
 | UC-10 | Accept workspace invitation | User | US-E3 | Planned |
-| UC-11 | Read community feed | Community Member | US-D1 | Planned |
-| UC-12 | Publish post | Community Member | US-D2, US-D4 | Planned |
-| UC-13 | Comment on post | Community Member | US-D3 | Planned |
+| UC-11 | Read community feed | Community Member | US-D1 | Implemented (`GET /api/v1/communities/{communityId}/posts`, `GET /api/v1/posts/{postId}`, `/communities/[slug]`, `/communities/[slug]/posts/[postId]`) |
+| UC-12 | Publish post | Community Member | US-D2, US-D4 | Implemented (`POST /api/v1/communities/{communityId}/posts`, `PATCH`/`DELETE /api/v1/posts/{postId}`, `/communities/[slug]`) |
+| UC-13 | Comment on post | Community Member | US-D3 | Implemented (`POST /api/v1/posts/{postId}/comments`, `/communities/[slug]/posts/[postId]`; in-app `post_commented` notification) |
 | UC-14 | Invite workspace member | Workspace Owner | US-E2 | Planned |
 | UC-15 | Manage tasks | Workspace Member | US-E4, US-E5 | Mockup |
 | UC-16 | Read and clear notifications | User | US-F1, US-F2 | Mockup |
-| UC-17 | Report content | Reporter | US-G1 | Planned |
-| UC-18 | Resolve report | Content Moderator | US-G2, US-G3 | Implemented (`/admin/reports`) |
+| UC-17 | Report content | Reporter | US-G1 | Implemented (`POST /api/v1/posts/{postId}/reports`, `POST /api/v1/comments/{commentId}/reports`) |
+| UC-18 | Resolve report | Content Moderator | US-G2, US-G3 | Implemented (`/admin/reports`; community owners and moderators also resolve their community's reports at `/communities/[slug]/manage`, Reports tab) |
 | UC-19 | Moderate community | Community Moderator | US-H1, US-G3 | Implemented (`/admin/communities`) |
 | UC-20 | Review sponsored campaign | Campaign Moderator | US-H2, US-G3 | Implemented (`/admin/campaigns`) |
 | UC-21 | Manage user status | Platform Admin | US-H3, US-G3 | Implemented (`/admin/users`) |
@@ -244,6 +244,7 @@ Common rule for every authenticated use case: the session is validated first; au
 - **Failure flows**:
   - F1: Not authorized. `403` or `404` consistent with the visibility rule.
 - **Business rules**: List and detail endpoints share one visibility rule. Cache entries, if any, are keyed by tenant and visibility scope.
+- **Implementation notes**: Public communities are readable signed out; a private community's feed answers `401` without a session and `403 members_only` to a non-member, so F1 is `401`/`403` there and `404 community_not_found` for a hidden or unknown community. A post or comment the viewer cannot read (deleted, hidden by moderation for non-moderators, in an unreadable community) is the same `404 post_not_found` / `comment_not_found` as an unknown id. The feed (`GET /api/v1/communities/{communityId}/posts`) is newest first with 400-character excerpts; the post page loads `GET /api/v1/posts/{postId}` and its comments (`GET /api/v1/posts/{postId}/comments`, oldest first), 1-50 per page (default 20) with opaque cursors. Nothing is cached (`Cache-Control: no-store`, `private, no-store` with a session), so there are no cache entries to key. The page itself answers a real HTTP 404 for an unreadable post, a post of another community and a malformed id, because the server resolves it before rendering. The reads are `SECURITY DEFINER` functions of migration `0032` that work with or without a session.
 
 ### UC-12: Publish post
 
@@ -261,6 +262,7 @@ Common rule for every authenticated use case: the session is validated first; au
   - F1: Validation error. Nothing is stored.
   - F2: Frozen community. The system rejects the post with a clear reason.
 - **Postconditions**: One post per idempotency key.
+- **Implementation notes**: The key is the optional `Idempotency-Key` header, scoped to the actor and kept 24 hours; a replay answers `201` with the same post and `Idempotent-Replayed: true`, and the same key with another body is `409 idempotency_key_reused`. Limits: title 1-150 and body 1-10,000 characters after trimming, plain text (never rendered as HTML); 10 posts per 10 minutes. F2 is `409 community_frozen` (frozen or archived), a non-member gets `403 not_a_member`. A1 edits use `PATCH /api/v1/posts/{postId}` with `If-Match` (`428`, `400 invalid_if_match`, `412 version_mismatch` with `current`); only the author edits, and not once moderators hid the post (`409 content_hidden`) or while the community is frozen; the author deletes (`DELETE`, `204`, soft delete) at any time, and the post and its comments leave every list while reports and moderation records stay. Migration `0033`.
 
 ### UC-13: Comment on post
 
@@ -274,6 +276,7 @@ Common rule for every authenticated use case: the session is validated first; au
 - **Failure flows**:
   - F1: Membership lost or post removed. The system rejects with `403` or `404`.
 - **Postconditions**: One comment per idempotency key.
+- **Implementation notes**: Same `Idempotency-Key` rules as UC-12; body 1-2,000 characters after trimming, 30 comments per 10 minutes, comments are flat. F1 is `403 not_a_member`, `404 post_not_found`, `409 community_frozen`, or `409 content_hidden` when moderators hid the post. In the same transaction the database writes an outbox row (processed at once) and, unless the commenter is the post author or the author is gone, one in-app `post_commented` notification ("<name> commented on your post in <community>", no post or comment text, no email); step 3's UC-23 event is that outbox row. The notification links to the post only while the recipient can still read it. Authors edit (`PATCH /api/v1/comments/{commentId}` with `If-Match`) and delete (`DELETE`, `204`) their comments under the rules of UC-12.
 
 ## Workspaces and tasks
 
@@ -386,6 +389,7 @@ Common rule for every authenticated use case: the session is validated first; au
   - F1: Duplicate report. The system returns the existing report.
   - F2: Target not visible. `404`.
 - **Business rules**: Reporter identity is visible only to authorized moderators.
+- **Implementation notes**: `reason` is `spam`, `harassment`, `off_topic`, `misinformation`, `self_promotion` or `other`; `details` is optional, up to 1,000 characters. A new report is `201` and a repeat by the same reporter on the same open target is `200` with the same `{"report": {"id", "status": "open"}}` body (no `Idempotency-Key` is needed: one open report per reporter and target). Reporting needs a session and read access, not membership (a non-member of a public community may report); reporting your own content is `409 own_content`; frozen communities can still be reported. Limit: 20 reports per 10 minutes. No endpoint returns a reporter, so community owners and moderators never see who reported; only platform report staff do (UC-18). Migration `0034`.
 
 ### UC-18: Resolve report
 
@@ -401,7 +405,7 @@ Common rule for every authenticated use case: the session is validated first; au
   - F1: Report outside scope. `404`.
   - F2: Already resolved. Conflict.
 - **Postconditions**: A moderation record exists for every action.
-- **Implementation notes**: Platform roles are global, so a content moderator's scope is every community and F1 does not occur yet. Each resolution also writes a `spark.platform_audit_events` row. Step 4 (UC-23 event) is not built because notifications do not exist yet.
+- **Implementation notes**: Platform roles are global, so a content moderator's scope is every community and F1 does not occur yet. Each resolution also writes a `spark.platform_audit_events` row. Step 4 (UC-23 event) is not built because notifications do not exist yet. Community-scoped resolution (Phase 2 C2, migration `0034`): active community owners and moderators list their community's open reports (`GET /api/v1/communities/{communityId}/reports`, one entry per reported post or comment, no reporter) on the Reports tab and decide with `POST /api/v1/posts/{postId}/moderation` or `POST /api/v1/comments/{commentId}/moderation` (`hide`, `dismiss` or `restore` with a reason of 3 to 500 characters); each affected report gets one `spark.moderation_actions` row in the same transaction, and a decision works while the community is frozen. Others get `403 insufficient_role`.
 
 ### UC-19: Moderate community
 
@@ -468,8 +472,8 @@ Common rule for every authenticated use case: the session is validated first; au
 | --- | --- |
 | Opaque session validated before authorization | All authenticated use cases |
 | Per-resource authorization in the application layer, tenant filtering in database access | UC-07 to UC-22 |
-| Idempotency keys on mutations that retries can duplicate | UC-07, UC-12, UC-13, UC-17 |
-| Version or conditional update for concurrent edits | UC-15 |
+| Idempotency keys on mutations that retries can duplicate (UC-17 needs none: one open report per reporter and target) | UC-07, UC-12, UC-13, UC-17 |
+| Version or conditional update for concurrent edits | UC-12, UC-13, UC-15 |
 | Transaction wraps state change, moderation record, and outbox event | UC-07, UC-09, UC-10, UC-18 to UC-22 |
 | Route-specific rate limits with `429` and `Retry-After` | UC-03, UC-04, UC-05, UC-07 |
 | Hidden resources return `404` indistinguishable from missing | UC-02, UC-11, UC-17 |
