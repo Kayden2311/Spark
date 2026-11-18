@@ -20,7 +20,10 @@ interface ContentMenuProps {
 interface Item {
   label: string;
   run: () => void;
+  disabled?: boolean;
 }
+
+export const REPORTED_LABEL = "You reported this";
 
 /** The "More actions" menu of a post or comment; what it offers follows the viewer flags the API sent. */
 export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onModerate }: ContentMenuProps) {
@@ -34,6 +37,7 @@ export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onMode
   if (viewer.canEdit && onEdit) items.push({ label: "Edit", run: onEdit });
   if (viewer.canDelete && onDelete) items.push({ label: "Delete", run: onDelete });
   if (viewer.canReport && !viewer.reported && onReport) items.push({ label: "Report", run: onReport });
+  if (viewer.reported && onReport) items.push({ label: REPORTED_LABEL, run: () => undefined, disabled: true });
   if (viewer.canModerate && onModerate) {
     const action: ModerateAction = hidden ? "restore" : "hide";
     items.push({ label: hidden ? "Restore" : "Hide", run: () => onModerate(action) });
@@ -102,9 +106,11 @@ export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onMode
         <div className="circleMenuList" id={menuId} onKeyDown={onListKey} ref={list} role="menu">
           {items.map((item) => (
             <button
-              className={`circleMenuItem${item.label === "Delete" ? " circleMenuItemDanger" : ""}`}
+              className={`circleMenuItem${item.label === "Delete" ? " circleMenuItemDanger" : ""}${item.disabled ? " circleMenuItemDisabled" : ""}`}
               key={item.label}
+              aria-disabled={item.disabled || undefined}
               onClick={() => {
+                if (item.disabled) return;
                 if (item.label !== "Edit") rememberFocus(trigger.current);
                 setOpen(false);
                 item.run();

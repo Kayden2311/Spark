@@ -8,10 +8,13 @@ import { SignalParticles } from "../../../../signal-particles";
 import { Byline } from "../../../_components/byline";
 import { ConfirmDialog } from "../../../_components/confirm-dialog";
 import { ContentMenu, type ModerateAction } from "../../../_components/content-menu";
+import { ModerationDialog } from "../../../_components/moderation-dialog";
+import { ReportDialog } from "../../../_components/report-dialog";
 import { TextField } from "../../../_components/text-field";
 import { SiteFooter, SiteHeader } from "../../../site-chrome";
 import { ApiError, loginPath, messageOf } from "../../../_lib/api";
 import {
+  asReported,
   CHANGED_ELSEWHERE,
   GONE_MESSAGE,
   contentApi,
@@ -19,15 +22,12 @@ import {
   currentOf,
   POST_BODY_MAX,
   POST_TITLE_MAX,
-  type CommentItem,
   type PostDetail,
 } from "../../../_lib/content-api";
 import { setFlash } from "../../../_lib/flash";
 import { useCommunity } from "../../../_lib/use-communities";
 import { MEMBERS_ONLY_MESSAGE } from "../../feed";
 import { Comments } from "./comments";
-
-export type ReportTarget = { kind: "post"; post: PostDetail } | { kind: "comment"; comment: CommentItem };
 
 interface PostViewProps {
   slug: string;
@@ -36,9 +36,6 @@ interface PostViewProps {
   initial?: PostDetail | null;
   /** Open the editor straight away (the feed's Edit item sends people here with ?edit=1). */
   startEditing?: boolean;
-  /** Hooks for the report and moderation dialogs. */
-  onReport?: (target: ReportTarget) => void;
-  onModerate?: (target: ReportTarget, action: ModerateAction) => void;
 }
 
 interface LoadError {
@@ -46,7 +43,7 @@ interface LoadError {
   message: string;
 }
 
-export function PostView({ slug, postId, initial = null, startEditing = false, onReport, onModerate }: PostViewProps) {
+export function PostView({ slug, postId, initial = null, startEditing = false }: PostViewProps) {
   const { isAuthenticated } = useAuth();
   const router = useRouter();
   const { community, status: communityStatus } = useCommunity(slug);
@@ -56,6 +53,8 @@ export function PostView({ slug, postId, initial = null, startEditing = false, o
   const [editing, setEditing] = useState(startEditing);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [moderating, setModerating] = useState<ModerateAction | null>(null);
 
   useEffect(() => {
     if (initial && attempt === 0) return;
@@ -124,8 +123,8 @@ export function PostView({ slug, postId, initial = null, startEditing = false, o
                   setNotice(null);
                   setEditing(true);
                 }}
-                onModerate={onModerate && ((action) => onModerate({ kind: "post", post }, action))}
-                onReport={onReport && (() => onReport({ kind: "post", post }))}
+                onModerate={setModerating}
+                onReport={() => setReporting(true)}
                 viewer={post.viewer}
               />
             )}
@@ -162,13 +161,31 @@ export function PostView({ slug, postId, initial = null, startEditing = false, o
           community={community}
           count={post.commentCount}
           onCountChange={(delta) => setPost((current) => (current ? { ...current, commentCount: Math.max(0, current.commentCount + delta) } : current))}
-          onModerate={onModerate && ((comment, action) => onModerate({ kind: "comment", comment }, action))}
-          onReport={onReport && ((comment) => onReport({ kind: "comment", comment }))}
           postHidden={hidden}
           postId={post.id}
           returnTo={`${base}/posts/${encodeURIComponent(post.id)}`}
           signedIn={isAuthenticated}
         />
+
+        {reporting && (
+          <ReportDialog
+            fallbackFocus={() => document.getElementById("comments-title")}
+            id={post.id}
+            kind="post"
+            onClose={() => setReporting(false)}
+            onReported={() => setPost((current) => (current ? asReported(current) : current))}
+          />
+        )}
+        {moderating && (
+          <ModerationDialog
+            action={moderating}
+            fallbackFocus={() => document.getElementById("comments-title")}
+            id={post.id}
+            kind="post"
+            onClose={() => setModerating(null)}
+            onDone={(result) => setPost((current) => (current ? { ...current, moderation: result.moderation } : current))}
+          />
+        )}
 
         {confirmingDelete && (
           <ConfirmDialog

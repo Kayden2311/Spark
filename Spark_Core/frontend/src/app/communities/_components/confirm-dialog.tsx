@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { contentErrorMessage } from "../_lib/content-api";
-import { takeFocusTarget } from "../_lib/focus-return";
+import { trapDialogKeys, useDialogFocus } from "./dialog-shell";
 
 interface ConfirmDialogProps {
   /** The question, for example "Delete this post? This can't be undone." */
@@ -22,37 +22,7 @@ export function ConfirmDialog({ message, confirmLabel, onConfirm, onClose, fallb
   const cancel = useRef<HTMLButtonElement>(null);
   const messageId = useId();
 
-  useEffect(() => {
-    const opener = takeFocusTarget() ?? (document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null);
-    cancel.current?.focus();
-    return () => {
-      const back = opener?.isConnected ? opener : fallbackFocus?.();
-      back?.focus();
-    };
-    // Mount only: the opener is whatever had focus when the dialog appeared.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Tab cycles inside the dialog instead of reaching the page behind it.
-  const trap = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape" && !busy) {
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not([disabled])"));
-    if (controls.length === 0) return;
-    const first = controls[0]!;
-    const last = controls[controls.length - 1]!;
-    const active = document.activeElement;
-    if (event.shiftKey && (active === first || !controls.includes(active as HTMLElement))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (active === last || !controls.includes(active as HTMLElement))) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
+  useDialogFocus(cancel, fallbackFocus);
 
   const confirm = async () => {
     if (busy) return;
@@ -67,7 +37,7 @@ export function ConfirmDialog({ message, confirmLabel, onConfirm, onClose, fallb
   };
 
   return (
-    <div className="circleDialogBackdrop" onKeyDown={trap}>
+    <div className="circleDialogBackdrop" onKeyDown={(event) => trapDialogKeys(event, busy, onClose)}>
       <div aria-describedby={messageId} aria-modal="true" className="circleDialog" role="dialog" aria-label={confirmLabel}>
         <p className="circleDialogMessage" id={messageId}>
           {message}

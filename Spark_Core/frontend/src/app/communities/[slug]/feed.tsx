@@ -6,8 +6,10 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../auth-context";
 import { ConfirmDialog } from "../_components/confirm-dialog";
 import type { ModerateAction } from "../_components/content-menu";
+import { ModerationDialog } from "../_components/moderation-dialog";
+import { ReportDialog } from "../_components/report-dialog";
 import { ApiError, loginPath, messageOf, PAUSED_MESSAGE } from "../_lib/api";
-import { appendUnique, contentApi, GONE_MESSAGE, summaryOf, type PostDetail, type PostSummary } from "../_lib/content-api";
+import { appendUnique, asReported, contentApi, GONE_MESSAGE, summaryOf, type PostDetail, type PostSummary } from "../_lib/content-api";
 import type { CommunityDetail } from "../types";
 import { Composer } from "./composer";
 import { PostCard } from "./post-card";
@@ -17,9 +19,6 @@ const MEMBER_STATUSES = new Set(["owner", "moderator", "member"]);
 interface FeedProps {
   community: CommunityDetail;
   notify: (text: string) => void;
-  /** Hooks for the report and moderation dialogs. */
-  onReport?: (post: PostSummary) => void;
-  onModerate?: (post: PostSummary, action: ModerateAction) => void;
 }
 
 interface Settled {
@@ -33,7 +32,7 @@ interface Settled {
 export const MEMBERS_ONLY_MESSAGE = "Members only — request access to read the discussions";
 
 /** The Discussions section: composer or the reason there is none, then the posts. */
-export function Feed({ community, notify, onReport, onModerate }: FeedProps) {
+export function Feed({ community, notify }: FeedProps) {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const base = `/communities/${encodeURIComponent(community.slug)}`;
@@ -46,6 +45,8 @@ export function Feed({ community, notify, onReport, onModerate }: FeedProps) {
   const [settled, setSettled] = useState<Settled>({ key: "", items: [], nextCursor: null, error: null });
   const [more, setMore] = useState<{ key: string; loading: boolean; error: string | null }>({ key: "", loading: false, error: null });
   const [deleting, setDeleting] = useState<PostSummary | null>(null);
+  const [reporting, setReporting] = useState<PostSummary | null>(null);
+  const [moderating, setModerating] = useState<{ post: PostSummary; action: ModerateAction } | null>(null);
 
   useEffect(() => {
     if (!readable) return;
@@ -83,6 +84,9 @@ export function Feed({ community, notify, onReport, onModerate }: FeedProps) {
 
   const remove = (id: string) =>
     setSettled((previous) => (previous.key === key ? { ...previous, items: previous.items.filter((item) => item.id !== id) } : previous));
+
+  const patch = (id: string, change: (post: PostSummary) => PostSummary) =>
+    setSettled((previous) => (previous.key === key ? { ...previous, items: previous.items.map((item) => (item.id === id ? change(item) : item)) } : previous));
 
   let compose: React.ReactNode = null;
   if (community.frozen) {
@@ -132,8 +136,8 @@ export function Feed({ community, notify, onReport, onModerate }: FeedProps) {
               key={post.id}
               onDelete={setDeleting}
               onEdit={(target) => router.push(`${base}/posts/${encodeURIComponent(target.id)}?edit=1`)}
-              onModerate={onModerate}
-              onReport={onReport}
+              onModerate={(target, action) => setModerating({ post: target, action })}
+              onReport={setReporting}
               post={post}
               slug={community.slug}
             />
@@ -165,6 +169,25 @@ export function Feed({ community, notify, onReport, onModerate }: FeedProps) {
       </div>
       {compose}
       {list}
+      {reporting && (
+        <ReportDialog
+          fallbackFocus={() => document.getElementById("discussions-title")}
+          id={reporting.id}
+          kind="post"
+          onClose={() => setReporting(null)}
+          onReported={() => patch(reporting.id, asReported)}
+        />
+      )}
+      {moderating && (
+        <ModerationDialog
+          action={moderating.action}
+          fallbackFocus={() => document.getElementById("discussions-title")}
+          id={moderating.post.id}
+          kind="post"
+          onClose={() => setModerating(null)}
+          onDone={(result) => patch(moderating.post.id, (item) => ({ ...item, moderation: result.moderation }))}
+        />
+      )}
       {deleting && (
         <ConfirmDialog
           confirmLabel="Delete post"

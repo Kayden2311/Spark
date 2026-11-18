@@ -5,10 +5,13 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Byline } from "../../../_components/byline";
 import { ConfirmDialog } from "../../../_components/confirm-dialog";
 import { ContentMenu, type ModerateAction } from "../../../_components/content-menu";
+import { ModerationDialog } from "../../../_components/moderation-dialog";
+import { ReportDialog } from "../../../_components/report-dialog";
 import { TextField } from "../../../_components/text-field";
 import { ApiError, loginPath, messageOf, PAUSED_MESSAGE } from "../../../_lib/api";
 import {
   appendUnique,
+  asReported,
   CHANGED_ELSEWHERE,
   COMMENT_BODY_MAX,
   contentApi,
@@ -34,8 +37,6 @@ interface CommentsProps {
   returnTo: string;
   count: number;
   onCountChange: (delta: number) => void;
-  onReport?: (comment: CommentItem) => void;
-  onModerate?: (comment: CommentItem, action: ModerateAction) => void;
 }
 
 interface Settled {
@@ -46,7 +47,7 @@ interface Settled {
 }
 
 /** The comment thread of a post: oldest first, "Show more", the composer and the per-comment menu. */
-export function Comments({ postId, community, signedIn, postHidden, returnTo, count, onCountChange, onReport, onModerate }: CommentsProps) {
+export function Comments({ postId, community, signedIn, postHidden, returnTo, count, onCountChange }: CommentsProps) {
   const [attempt, setAttempt] = useState(0);
   const key = `${attempt}:${postId}`;
   const [settled, setSettled] = useState<Settled>({ key: "", items: [], nextCursor: null, error: null });
@@ -148,8 +149,6 @@ export function Comments({ postId, community, signedIn, postHidden, returnTo, co
               onCountChange(-1);
             }}
             onGone={() => setGone(true)}
-            onModerate={onModerate}
-            onReport={onReport}
           />
         ))}
       </ul>
@@ -240,17 +239,17 @@ interface RowProps {
   onDeleted: () => void;
   /** The comment was already gone when the delete ran. */
   onGone: () => void;
-  onReport?: (comment: CommentItem) => void;
-  onModerate?: (comment: CommentItem, action: ModerateAction) => void;
 }
 
-function CommentRow({ comment, onChanged, onDeleted, onGone, onReport, onModerate }: RowProps) {
+function CommentRow({ comment, onChanged, onDeleted, onGone }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [moderating, setModerating] = useState<ModerateAction | null>(null);
   const hidden = comment.moderation === "hidden";
   const changed = draft.trim().length > 0 && draft !== comment.body;
 
@@ -290,8 +289,8 @@ function CommentRow({ comment, onChanged, onDeleted, onGone, onReport, onModerat
               setNotice(null);
               setEditing(true);
             }}
-            onModerate={onModerate && ((action) => onModerate(comment, action))}
-            onReport={onReport && (() => onReport(comment))}
+            onModerate={setModerating}
+            onReport={() => setReporting(true)}
             viewer={comment.viewer}
           />
         )}
@@ -320,6 +319,25 @@ function CommentRow({ comment, onChanged, onDeleted, onGone, onReport, onModerat
         <p className="circleNotice circleFormError" role="status">
           {notice}
         </p>
+      )}
+      {reporting && (
+        <ReportDialog
+          fallbackFocus={() => document.getElementById("comments-title")}
+          id={comment.id}
+          kind="comment"
+          onClose={() => setReporting(false)}
+          onReported={() => onChanged(asReported(comment))}
+        />
+      )}
+      {moderating && (
+        <ModerationDialog
+          action={moderating}
+          fallbackFocus={() => document.getElementById("comments-title")}
+          id={comment.id}
+          kind="comment"
+          onClose={() => setModerating(null)}
+          onDone={(result) => onChanged({ ...comment, moderation: result.moderation })}
+        />
       )}
       {confirming && (
         <ConfirmDialog

@@ -205,7 +205,7 @@ describe("post page", () => {
 
     it("returns focus on Escape, then moves it to the comments heading after a delete that answers 404", async () => {
       serve({
-        post: postDetail({ commentCount: 1 }),
+        post: postDetail({ commentCount: 1, viewer: { canReport: false } }),
         pages: () => ({ items: [comment({ id: "m1", body: "Mine", viewer: MINE })], nextCursor: null }),
         extra: (url, init) => (url.pathname === "/api/v1/comments/m1" && init.method === "DELETE" ? json({ code: "comment_not_found", detail: "Comment not found." }, 404) : undefined),
       });
@@ -310,6 +310,7 @@ describe("post page", () => {
 
     it("reloads a comment that changed elsewhere on 412", async () => {
       serve({
+        post: postDetail({ viewer: { canReport: false } }),
         pages: () => ({ items: [comment({ id: "m1", body: "Mine", version: 1, viewer: MINE })], nextCursor: null }),
         extra: (url, init) =>
           url.pathname === "/api/v1/comments/m1" && init.method === "PATCH"

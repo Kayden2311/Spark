@@ -1600,11 +1600,28 @@ a.wsTimelineUnphased:focus-visible { outline: none; box-shadow: var(--sp-ring); 
 .notificationKind[data-kind="community_request_approved"] { border-color: transparent; color: var(--sp-done); background: var(--sp-done-soft); }
 .notificationKind[data-kind="community_request_rejected"] { color: var(--sp-muted); }
 
+/* Community manage page: the Reports tab. */
+.spReportList { margin: 0; padding: 0; list-style: none; }
+.spReport { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 12px 16px; }
+.spReport + .spReport { border-top: 1px solid var(--sp-line-soft); }
+.spReportBody { display: grid; gap: 6px; min-width: 0; }
+.spReportWho { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; }
+.spReportWho strong { color: var(--sp-ink); font-size: var(--sp-t13); font-weight: 600; overflow-wrap: anywhere; }
+.spReportLink { color: var(--sp-ink); font-size: var(--sp-t13); font-weight: 600; overflow-wrap: anywhere; }
+.spReportExcerpt, .spReportContext, .spReportCount, .spReportWhen { margin: 0; color: var(--sp-text); font-size: var(--sp-t13); line-height: 1.55; overflow-wrap: anywhere; }
+.spReportContext, .spReportWhen { color: var(--sp-muted); font-size: var(--sp-t12); }
+.spReportCount { color: var(--sp-ink); font-weight: 600; }
+.spReportReasons, .spReportDetails { margin: 0; padding: 0; list-style: none; }
+.spReportDetails { display: grid; gap: 4px; }
+.spReportDetails li { padding-left: 10px; border-left: 2px solid var(--sp-line); color: var(--sp-muted); font-size: var(--sp-t12); white-space: pre-line; overflow-wrap: anywhere; }
+.spReportActions { display: flex; gap: 6px; }
+
 @media (max-width: 720px) {
   .spChoices, .spFormRow { grid-template-columns: minmax(0, 1fr); }
   .spFieldNarrow { max-width: none; }
   .spRequest { grid-template-columns: auto minmax(0, 1fr); }
   .spRequestActions { grid-column: 2; }
+  .spReport { grid-template-columns: minmax(0, 1fr); }
   .spMemberTable thead { display: none; }
   .spMemberTable, .spMemberTable tbody, .spMemberTable td { display: block; }
   .spMemberTable tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 10px 12px; }

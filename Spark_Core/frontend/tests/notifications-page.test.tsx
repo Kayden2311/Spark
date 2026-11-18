@@ -352,4 +352,18 @@ describe("community notifications", () => {
     await user.click(screen.getByRole("button", { name: /was approved/u }));
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/communities/climate-circle"));
   });
+
+  it("labels a new comment and opens the post it points to", async () => {
+    pages = [{
+      items: [community(4, "post_commented", "Someone commented on your post", "/communities/climate-circle/posts/p1")],
+      nextCursor: null,
+    }];
+    const user = userEvent.setup();
+    render(<NotificationsPage />);
+    const row = await screen.findByRole("button", { name: /commented on your post/u });
+    expect(within(row).getByText("New comment")).toBeInTheDocument();
+    expect(within(row).getByText("Community · hosted by Acme Host")).toBeInTheDocument();
+    await user.click(row);
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/communities/climate-circle/posts/p1"));
+  });
 });

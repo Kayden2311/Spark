@@ -378,9 +378,11 @@ describe("More actions menu", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("offers no Report once reported or when signed out, and no menu at all without items", () => {
+  it("shows a disabled You reported this once reported, and nothing when signed out", async () => {
     const { rerender } = render(<ContentMenu hidden={false} onReport={vi.fn()} viewer={viewer({ reported: true, canReport: false })} />);
-    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+    await open();
+    expect(items()).toEqual(["You reported this"]);
+    expect(screen.getByRole("menuitem", { name: "You reported this" })).toHaveAttribute("aria-disabled", "true");
     rerender(<ContentMenu hidden={false} onReport={vi.fn()} viewer={viewer({ canReport: false })} />);
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
   });

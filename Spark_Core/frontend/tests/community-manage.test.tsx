@@ -445,3 +445,128 @@ describe("community manage page", () => {
     await waitFor(() => expect(screen.queryByRole("tab", { name: "Settings" })).not.toBeInTheDocument());
   });
 });
+
+const REPORTS = "/api/v1/communities/c-northstar/reports";
+
+const queueItem = (overrides: Record<string, unknown> = {}, target: Record<string, unknown> = {}) => ({
+  target: { kind: "post", id: "p1", postId: "p1", title: "Buy cheap watches", excerpt: "Click here for deals", authorName: "Sam Spammer", moderation: "visible", ...target },
+  openReports: 3,
+  reasons: [{ reason: "spam", count: 2 }, { reason: "off_topic", count: 1 }],
+  latestDetails: ["Looks like an ad"],
+  firstReportedAt: "2026-11-01T09:00:00.000Z",
+  lastReportedAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+  ...overrides,
+});
+
+function serveReports(community: CommunityDetail, items: unknown[], extra?: Route) {
+  return serve(community, (url, init) => {
+    const handled = extra?.(url, init);
+    if (handled) return handled;
+    if (url.pathname === REPORTS && (init.method ?? "GET") === "GET") return json({ items });
+    return undefined;
+  });
+}
+
+describe("community manage page: Reports tab", () => {
+  beforeEach(() => {
+    auth.isAuthenticated = true;
+    auth.isLoading = false;
+    auth.user = { id: "u-owner" };
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each(["owner", "moderator"] as const)("shows the tab to a community %s", async (viewerStatus) => {
+    serveReports(manager({ viewerStatus }), []);
+    render(<ManageCommunity slug="northstar-founders" />);
+    expect(await screen.findByRole("tab", { name: "Reports" })).toBeInTheDocument();
+  });
+
+  it("hides the tab and never asks for reports for a host admin with no community role", async () => {
+    const { calls } = serveReports(manager({ viewerStatus: null, canGovern: true }), []);
+    render(<ManageCommunity slug="northstar-founders" />);
+    expect(await screen.findByRole("tab", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Reports" })).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path === REPORTS)).toBe(false);
+  });
+
+  it("hides the tab from a plain member", async () => {
+    serveReports(detail({ viewerStatus: "member", canManage: true }), []);
+    render(<ManageCommunity slug="northstar-founders" />);
+    await screen.findByRole("tab", { name: /^Requests/ });
+    expect(screen.queryByRole("tab", { name: "Reports" })).not.toBeInTheDocument();
+  });
+
+  it("lists one row per reported item without ever naming a reporter", async () => {
+    serveReports(manager(), [
+      queueItem(),
+      queueItem({ openReports: 1, reasons: [{ reason: "harassment", count: 1 }], latestDetails: [] }, { kind: "comment", id: "m1", postId: "p2", title: "Roadmap", excerpt: "You are all fools", authorName: "Rob Rude" }),
+    ]);
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Reports");
+    const list = await screen.findByRole("list", { name: "Open reports" });
+    const rows = [screen.getByRole("link", { name: "Buy cheap watches" }), screen.getByRole("link", { name: "You are all fools" })].map((link) => link.closest("li")!);
+    expect(list.querySelectorAll(":scope > li")).toHaveLength(2);
+    expect(within(rows[0]!).getByRole("link", { name: "Buy cheap watches" })).toHaveAttribute("href", "/communities/northstar-founders/posts/p1");
+    expect(within(rows[0]!).getByText("Click here for deals")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("Sam Spammer")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("3 open reports")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("Spam ×2")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("Off-topic ×1")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("Looks like an ad")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText(/2h ago/)).toBeInTheDocument();
+    expect(within(rows[1]!).getByRole("link", { name: "You are all fools" })).toHaveAttribute("href", "/communities/northstar-founders/posts/p2");
+    expect(within(rows[1]!).getByText("1 open report")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Comment")).toBeInTheDocument();
+    expect(screen.queryByText(/reported by/i)).not.toBeInTheDocument();
+  });
+
+  it("says No open reports when the queue is empty", async () => {
+    serveReports(manager(), []);
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Reports");
+    expect(await screen.findByText("No open reports")).toBeInTheDocument();
+  });
+
+  it("removes the row after Hide, with the reason posted to the moderation route", async () => {
+    const { calls } = serveReports(manager(), [queueItem(), queueItem({}, { id: "p9", postId: "p9", title: "Second one" })], (url, init) =>
+      url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST" ? json({ moderation: "hidden", reportsClosed: 3, changed: true }) : undefined,
+    );
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Reports");
+    await userEvent.click((await screen.findAllByRole("button", { name: "Hide post by Sam Spammer" }))[0]!);
+    expect(screen.getByRole("dialog", { name: "Hide this post" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Reason"), "Spam ad");
+    await userEvent.click(screen.getByRole("button", { name: "Hide post" }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: "Buy cheap watches" })).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "Second one" })).toBeInTheDocument();
+    expect(calls.find((call) => call.path === "/api/v1/posts/p1/moderation")?.body).toEqual({ action: "hide", reason: "Spam ad" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("removes the row after Keep, which dismisses the reports", async () => {
+    const { calls } = serveReports(manager(), [queueItem({}, { kind: "comment", id: "m1", postId: "p1", authorName: "Rob Rude", excerpt: "Fine comment" })], (url, init) =>
+      url.pathname === "/api/v1/comments/m1/moderation" && init.method === "POST" ? json({ moderation: "visible", reportsClosed: 3, changed: true }) : undefined,
+    );
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Reports");
+    await userEvent.click(await screen.findByRole("button", { name: "Keep comment by Rob Rude" }));
+    expect(screen.getByRole("dialog", { name: "Keep and dismiss reports" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Reason"), "Within guidelines");
+    await userEvent.click(screen.getByRole("button", { name: "Keep and dismiss" }));
+    expect(await screen.findByText("No open reports")).toBeInTheDocument();
+    expect(calls.find((call) => call.path === "/api/v1/comments/m1/moderation")?.body).toEqual({ action: "dismiss", reason: "Within guidelines" });
+  });
+
+  it("keeps the row and shows the error when moderation fails", async () => {
+    serveReports(manager(), [queueItem()], (url, init) =>
+      init.method === "POST" ? json({ code: "forbidden", detail: "You cannot moderate here." }, 403) : undefined,
+    );
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Reports");
+    await userEvent.click(await screen.findByRole("button", { name: "Hide post by Sam Spammer" }));
+    await userEvent.type(screen.getByLabelText("Reason"), "Spam ad");
+    await userEvent.click(screen.getByRole("button", { name: "Hide post" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("You cannot moderate here.");
+    expect(screen.getByRole("link", { name: "Buy cheap watches" })).toBeInTheDocument();
+  });
+});

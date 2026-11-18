@@ -64,6 +64,38 @@ export interface Page<T> {
   nextCursor: string | null;
 }
 
+export type ContentKind = "post" | "comment";
+export type ReportReason = "spam" | "harassment" | "off_topic" | "misinformation" | "self_promotion" | "other";
+export type ModerationAction = "hide" | "restore" | "dismiss";
+
+export interface ModerationResult {
+  /** "hidden" or "visible": the item's state after the action. */
+  moderation: string;
+  reportsClosed: number;
+  changed: boolean;
+}
+
+/** One reported post or comment in the manage page queue. The API never says who reported. */
+export interface ReportQueueItem {
+  target: {
+    kind: ContentKind;
+    id: string;
+    postId: string;
+    title: string;
+    excerpt: string;
+    authorName: string;
+    moderation: string;
+  };
+  openReports: number;
+  reasons: Array<{ reason: string; count: number }>;
+  latestDetails: string[];
+  firstReportedAt: string;
+  lastReportedAt: string;
+}
+
+export const REPORT_DETAILS_MAX = 1_000;
+export const MODERATION_REASON_MIN = 3;
+export const MODERATION_REASON_MAX = 500;
 export const POST_TITLE_MAX = 150;
 export const POST_BODY_MAX = 10_000;
 export const COMMENT_BODY_MAX = 2_000;
@@ -144,7 +176,22 @@ export const contentApi = {
   deleteComment(commentId: string) {
     return request<void>(`/comments/${id(commentId)}`, { method: "DELETE" });
   },
+  /** 201 for a new report, 200 when this viewer already has an open one; both mean "reported". */
+  report(kind: ContentKind, targetId: string, body: { reason: ReportReason; details?: string }) {
+    return request<{ report: { id: string; status: string } }>(`/${kind}s/${id(targetId)}/reports`, { method: "POST", body });
+  },
+  moderate(kind: ContentKind, targetId: string, body: { action: ModerationAction; reason: string }) {
+    return request<ModerationResult>(`/${kind}s/${id(targetId)}/moderation`, { method: "POST", body });
+  },
+  reports(communityId: string, signal?: AbortSignal) {
+    return request<{ items: ReportQueueItem[] }>(`/communities/${id(communityId)}/reports`, { signal });
+  },
 };
+
+/** What the viewer flags look like once this viewer has reported the item. */
+export function asReported<T extends { viewer: ContentViewer }>(item: T): T {
+  return { ...item, viewer: { ...item.viewer, reported: true, canReport: false } };
+}
 
 /** The newer representation a 412 carries, or null. */
 export function currentOf<T>(error: unknown): T | null {
