@@ -127,12 +127,12 @@ export function ReportsTab({ context }: { context: ManageContext }) {
                     Keep
                   </button>
                   <button
-                    aria-label={`Hide ${target.kind} by ${target.authorName}`}
+                    aria-label={`${hidden ? "Restore" : "Hide"} ${target.kind} by ${target.authorName}`}
                     className="spBtn spBtnPrimary spBtnSm"
-                    onClick={() => setDeciding({ item, action: "hide" })}
+                    onClick={() => setDeciding({ item, action: hidden ? "restore" : "hide" })}
                     type="button"
                   >
-                    Hide
+                    {hidden ? "Restore" : "Hide"}
                   </button>
                 </div>
               </li>
@@ -144,14 +144,22 @@ export function ReportsTab({ context }: { context: ManageContext }) {
       {deciding && (
         <ModerationDialog
           action={deciding.action}
+          hidden={deciding.item.target.moderation === "hidden"}
           fallbackFocus={() => document.getElementById("reports-title")}
           id={deciding.item.target.id}
           kind={deciding.item.target.kind}
           onClose={() => setDeciding(null)}
-          onDone={() => {
+          onDone={(result) => {
             const done = deciding;
+            const noun = done.item.target.kind === "post" ? "Post" : "Comment";
+            if (done.action === "restore") {
+              // Restoring does not close reports: the row stays, now shown as visible.
+              list.setItems((current) => current.map((entry) => (keyOf(entry) === keyOf(done.item) ? { ...entry, target: { ...entry.target, moderation: result.moderation } } : entry)));
+              notify(`${noun} restored.`);
+              return;
+            }
             list.setItems((current) => current.filter((entry) => keyOf(entry) !== keyOf(done.item)));
-            notify(done.action === "hide" ? `${done.item.target.kind === "post" ? "Post" : "Comment"} hidden.` : "Reports dismissed.");
+            notify(done.action === "hide" ? `${noun} hidden.` : "Reports dismissed.");
           }}
         />
       )}

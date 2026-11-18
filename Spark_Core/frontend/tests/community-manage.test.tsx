@@ -557,6 +557,33 @@ describe("community manage page: Reports tab", () => {
     expect(calls.find((call) => call.path === "/api/v1/comments/m1/moderation")?.body).toEqual({ action: "dismiss", reason: "Within guidelines" });
   });
 
+  it("offers Restore for a hidden row, keeps the row and shows it as visible afterwards", async () => {
+    const { calls } = serveReports(manager(), [queueItem({}, { moderation: "hidden" })], (url, init) =>
+      url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST" ? json({ moderation: "visible", reportsClosed: 0, changed: true }) : undefined,
+    );
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Reports");
+    expect(await screen.findByText("Hidden")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hide post by Sam Spammer" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Restore post by Sam Spammer" }));
+    expect(screen.getByRole("dialog", { name: "Restore this post" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Reason"), "Reviewed, fine");
+    await userEvent.click(screen.getByRole("button", { name: "Restore post" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(calls.find((call) => call.path === "/api/v1/posts/p1/moderation")?.body).toEqual({ action: "restore", reason: "Reviewed, fine" });
+    expect(screen.getByRole("link", { name: "Buy cheap watches" })).toBeInTheDocument();
+    expect(screen.queryByText("Hidden")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide post by Sam Spammer" })).toBeInTheDocument();
+  });
+
+  it("tells the moderator a hidden item stays hidden when keeping it", async () => {
+    serveReports(manager(), [queueItem({}, { moderation: "hidden" })]);
+    render(<ManageCommunity slug="northstar-founders" />);
+    await openTab("Reports");
+    await userEvent.click(await screen.findByRole("button", { name: "Keep post by Sam Spammer" }));
+    expect(screen.getByText("The reports are closed and the post stays hidden.")).toBeInTheDocument();
+  });
+
   it("keeps the row and shows the error when moderation fails", async () => {
     serveReports(manager(), [queueItem()], (url, init) =>
       init.method === "POST" ? json({ code: "forbidden", detail: "You cannot moderate here." }, 403) : undefined,

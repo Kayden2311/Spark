@@ -15,7 +15,7 @@ import { trapDialogKeys, useDialogFocus } from "./dialog-shell";
 interface Copy {
   title: (kind: ContentKind) => string;
   confirm: (kind: ContentKind) => string;
-  description: (kind: ContentKind) => string;
+  description: (kind: ContentKind, hidden: boolean) => string;
   danger: boolean;
   /** Quick fills, the same wording staff use on the platform reports queue. */
   templates: string[];
@@ -39,7 +39,7 @@ const COPY: Record<ModerationAction, Copy> = {
   dismiss: {
     title: () => "Keep and dismiss reports",
     confirm: () => "Keep and dismiss",
-    description: (kind) => `The ${kind} stays visible and its open reports are closed as dismissed.`,
+    description: (kind, hidden) => (hidden ? `The reports are closed and the ${kind} stays hidden.` : `The ${kind} stays visible and its open reports are closed as dismissed.`),
     danger: false,
     templates: ["Not a policy violation.", "Duplicate of a report already handled.", "Not enough detail to act on."],
   },
@@ -49,6 +49,8 @@ interface ModerationDialogProps {
   kind: ContentKind;
   id: string;
   action: ModerationAction;
+  /** The item is hidden now; it changes what "Keep and dismiss" promises. */
+  hidden?: boolean;
   onClose: () => void;
   /** Called with the API answer once the action went through; the dialog then closes itself. */
   onDone: (result: ModerationResult) => void;
@@ -56,7 +58,7 @@ interface ModerationDialogProps {
 }
 
 /** Hide, restore or keep (dismiss the reports of) a post or comment, with a required reason of 3 to 500 characters. */
-export function ModerationDialog({ kind, id, action, onClose, onDone, fallbackFocus }: ModerationDialogProps) {
+export function ModerationDialog({ kind, id, action, hidden = false, onClose, onDone, fallbackFocus }: ModerationDialogProps) {
   const copy = COPY[action];
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -92,7 +94,7 @@ export function ModerationDialog({ kind, id, action, onClose, onDone, fallbackFo
             {copy.title(kind)}
           </h2>
           <p className="circleDialogText" id={descriptionId}>
-            {copy.description(kind)}
+            {copy.description(kind, hidden)}
           </p>
           <div className="circleField">
             <label htmlFor={reasonId}>Reason</label>

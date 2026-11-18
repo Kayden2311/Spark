@@ -23,6 +23,20 @@ export function useDialogFocus(initial: RefObject<HTMLElement | null>, fallback?
   }, []);
 }
 
+/**
+ * The controls Tab can reach. A radio group has one tab stop: its checked radio, or its first radio when none
+ * is checked, so the other radios must not count as the first or last control.
+ */
+function tabbable(root: HTMLElement): HTMLElement[] {
+  const all = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+  return all.filter((element) => {
+    if (!(element instanceof HTMLInputElement) || element.type !== "radio" || !element.name) return true;
+    const group = all.filter((other): other is HTMLInputElement => other instanceof HTMLInputElement && other.type === "radio" && other.name === element.name);
+    const stop = group.find((radio) => radio.checked) ?? group[0];
+    return element === stop;
+  });
+}
+
 /** Escape closes (unless busy); Tab and Shift+Tab cycle between the dialog's own controls. */
 export function trapDialogKeys(event: ReactKeyboardEvent<HTMLElement>, busy: boolean, onClose: () => void): void {
   if (event.key === "Escape" && !busy) {
@@ -30,7 +44,7 @@ export function trapDialogKeys(event: ReactKeyboardEvent<HTMLElement>, busy: boo
     return;
   }
   if (event.key !== "Tab") return;
-  const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE));
+  const controls = tabbable(event.currentTarget);
   if (controls.length === 0) return;
   const first = controls[0]!;
   const last = controls[controls.length - 1]!;

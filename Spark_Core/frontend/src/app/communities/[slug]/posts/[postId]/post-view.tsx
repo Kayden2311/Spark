@@ -183,7 +183,7 @@ export function PostView({ slug, postId, initial = null, startEditing = false }:
             id={post.id}
             kind="post"
             onClose={() => setModerating(null)}
-            onDone={(result) => setPost((current) => (current ? { ...current, moderation: result.moderation } : current))}
+            onDone={(result) => setPost((current) => (current ? { ...current, moderation: result.moderation, version: result.changed ? current.version + 1 : current.version } : current))}
           />
         )}
 

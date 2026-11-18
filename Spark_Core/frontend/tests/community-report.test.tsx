@@ -274,3 +274,70 @@ describe("report and moderation on the post page", () => {
     expect(calls.at(-1)?.path).toBe("/api/v1/comments/m1/moderation");
   });
 });
+
+describe("ReportDialog focus", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps Shift+Tab and Tab inside the dialog when a radio other than the first is checked", async () => {
+    stubFetch(() => undefined);
+    render(<ReportDialog id="p1" kind="post" onClose={vi.fn()} onReported={vi.fn()} />);
+    const dialog = screen.getByRole("dialog");
+    const radio = screen.getByRole("radio", { name: "Misinformation" });
+    await userEvent.click(radio);
+    expect(radio).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    const send = within(dialog).getByRole("button", { name: "Send" });
+    expect(send).toHaveFocus();
+    await userEvent.tab();
+    expect(radio).toHaveFocus();
+  });
+
+  it("returns focus to the checked radio after an error", async () => {
+    stubFetch(() => json({ code: "own_content", detail: "You cannot report your own content." }, 409));
+    render(<ReportDialog id="p1" kind="post" onClose={vi.fn()} onReported={vi.fn()} />);
+    await userEvent.click(screen.getByRole("radio", { name: "Harassment" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Harassment" })).toHaveFocus());
+  });
+});
+
+describe("moderation states", () => {
+  beforeEach(() => {
+    auth.isAuthenticated = true;
+    auth.user = { id: "u-me" };
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("says the item stays hidden when keeping a hidden item", () => {
+    const { rerender } = render(<ModerationDialog action="dismiss" hidden id="p1" kind="post" onClose={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.getByText("The reports are closed and the post stays hidden.")).toBeInTheDocument();
+    rerender(<ModerationDialog action="dismiss" hidden id="m1" kind="comment" onClose={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.getByText("The reports are closed and the comment stays hidden.")).toBeInTheDocument();
+    rerender(<ModerationDialog action="dismiss" id="m1" kind="comment" onClose={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.getByText(/stays visible/)).toBeInTheDocument();
+  });
+
+  it("raises the local version after a changed moderation so the next edit sends the new If-Match", async () => {
+    const mine = { isAuthor: true, canEdit: true, canDelete: true, canReport: false, canModerate: true };
+    const { calls } = servePost(moderator(), postDetail({ version: 1, viewer: mine }), [], (url, init) => {
+      if (url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST") return json({ moderation: "hidden", reportsClosed: 0, changed: true });
+      if (url.pathname === "/api/v1/posts/p1" && init.method === "PATCH") return json(postDetail({ version: 3, title: "New title", viewer: mine }));
+      return undefined;
+    });
+    render(<PostView postId="p1" slug="northstar-founders" />);
+    const article = (await screen.findByRole("heading", { level: 1, name: "Hello founders" })).closest("article")!;
+    await openMenu(article);
+    await userEvent.click(screen.getByRole("menuitem", { name: "Hide" }));
+    await userEvent.type(screen.getByLabelText("Reason"), "Testing");
+    await userEvent.click(screen.getByRole("button", { name: "Hide post" }));
+    await waitFor(() => expect(within(article).getByText("Hidden")).toBeInTheDocument());
+    await openMenu(article);
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    await userEvent.clear(screen.getByLabelText("Title"));
+    await userEvent.type(screen.getByLabelText("Title"), "New title");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((call) => call.method === "PATCH")).toBe(true));
+    expect(calls.find((call) => call.method === "PATCH")?.headers["if-match"]).toBe('"v2"');
+  });
+});

@@ -34,6 +34,7 @@ export function ReportDialog({ kind, id, onClose, onReported, fallbackFocus }: R
   const [error, setError] = useState<string | null>(null);
   const first = useRef<HTMLInputElement>(null);
   const done = useRef<HTMLButtonElement>(null);
+  const form = useRef<HTMLFormElement>(null);
   const titleId = useId();
   const detailsId = useId();
   const hintPrefix = useId();
@@ -44,6 +45,13 @@ export function ReportDialog({ kind, id, onClose, onReported, fallbackFocus }: R
   useEffect(() => {
     if (sent) done.current?.focus();
   }, [sent]);
+
+  // The fieldset is disabled while sending, which drops focus; after an error put it back on the form.
+  useEffect(() => {
+    if (!error) return;
+    const target = form.current?.querySelector<HTMLElement>('input[type="radio"]:checked') ?? form.current?.querySelector<HTMLElement>("input, textarea, button");
+    target?.focus();
+  }, [error]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -80,7 +88,7 @@ export function ReportDialog({ kind, id, onClose, onReported, fallbackFocus }: R
             </div>
           </>
         ) : (
-          <form className="circleDialogForm" noValidate onSubmit={(event) => void submit(event)}>
+          <form className="circleDialogForm" noValidate ref={form} onSubmit={(event) => void submit(event)}>
             <h2 className="circleDialogTitle" id={titleId}>
               {`Report this ${kind}`}
             </h2>

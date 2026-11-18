@@ -336,7 +336,7 @@ function CommentRow({ comment, onChanged, onDeleted, onGone }: RowProps) {
           id={comment.id}
           kind="comment"
           onClose={() => setModerating(null)}
-          onDone={(result) => onChanged({ ...comment, moderation: result.moderation })}
+          onDone={(result) => onChanged({ ...comment, moderation: result.moderation, version: result.changed ? comment.version + 1 : comment.version })}
         />
       )}
       {confirming && (
