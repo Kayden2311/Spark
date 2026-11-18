@@ -527,7 +527,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(37);
+    expect(result.rows[0].count).toBe(38);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -7199,5 +7199,24 @@ describe("Community leftovers", () => {
     expect(await updateCommunity(host.owner, priv, 4, { visibility: "hidden" })).toMatchObject({ outcome: "ok" });
     expect(await updateCommunity(host.owner, priv, 5, { visibility: "public" })).toMatchObject({ outcome: "ok" });
     expect((await requestRows(priv)).find((row) => row.user_id === late.id)).toMatchObject({ status: "pending" });
+  });
+  it("keeps requests pending when a frozen community becomes public", async () => {
+    const host = await hostWorkspace("Frozen opening host");
+    const waiting = await account("Frozen waiting");
+    const priv = await communityFixture(host, { name: "Frozen Opening", visibility: "private", frozen: true });
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id) VALUES ($1,$2,$3)`, [host.workspace, priv, waiting.id]);
+    const before = {
+      members: (await memberships(priv)).length,
+      notices: (await owner.query(`SELECT count(*)::integer AS n FROM ${table("notifications")} WHERE resource_id=$1`, [priv])).rows[0].n as number,
+      events: (await owner.query(`SELECT count(*)::integer AS n FROM ${table("outbox_events")} WHERE tenant_id=$1 AND aggregate_type='community_join_request'`, [host.workspace])).rows[0].n as number,
+    };
+    expect(await updateCommunity(host.owner, priv, 1, { visibility: "public" })).toEqual({ outcome: "ok", settings_version: 2 });
+    expect((await requestRows(priv))[0]).toMatchObject({ user_id: waiting.id, status: "pending", reviewed_by_user_id: null, reviewed_at: null });
+    expect(await memberships(priv)).toHaveLength(before.members);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT visibility FROM ${table("communities")} WHERE id=$1`, [priv])).rows[0].visibility).toBe("public");
+    expect((await owner.query(`SELECT count(*)::integer AS n FROM ${table("notifications")} WHERE resource_id=$1`, [priv])).rows[0].n).toBe(before.notices);
+    expect((await owner.query(`SELECT count(*)::integer AS n FROM ${table("outbox_events")} WHERE tenant_id=$1 AND aggregate_type='community_join_request'`, [host.workspace])).rows[0].n).toBe(before.events);
   });
 });

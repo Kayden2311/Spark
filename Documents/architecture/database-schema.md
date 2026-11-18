@@ -355,10 +355,10 @@ The runtime role still has no write privilege on any community table. Every chan
 
 - **Locks.** Host workspace `FOR SHARE`, community `FOR SHARE` (`lock_community_content`; the `community_open` trigger takes it too), post, comment. Membership changes lock the community row `FOR UPDATE`, so they serialize with content writes while writes in one community do not serialize with each other.
 - **Writes.**
-  - `ws_create_post(community, title, body, idempotency_key, request_hash)` → `created | not_found | not_a_member | community_frozen` with `post_id`. Title 1-150, body 1-10,000 (`Invalid post title|body`). The optional key is scoped to (host workspace, actor, `community.post.create`) and kept 24 hours: same hash replays the original id, another hash is a conflict (`Invalid idempotency key` for a bad key or hash).
+  - `ws_create_post(community, title, body, idempotency_key, request_hash)` → `created | replayed | idempotency_conflict | not_found | not_a_member | community_frozen` with `post_id`. Title 1-150, body 1-10,000 (`Invalid post title|body`). The optional key is scoped to (host workspace, actor, `community.post.create`) and kept 24 hours: same hash replays the original id, another hash is a conflict (`Invalid idempotency key` for a bad key or hash).
   - `ws_update_post(post, expected_version, title, body)` → `ok | not_found | not_author | not_a_member | community_frozen | content_hidden | version_mismatch`. NULL leaves a field unchanged; both NULL raises `Invalid post patch`. Sets `edited_at`.
   - `ws_delete_post(post)`: soft delete by the author at any time; a second delete is `ok`; a non-author who can read gets `not_author`.
-  - `ws_create_comment(post, body, idempotency_key, request_hash)` → also `content_hidden` when the post is hidden. Body 1-2,000 (`Invalid comment body`). Operation `community.comment.create`. When the post author is not the actor and is active, one outbox row (processed at once: in-app only) and one `post_commented` notification are written; the title carries no post or comment text.
+  - `ws_create_comment(post, body, idempotency_key, request_hash)` → `created | replayed | idempotency_conflict | not_found | not_a_member | community_frozen | content_hidden` (the last when the post is hidden). Body 1-2,000 (`Invalid comment body`). Operation `community.comment.create`. When the post author is not the actor and is active, one outbox row (processed at once: in-app only) and one `post_commented` notification are written; the title carries no post or comment text.
   - `ws_update_comment(comment, expected_version, body)` and `ws_delete_comment(comment)`: the same outcomes and order as for posts.
 - **Notifications.** `notifications_kind_allowed` adds `post_commented` (`resource_type 'post'`). The `0031` read functions `ws_list_notifications`, `ws_unread_notification_count`, `ws_mark_notification_read` and `ws_mark_notifications_read` are redefined so post rows are visible outside the host workspace like community rows; the link points to the post only while the recipient can read it.
 - **Internal helpers:** `lock_community_content(community)` and `is_active_community_member(tenant, community, actor)`.
@@ -374,6 +374,14 @@ Reporting a post or comment, moderating it with a record, and the per-community 
   - `ws_moderate_content(kind, target, action, reason)` → `ok | unchanged | not_found | forbidden`. Community owners and moderators only; works while frozen; reason trimmed 3-500 (`Invalid moderation action|reason`). `hide` sets the status to `hidden` and resolves every open report with one `hide` record each (or one record without a report); `dismiss` dismisses every open report (`dismiss_report` records); `restore` sets `visible` and never closes reports. A status change bumps `version` and never sets `edited_at`.
   - `community_report_queue(community)`: the open and reviewing reports for owners and moderators, one row per target, newest first, at most 100, with `reasons [{reason, count}]` and up to three `latest_details`. Never returns a reporter. An invisible community raises `P0002 Community not found`; a visible one the viewer does not moderate raises `42501 Community access denied`.
 
+## Report fixes (`0036_report_fixes.sql`)
+
+Fixes to `0034`, `CREATE OR REPLACE` with unchanged signatures.
+
+- **Reason backfill.** Reports whose `reason_code` is outside the closed set (the legacy free-text seed codes) become `other`, then `content_reports_reason_allowed` is `VALIDATE`d. A `NOT VALID` check is still enforced on every `UPDATE`, so such a legacy report could otherwise not be resolved or dismissed (`23514`).
+- **`staff_resolve_report` lock order.** It now reads the report's target without a lock, locks the post (and comment) first, then the report, and re-checks the report's status, the same order as `ws_moderate_content`; the two no longer deadlock.
+- **`ws_report_content` insert retry.** When the conflicting report closes between the insert conflict and the re-select, the insert is retried once; a second miss raises a serialization failure (`40001`) instead of answering `already_reported` with a NULL id.
+
 ## Community leftovers (`0035_community_fixes.sql`)
 
 `CREATE OR REPLACE` with unchanged signatures; closes the issues C1 parked.
@@ -381,7 +389,11 @@ Reporting a post or comment, moderating it with a record, and the per-community 
 - `community_cards`: `member_count` counts active memberships of users with `deleted_at IS NULL`. `weekly_posts` counts posts that are not deleted, `moderation_status = 'visible'` and `visibility <> 'hidden'`, plus comments that are not deleted and visible whose post meets the same rule.
 - `discoverable_communities`: hidden communities are also discoverable by the active `owner`s and `admin`s of their active host workspace (not just their members).
 - `ws_add_community_member`: when it approves the user's pending request it also writes the outbox row (`community_join_request.approved`) and the `community_request_approved` notification, with the same text as `ws_decide_community_request`.
-- `ws_update_community`: a visibility change from `private` to `public` approves every pending request in the same transaction, after the community row lock and in request order. Each approval inserts or re-activates the membership as `member` (a suspended membership stays suspended), sets `reviewed_by_user_id` to the actor and `reviewed_at` to `now()`, writes the outbox row and the notification, and records the audit `community.request_approved`. Other visibility changes leave requests pending.
+- `ws_update_community`: a visibility change from `private` to `public` approves every pending request in the same transaction, after the community row lock and in request order. Each approval inserts or re-activates the membership as `member` (a suspended membership stays suspended), sets `reviewed_by_user_id` to the actor and `reviewed_at` to `now()`, writes the outbox row and the notification, and records the audit `community.request_approved`. Other visibility changes leave requests pending. `0037` limits this approval to communities that are not frozen (see below).
+
+## Frozen communities stay closed when opened (`0037_community_frozen_open.sql`)
+
+`ws_update_community` is redefined from the `0035` body with one change: the private to public approval runs only when `frozen_at IS NULL`, because a frozen community takes no new members (like `ws_decide_community_request` and `ws_add_community_member`). For a frozen community the visibility change still succeeds, and the pending requests stay pending, with no membership, notification or outbox row, until a manager decides them after it is unfrozen.
 
 ## Scope and assumptions
 
