@@ -343,7 +343,7 @@ The runtime role still has no write privilege on any community table. Every chan
 - **Fields.** `posts.edited_at` and `post_comments.edited_at` (nullable). `posts_body_length` (trimmed 1-10,000) and `post_comments_body_length` (trimmed 1-2,000) are `NOT VALID`: they bind new and updated rows without rejecting older data.
 - **Helpers.** `can_moderate_community(community)` (STABLE definer, executable by `spark_app`) is true for an active owner or moderator of a non-archived community of an active host workspace, false without a live session. `can_read_post(tenant, post)` keeps its signature and applies the rule above to the session actor; the `post_read` and `comment_read` policies use it.
 - **Reads** (STABLE `SECURITY DEFINER SET search_path = ''`, executable by `spark_app`, working with or without a session; none returns an email or a reporter). Authors of deleted users read `Former member` with no avatar.
-  - `community_feed(community, before_created, before_id, limit)`: newest first by `(created_at, id)`, keyset cursor, up to `limit + 1` rows. `excerpt` is the first 400 characters with `truncated`; `comment_count` counts visible, non-deleted comments; also `viewer_is_author`, `viewer_reported`, `edited_at`, `version`. Hidden posts are listed only for moderators. An unreadable community raises `P0002`; a private or hidden community the viewer is not an active member of raises `42501`.
+  - `community_feed(community, before_created, before_id, limit)`: newest first by `(created_at, id)`, keyset cursor, up to `limit + 1` rows. `excerpt` is the first 400 characters with `truncated`; `comment_count` counts visible, non-deleted comments; also `viewer_is_author`, `viewer_reported`, `edited_at`, `version`. Hidden posts are listed only for moderators. An unreadable community raises `P0002`; a private community the viewer is not an active member of raises `42501`. A hidden community raises `P0002` for anyone who is not a member and does not manage it (only its managers and members see it, and only managers who are not members get `42501`).
   - `community_post(post)`: one post with its full body and the viewer flags; no row when unreadable.
   - `community_post_comments(post, after_created, after_id, limit)`: oldest first, keyset, up to `limit + 1` rows; an unreadable post raises `P0002 Post not found`; hidden comments only for moderators.
   - `community_comment(comment)`: one comment with its community; no row when unreadable.
@@ -365,22 +365,14 @@ The runtime role still has no write privilege on any community table. Every chan
 
 ## Content reports and community moderation (`0034_content_reports.sql`)
 
-Reporting a post or comment, moderating it with a record, and the per-community report queue. The runtime role has no write path to `content_reports` or `moderation_actions` outside these definers; `staff_resolve_report` (`0009`) is unchanged.
+Reporting a post or comment, moderating it with a record, and the per-community report queue. The runtime role has no write path to `content_reports` or `moderation_actions` outside these definers; `staff_resolve_report` (`0009`) is unchanged here (superseded by `0036`, which changes its lock order).
 
-- **Reason set.** `content_reports_reason_allowed` (`NOT VALID`, so the legacy free-text seed code stays) limits `reason_code` to `spam`, `harassment`, `off_topic`, `misinformation`, `self_promotion`, `other`.
+- **Reason set.** `content_reports_reason_allowed` (`NOT VALID`, so the legacy free-text seed code stays; validated by `0036`) limits `reason_code` to `spam`, `harassment`, `off_topic`, `misinformation`, `self_promotion`, `other`.
 - **Locks.** As in `0033`: host workspace and community `FOR SHARE`, post, comment, reports. A report takes the post and comment `FOR SHARE` (reports do not serialize with each other, and the partial unique indexes make one reporter's report idempotent); a moderation takes them `FOR UPDATE`.
 - **Functions** (definers, `spark_app` only).
   - `ws_report_content(kind, target, reason, details)` → `reported | already_reported | not_found | own_content` with `report_id`. Needs read access, not membership; frozen communities can still be reported. Details are trimmed, at most 1,000, blank stored as NULL (`Invalid report target|reason|details`). A reporter with an open or reviewing report on the target gets that report's id back.
-  - `ws_moderate_content(kind, target, action, reason)` → `ok | unchanged | not_found | forbidden`. Community owners and moderators only; works while frozen; reason trimmed 3-500 (`Invalid moderation action|reason`). `hide` sets the status to `hidden` and resolves every open report with one `hide` record each (or one record without a report); `dismiss` dismisses every open report (`dismiss_report` records); `restore` sets `visible` and never closes reports. A status change bumps `version` and never sets `edited_at`.
-  - `community_report_queue(community)`: the open and reviewing reports for owners and moderators, one row per target, newest first, at most 100, with `reasons [{reason, count}]` and up to three `latest_details`. Never returns a reporter. An invisible community raises `P0002 Community not found`; a visible one the viewer does not moderate raises `42501 Community access denied`.
-
-## Report fixes (`0036_report_fixes.sql`)
-
-Fixes to `0034`, `CREATE OR REPLACE` with unchanged signatures.
-
-- **Reason backfill.** Reports whose `reason_code` is outside the closed set (the legacy free-text seed codes) become `other`, then `content_reports_reason_allowed` is `VALIDATE`d. A `NOT VALID` check is still enforced on every `UPDATE`, so such a legacy report could otherwise not be resolved or dismissed (`23514`).
-- **`staff_resolve_report` lock order.** It now reads the report's target without a lock, locks the post (and comment) first, then the report, and re-checks the report's status, the same order as `ws_moderate_content`; the two no longer deadlock.
-- **`ws_report_content` insert retry.** When the conflicting report closes between the insert conflict and the re-select, the insert is retried once; a second miss raises a serialization failure (`40001`) instead of answering `already_reported` with a NULL id.
+  - `ws_moderate_content(kind, target, action, reason)` → `ok | unchanged | not_found | forbidden`. Community owners and moderators only; works while frozen; reason trimmed 3-500 (`Invalid moderation action|reason`). `hide` sets the status to `hidden` and resolves every open report with one `hide` record each (or one record without a report); `dismiss` dismisses every open report (`dismiss_report` records); `restore` sets `visible` and never closes reports. A status change bumps `version` and never sets `edited_at`. `0038` makes `dismiss` on the actor's own content `forbidden`.
+  - `community_report_queue(community)`: the open and reviewing reports for owners and moderators, one row per target, newest first, at most 100, with `reasons [{reason, count}]` and up to three `latest_details`. Never returns a reporter. An invisible community raises `P0002 Community not found` (a hidden community for a non-member who does not manage it); a visible one the viewer does not moderate raises `42501 Community access denied`.
 
 ## Community leftovers (`0035_community_fixes.sql`)
 
@@ -391,9 +383,23 @@ Fixes to `0034`, `CREATE OR REPLACE` with unchanged signatures.
 - `ws_add_community_member`: when it approves the user's pending request it also writes the outbox row (`community_join_request.approved`) and the `community_request_approved` notification, with the same text as `ws_decide_community_request`.
 - `ws_update_community`: a visibility change from `private` to `public` approves every pending request in the same transaction, after the community row lock and in request order. Each approval inserts or re-activates the membership as `member` (a suspended membership stays suspended), sets `reviewed_by_user_id` to the actor and `reviewed_at` to `now()`, writes the outbox row and the notification, and records the audit `community.request_approved`. Other visibility changes leave requests pending. `0037` limits this approval to communities that are not frozen (see below).
 
+## Report fixes (`0036_report_fixes.sql`)
+
+Fixes to `0034`, `CREATE OR REPLACE` with unchanged signatures.
+
+- **Reason backfill.** Reports whose `reason_code` is outside the closed set (the legacy free-text seed codes) become `other`, then `content_reports_reason_allowed` is `VALIDATE`d. A `NOT VALID` check is still enforced on every `UPDATE`, so such a legacy report could otherwise not be resolved or dismissed (`23514`).
+- **`staff_resolve_report` lock order.** It now reads the report's target without a lock, locks the post (and comment) first, then the report, and re-checks the report's status, the same order as `ws_moderate_content`; the two no longer deadlock.
+- **`ws_report_content` insert retry.** When the conflicting report closes between the insert conflict and the re-select, the insert is retried once; a second miss raises a serialization failure (`40001`) instead of answering `already_reported` with a NULL id.
+
 ## Frozen communities stay closed when opened (`0037_community_frozen_open.sql`)
 
 `ws_update_community` is redefined from the `0035` body with one change: the private to public approval runs only when `frozen_at IS NULL`, because a frozen community takes no new members (like `ws_decide_community_request` and `ws_add_community_member`). For a frozen community the visibility change still succeeds, and the pending requests stay pending, with no membership, notification or outbox row, until a manager decides them after it is unfrozen.
+
+## C2 final review fixes (`0038_c2_final_fixes.sql`)
+
+- **Body checks validated.** `posts_body_length` and `post_comments_body_length` (`0032`, created `NOT VALID`) are `VALIDATE`d. A `NOT VALID` check is still enforced on every `UPDATE`, so a legacy blank or oversized body would block the author's delete, `ws_moderate_content` and `staff_resolve_report` (`23514`); the migration fails, naming the table, if a violating row exists instead of forcing it.
+- **`ws_moderate_content`** (`CREATE OR REPLACE` from the `0034` body, signature unchanged): `dismiss` answers `forbidden` when the target's author is the actor, so a moderator cannot clear reports on their own content (another moderator can). `hide` and `restore` of one's own content stay allowed.
+- **`ws_join_community`** is unchanged: a public, unfrozen community joins an actor with a pending request and sets that request to `withdrawn` (the case of a private community made public while frozen).
 
 ## Scope and assumptions
 
