@@ -79,6 +79,19 @@ const KNOWN_INPUT_ERRORS: ReadonlySet<string> = new Set([
   "Invalid request message",
   "Invalid request status",
   "Invalid decision",
+  "Invalid post title",
+  "Invalid post body",
+  "Invalid post patch",
+  "Invalid comment body",
+  "Invalid post cursor",
+  "Invalid post limit",
+  "Invalid comment cursor",
+  "Invalid comment limit",
+  "Invalid report target",
+  "Invalid report reason",
+  "Invalid report details",
+  "Invalid moderation action",
+  "Invalid moderation reason",
 ]);
 
 // Raised by the issue trigger when a concurrent writer filled the column first: the race fallback for

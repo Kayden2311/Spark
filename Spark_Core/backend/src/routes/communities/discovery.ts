@@ -243,10 +243,10 @@ async function plainTransaction<T>(pool: Pool, work: (client: PoolClient) => Pro
   }
 }
 
-type Viewer = { tokenHash: Buffer } | null;
+export type Viewer = { tokenHash: Buffer } | null;
 
 /** Resolves the caller: a live session, or null (anonymous) for no cookie or an invalid/expired one. */
-async function resolveViewer(pool: Pool, request: FastifyRequest): Promise<Viewer> {
+export async function resolveViewer(pool: Pool, request: FastifyRequest): Promise<Viewer> {
   const tokenHash = readSessionTokenHash(request.headers.cookie);
   if (!tokenHash) return null;
   const principal = await loadSessionPrincipal(pool, tokenHash);
@@ -254,7 +254,7 @@ async function resolveViewer(pool: Pool, request: FastifyRequest): Promise<Viewe
 }
 
 // Runs the read as the viewer when there is one, anonymously otherwise. Returns undefined after answering an error.
-async function readAs<T>(
+export async function readAs<T>(
   pool: Pool,
   request: FastifyRequest,
   reply: FastifyReply,
@@ -281,7 +281,7 @@ async function readAs<T>(
 }
 
 // Responses vary by cookie, so they are never cached.
-const cacheControl = (viewer: Viewer) => (viewer ? "private, no-store" : "no-store");
+export const cacheControl = (viewer: Viewer) => (viewer ? "private, no-store" : "no-store");
 
 const LIST_SQL = `SELECT ${CARD_COLUMNS}, lower(name) AS cursor_name
   FROM spark.discover_communities($1::text, $2::text, $3::text, $4::text, $5::text, $6::uuid, $7::integer)`;

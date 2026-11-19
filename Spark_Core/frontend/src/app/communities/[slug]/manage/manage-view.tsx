@@ -11,13 +11,14 @@ import { useCommunity } from "../../_lib/use-communities";
 import type { CommunityDetail } from "../../types";
 import { MembersTab } from "./members-tab";
 import { RequestsTab } from "./requests-tab";
+import { ReportsTab } from "./reports-tab";
 import { SettingsTab } from "./settings-tab";
 
 export const RESTRICTED_MESSAGE = "Only community owners and moderators can manage this community";
 
 const VISIBILITY_LABELS: Record<CommunityDetail["visibility"], string> = { public: "Public", private: "Private", hidden: "Hidden" };
 
-type Tab = "requests" | "members" | "settings";
+type Tab = "requests" | "members" | "reports" | "settings";
 type Toast = { id: number; text: string; tone: "success" | "error" };
 
 /**
@@ -126,7 +127,9 @@ export function ManageCommunity({ slug }: { slug: string }) {
   }
 
   const canGovern = community.canGovern;
-  const tabs: Array<[Tab, string]> = [["requests", "Requests"], ["members", "Members"], ...(canGovern ? [["settings", "Settings"] as [Tab, string]] : [])];
+  // Reports belong to community owners and moderators; a host admin with no community role does not see them.
+  const canModerate = community.viewerStatus === "owner" || community.viewerStatus === "moderator";
+  const tabs: Array<[Tab, string]> = [["requests", "Requests"], ["members", "Members"], ...(canModerate ? [["reports", "Reports"] as [Tab, string]] : []), ...(canGovern ? [["settings", "Settings"] as [Tab, string]] : [])];
   const active = tabs.some(([value]) => value === tab) ? tab : "requests";
   const context: ManageContext = { community, canGovern, notify, handleAccess, update, refresh };
 
@@ -191,6 +194,7 @@ export function ManageCommunity({ slug }: { slug: string }) {
       <div aria-labelledby={`${tabsId}-${active}-tab`} id={`${tabsId}-${active}-panel`} role="tabpanel">
         {active === "requests" && <RequestsTab context={context} />}
         {active === "members" && <MembersTab context={context} />}
+        {active === "reports" && <ReportsTab context={context} />}
         {active === "settings" && <SettingsTab context={context} key={community.version} onSaved={() => setStale(false)} onStale={onStale} stale={stale} />}
       </div>
 

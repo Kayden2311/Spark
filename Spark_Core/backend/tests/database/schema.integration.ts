@@ -527,7 +527,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(32);
+    expect(result.rows[0].count).toBe(39);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -765,7 +765,10 @@ describe("Local PostgreSQL schema", () => {
     expect((await asSession(sessionVisitor, `SELECT * FROM ${table("projects")}`)).rows).toHaveLength(0);
     expect((await asSession(sessionVisitor, `SELECT id FROM ${table("posts")} WHERE id=$1`, [privatePost])).rows).toEqual([{id:privatePost}]);
     expect((await asSession(sessionA, `SELECT id FROM ${table("communities")} WHERE id=$1`, [communityB])).rows).toHaveLength(0);
-    expect((await asSession(sessionA, `SELECT id FROM ${table("posts")} WHERE id=$1`, [publicPost])).rows).toEqual([]);
+    // Content of a public community is readable by everyone, signed out too (C2).
+    expect((await asSession(sessionA, `SELECT id FROM ${table("posts")} WHERE id=$1`, [publicPost])).rows).toEqual([{id:publicPost}]);
+    expect((await asSession(null, `SELECT id FROM ${table("posts")} WHERE id=$1`, [publicPost])).rows).toEqual([{id:publicPost}]);
+    expect((await asSession(null, `SELECT id FROM ${table("posts")} WHERE id=$1`, [privatePost])).rows).toEqual([]);
   });
   it("denies runtime writes, role escalation and sensitive table reads", async () => {
     for (const sensitive of ["password_credentials","auth_identities","sessions","account_tokens","content_reports","payment_events","promotion_orders","platform_role_assignments"]) {
@@ -850,7 +853,7 @@ describe("Local PostgreSQL schema", () => {
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,expires_at) VALUES ($1,$2,'password',$5),($3,$4,'password',$5),($6,$7,'password',$5)`, [adminUser, adminToken, contentUser, contentToken, future(), suspendedUser, suspendedToken]);
     await owner.query(`INSERT INTO ${table("sessions")} (user_id,token_hash,auth_method,created_at,expires_at) VALUES ($1,$2,'password',now()-interval '2 hours',now()-interval '1 hour')`, [adminUser, expiredToken]);
     await owner.query(`INSERT INTO ${table("post_comments")} (id,tenant_id,community_id,post_id,author_user_id,body) VALUES ($1,$2,$3,$4,$5,'Reported comment')`, [comment, tenantA, communityA, privatePost, userA]);
-    await owner.query(`INSERT INTO ${table("content_reports")} (id,tenant_id,community_id,reporter_user_id,post_id,comment_id,reason_code) VALUES ($1,$3,$4,$5,$6,NULL,'spam'),($2,$3,$4,$5,NULL,$7,'abuse')`, [postReport, commentReport, tenantA, communityA, visitor, privatePost, comment]);
+    await owner.query(`INSERT INTO ${table("content_reports")} (id,tenant_id,community_id,reporter_user_id,post_id,comment_id,reason_code) VALUES ($1,$3,$4,$5,$6,NULL,'spam'),($2,$3,$4,$5,NULL,$7,'harassment')`, [postReport, commentReport, tenantA, communityA, visitor, privatePost, comment]);
     await owner.query(`INSERT INTO ${table("promotion_placements")} (id,code,name,description) VALUES ($1,$2,'Placement','Test placement')`, [placement, `placement-${placement}`]);
     await owner.query(`INSERT INTO ${table("promotion_campaigns")} (id,tenant_id,community_id,name,headline,description,placement_id,submitted_by_user_id,review_status,requested_start_at) VALUES ($1,$3,$4,'Approve me','Headline','Body',$5,$6,'pending',$7),($2,$3,$4,'Reject me','Headline','Body',$5,$6,'pending',$7)`, [approveCampaign, rejectCampaign, tenantA, communityA, placement, userA, future()]);
 
@@ -1110,19 +1113,20 @@ describe("Local PostgreSQL schema", () => {
     const runtimeFunctions = await owner.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname=$1 AND has_function_privilege('spark_app',p.oid,'EXECUTE') ORDER BY p.proname`, [namespace]);
     expect(runtimeFunctions.rows.map((row) => row.proname)).toEqual([
-      "auth_revoke_session", "auth_session_principal", "can_manage_community", "can_read_community", "can_read_post", "community_by_slug", "community_filter_values", "discover_communities",
+      "auth_revoke_session", "auth_session_principal", "can_manage_community", "can_moderate_community", "can_read_community", "can_read_post", "community_by_slug", "community_comment",
+      "community_feed", "community_filter_values", "community_post", "community_post_comments", "community_report_queue", "discover_communities",
       "has_platform_role", "insight_flow", "insight_issue_states", "insight_members", "insight_sprint_burndown", "insight_sprint_outcomes", "is_community_member", "is_coworker",
       "is_session_user", "is_workspace_member", "my_communities", "session_workspace_ids", "staff_active_session_count", "staff_active_user_totals", "staff_activity_series", "staff_billing_counts",
       "staff_billing_mrr_series", "staff_billing_plan_mix", "staff_billing_revenue", "staff_community_daily", "staff_community_health", "staff_community_health_counts", "staff_community_series", "staff_engagement_heatmap",
       "staff_grant_role", "staff_list_invoices", "staff_list_reports", "staff_list_subscriptions", "staff_moderate_community", "staff_open_report_counts", "staff_overview", "staff_report_context",
       "staff_report_daily", "staff_report_preview", "staff_report_reasons", "staff_report_stats", "staff_report_top_communities", "staff_resolve_report", "staff_retention_cohorts", "staff_review_campaign",
       "staff_revoke_role", "staff_set_user_status", "staff_top_communities", "staff_user_activity", "staff_user_risk", "staff_user_roles", "staff_user_session_count", "staff_user_sessions",
-      "ws_accept_invitation", "ws_add_community_member", "ws_cancel_event", "ws_complete_sprint", "ws_create_community", "ws_create_event", "ws_create_invitation", "ws_create_issue",
-      "ws_create_milestone", "ws_create_project", "ws_create_sprint", "ws_create_workspace", "ws_decide_community_request", "ws_get_notification_preferences", "ws_invitation_preview", "ws_join_community",
+      "ws_accept_invitation", "ws_add_community_member", "ws_cancel_event", "ws_complete_sprint", "ws_create_comment", "ws_create_community", "ws_create_event", "ws_create_invitation", "ws_create_issue",
+      "ws_create_milestone", "ws_create_post", "ws_create_project", "ws_create_sprint", "ws_create_workspace", "ws_decide_community_request", "ws_delete_comment", "ws_delete_post", "ws_get_notification_preferences", "ws_invitation_preview", "ws_join_community",
       "ws_leave_community", "ws_list_community_member_candidates", "ws_list_community_members", "ws_list_community_requests", "ws_list_members", "ws_list_my_community_requests", "ws_list_notifications", "ws_list_workspace_communities",
-      "ws_mark_notification_read", "ws_mark_notifications_read", "ws_rebaseline_project", "ws_remove_community_member", "ws_remove_member", "ws_request_community_membership", "ws_resend_invitation", "ws_respond_event",
+      "ws_mark_notification_read", "ws_mark_notifications_read", "ws_moderate_content", "ws_rebaseline_project", "ws_remove_community_member", "ws_remove_member", "ws_report_content", "ws_request_community_membership", "ws_resend_invitation", "ws_respond_event",
       "ws_revoke_invitation", "ws_save_phases", "ws_set_community_role", "ws_set_member_role", "ws_set_notification_preferences", "ws_start_sprint", "ws_switch_methodology", "ws_unread_notification_count",
-      "ws_update_community", "ws_update_event", "ws_update_issue", "ws_update_milestone", "ws_update_project", "ws_update_sprint", "ws_update_status", "ws_update_workspace",
+      "ws_update_comment", "ws_update_community", "ws_update_event", "ws_update_issue", "ws_update_milestone", "ws_update_post", "ws_update_project", "ws_update_sprint", "ws_update_status", "ws_update_workspace",
       "ws_withdraw_community_request",
     ]);
   });
@@ -1406,10 +1410,10 @@ describe("Local PostgreSQL schema", () => {
     expect([before[at(18)]!.closed, before[at(17)]!.closed]).toEqual(["0", "0"]);
     await insightReport(fixture, community, "spam", "resolved", utcDay(20, 10), utcDay(18, 10));
     await insightReport(fixture, community, "spam", "dismissed", utcDay(20, 12), utcDay(18, 16));
-    await insightReport(fixture, community, "abuse", "open", utcDay(19, 8));
-    await insightReport(fixture, community, "abuse", "resolved", utcDay(19, 9), utcDay(17, 9));
+    await insightReport(fixture, community, "harassment", "open", utcDay(19, 8));
+    await insightReport(fixture, community, "harassment", "resolved", utcDay(19, 9), utcDay(17, 9));
     // Opened before the range, closed inside it: part of the backlog from the first day.
-    await insightReport(fixture, community, "abuse", "resolved", utcDay(40, 9), utcDay(17, 10));
+    await insightReport(fixture, community, "harassment", "resolved", utcDay(40, 9), utcDay(17, 10));
     const after = await daily();
     expect(after).toHaveLength(30);
     expect(after[29]!.day).toBe(utcDay(0).toISOString().slice(0, 10));
@@ -1430,7 +1434,11 @@ describe("Local PostgreSQL schema", () => {
   it("groups open reports by reason and community", async () => {
     const fixture = await insightFixture();
     const busy = await insightCommunity(fixture, "Busy Reports"), calm = await insightCommunity(fixture, "Calm Reports");
-    const reasonA = `reason-${randomUUID()}`, reasonB = `reason-${randomUUID()}`;
+    // Reasons are a closed set (0034), so the counts are compared with the queue before these reports.
+    const reasonA = "misinformation", reasonB = "self_promotion";
+    const openByReason = async () => new Map((await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_reasons")}()`)).rows
+      .map((row) => [row.reason as string, Number(row.open_count)]));
+    const before = await openByReason();
     for (let index = 0; index < 3; index++) await insightReport(fixture, busy, reasonA);
     await insightReport(fixture, busy, reasonB, "reviewing");
     await insightReport(fixture, calm, reasonB);
@@ -1438,8 +1446,9 @@ describe("Local PostgreSQL schema", () => {
     await insightReport(fixture, calm, reasonA, "dismissed", new Date(), new Date());
     await insightReport(fixture, calm, reasonA, "resolved", new Date(), new Date());
     const reasons = (await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_reasons")}()`)).rows;
-    expect(reasons.find((row) => row.reason === reasonA)).toEqual({ reason: reasonA, open_count: "3" });
-    expect(reasons.find((row) => row.reason === reasonB)).toEqual({ reason: reasonB, open_count: "2" });
+    const after = await openByReason();
+    expect((after.get(reasonA) ?? 0) - (before.get(reasonA) ?? 0)).toBe(3);
+    expect((after.get(reasonB) ?? 0) - (before.get(reasonB) ?? 0)).toBe(2);
     const reasonCounts = reasons.map((row) => Number(row.open_count));
     expect(reasonCounts).toEqual([...reasonCounts].sort((a, b) => b - a));
     const top = (await asSession(fixture.contentModerator, `SELECT * FROM ${fn("staff_report_top_communities")}(20)`)).rows;
@@ -6124,5 +6133,1129 @@ describe("Community membership writes", () => {
       [name, !internal.includes(name), ['search_path=""'], !internal.includes(name), false, false]));
     const kinds = (await owner.query(`SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.conname='notifications_kind_allowed'`, [namespace])).rows[0].def as string;
     for (const kind of ["community_request_received", "community_request_approved", "community_request_rejected", "event_cancelled"]) expect(kinds).toContain(kind);
+  });
+});
+
+type PostInput = { title?: string; body?: string; createdAt?: string; moderation?: "visible" | "hidden"; deleted?: boolean; visibility?: "public" | "members" | "hidden" };
+// A post written by the table owner; createdAt is a timestamptz literal so tests control microseconds.
+async function plantPost(host: Host, community: string, author: string, input: PostInput = {}) {
+  const id = randomUUID();
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("posts")} (id,tenant_id,community_id,author_user_id,title,body,visibility,moderation_status,created_at,deleted_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,coalesce($9::timestamptz,now()),CASE WHEN $10::boolean THEN now() END)`,
+    [id, host.workspace, community, author, input.title ?? "A post", input.body ?? "Post body", input.visibility ?? "members", input.moderation ?? "visible",
+      input.createdAt ?? null, input.deleted ?? false]);
+  return id;
+}
+type CommentInput = { body?: string; createdAt?: string; moderation?: "visible" | "hidden"; deleted?: boolean };
+async function plantComment(host: Host, community: string, post: string, author: string, input: CommentInput = {}) {
+  const id = randomUUID();
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("post_comments")} (id,tenant_id,community_id,post_id,author_user_id,body,moderation_status,created_at,deleted_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,coalesce($8::timestamptz,now()),CASE WHEN $9::boolean THEN now() END)`,
+    [id, host.workspace, community, post, author, input.body ?? "Comment body", input.moderation ?? "visible", input.createdAt ?? null, input.deleted ?? false]);
+  return id;
+}
+async function plantReport(host: Host, community: string, reporter: string, target: { post?: string; comment?: string }, status = "open") {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,comment_id,reason_code,status,resolved_at)
+    VALUES ($1,$2,$3,$4,$5,'spam',$6::text,CASE WHEN $6::text IN ('resolved','dismissed') THEN now() END)`, [host.workspace, community, reporter, target.post ?? null, target.comment ?? null, status]);
+}
+type FeedRow = { id: string; community_id: string; author_id: string; author_name: string; author_avatar_url: string | null; title: string; excerpt: string; truncated: boolean;
+  created_at: Date; edited_at: Date | null; comment_count: string; moderation_status: string; version: number; viewer_is_author: boolean; viewer_reported: boolean; cursor_ts: string };
+const feedCall = `SELECT *, created_at::text AS cursor_ts FROM ${fn("community_feed")}($1,$2::timestamptz,$3,$4)`;
+const feed = async (who: Account | null, community: string, before: [string, string] | null = null, limit: unknown = 50) =>
+  (await asSession(who?.token ?? null, feedCall, [community, before?.[0] ?? null, before?.[1] ?? null, limit])).rows as FeedRow[];
+const feedIds = async (who: Account | null, community: string) => (await feed(who, community)).map((row) => row.id);
+const postDetail = async (who: Account | null, post: string) =>
+  (await asSession(who?.token ?? null, `SELECT * FROM ${fn("community_post")}($1)`, [post])).rows as Record<string, unknown>[];
+type CommentRow = { id: string; post_id: string; author_id: string; author_name: string; author_avatar_url: string | null; body: string; created_at: Date; edited_at: Date | null;
+  moderation_status: string; version: number; viewer_is_author: boolean; viewer_reported: boolean; cursor_ts: string };
+const commentsCall = `SELECT *, created_at::text AS cursor_ts FROM ${fn("community_post_comments")}($1,$2::timestamptz,$3,$4)`;
+const comments = async (who: Account | null, post: string, after: [string, string] | null = null, limit: unknown = 50) =>
+  (await asSession(who?.token ?? null, commentsCall, [post, after?.[0] ?? null, after?.[1] ?? null, limit])).rows as CommentRow[];
+const commentDetail = async (who: Account | null, comment: string) =>
+  (await asSession(who?.token ?? null, `SELECT * FROM ${fn("community_comment")}($1)`, [comment])).rows as Record<string, unknown>[];
+const canModerate = async (who: Account | null, community: string) =>
+  (await asSession(who?.token ?? null, `SELECT ${fn("can_moderate_community")}($1) AS allowed`, [community])).rows[0].allowed as boolean;
+const communityGone = { code: "P0002", message: "Community not found" };
+const membersOnly = { code: "42501", message: "Community members only" };
+const postGone = { code: "P0002", message: "Post not found" };
+
+describe("Community content reads", () => {
+  it("reads public community content without a session", async () => {
+    const host = await hostWorkspace("Open content host");
+    const stranger = await account("Open content stranger");
+    const pub = await communityFixture(host, { name: "Open Circle" });
+    const priv = await communityFixture(host, { name: "Closed Circle", visibility: "private" });
+    const hid = await communityFixture(host, { name: "Secret Circle", visibility: "hidden" });
+    const archived = await communityFixture(host, { name: "Old Circle" });
+    const post = await plantPost(host, pub, host.owner.id, { title: "Hello", body: "Public body" });
+    const comment = await plantComment(host, pub, post, host.owner.id, { body: "First" });
+    await plantPost(host, priv, host.owner.id);
+    await plantPost(host, hid, host.owner.id);
+    await plantPost(host, archived, host.owner.id);
+    await owner.query(`UPDATE ${table("communities")} SET archived_at=now() WHERE id=$1`, [archived]);
+    for (const who of [null, stranger]) {
+      const rows = await feed(who, pub);
+      expect(rows.map((row) => [row.id, row.title, row.excerpt, row.truncated, row.viewer_is_author, row.viewer_reported])).toEqual([[post, "Hello", "Public body", false, false, false]]);
+      expect((await postDetail(who, post)).map((row) => [row.id, row.community_slug, row.body, row.viewer_is_member, row.viewer_can_moderate, row.community_frozen]))
+        .toEqual([[post, communitySlug(pub), "Public body", false, false, false]]);
+      expect((await comments(who, post)).map((row) => [row.id, row.body])).toEqual([[comment, "First"]]);
+      expect((await commentDetail(who, comment)).map((row) => [row.id, row.post_id, row.community_id])).toEqual([[comment, post, pub]]);
+      await expect(feed(who, priv)).rejects.toMatchObject(membersOnly);
+      await expect(feed(who, hid)).rejects.toMatchObject(communityGone);
+      await expect(feed(who, archived)).rejects.toMatchObject(communityGone);
+      await expect(feed(who, randomUUID())).rejects.toMatchObject(communityGone);
+    }
+    // Row access follows the same rule for the runtime role.
+    expect((await asSession(null, `SELECT id FROM ${table("posts")} WHERE id=$1`, [post])).rows).toEqual([{ id: post }]);
+    expect((await asSession(null, `SELECT id FROM ${table("post_comments")} WHERE id=$1`, [comment])).rows).toEqual([{ id: comment }]);
+  });
+
+  it("reads private content as a member only", async () => {
+    const host = await hostWorkspace("Private content host");
+    const member = await account("Private member"), stranger = await account("Private stranger"), admin = await account("Private host admin");
+    await addMember(host.workspace, admin, "admin");
+    const priv = await communityFixture(host, { name: "Members Circle", visibility: "private" });
+    const hid = await communityFixture(host, { name: "Hidden Members Circle", visibility: "hidden" });
+    await joinCommunity(host, priv, member);
+    await joinCommunity(host, hid, member);
+    const post = await plantPost(host, priv, member.id, { title: "Inside" });
+    const comment = await plantComment(host, priv, post, host.owner.id);
+    const hiddenPost = await plantPost(host, hid, host.owner.id);
+    expect((await feed(member, priv)).map((row) => [row.id, row.viewer_is_author])).toEqual([[post, true]]);
+    expect(await feedIds(member, hid)).toEqual([hiddenPost]);
+    expect((await postDetail(member, post)).map((row) => [row.viewer_is_author, row.viewer_is_member, row.viewer_can_moderate])).toEqual([[true, true, false]]);
+    expect((await postDetail(host.owner, post)).map((row) => [row.viewer_is_author, row.viewer_is_member, row.viewer_can_moderate])).toEqual([[false, true, true]]);
+    // A signed-in non-member and a host workspace admin who is not a member get nothing.
+    for (const who of [stranger, admin]) {
+      await expect(feed(who, priv)).rejects.toMatchObject(membersOnly);
+      expect(await postDetail(who, post)).toEqual([]);
+      await expect(comments(who, post)).rejects.toMatchObject(postGone);
+      expect(await commentDetail(who, comment)).toEqual([]);
+      expect((await asSession(who.token, `SELECT id FROM ${table("posts")} WHERE id=$1`, [post])).rows).toEqual([]);
+    }
+    // The host admin sees that the hidden community exists (C1) but not its content; a stranger does not see it.
+    await expect(feed(admin, hid)).rejects.toMatchObject(membersOnly);
+    await expect(feed(stranger, hid)).rejects.toMatchObject(communityGone);
+    expect(await postDetail(admin, hiddenPost)).toEqual([]);
+    // Leaving revokes access at once.
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='left',left_at=now() WHERE community_id=$1 AND user_id=$2`, [priv, member.id]);
+    await expect(feed(member, priv)).rejects.toMatchObject(membersOnly);
+    expect(await postDetail(member, post)).toEqual([]);
+  });
+
+  it("shows moderated content to community moderators only", async () => {
+    const host = await hostWorkspace("Moderated host");
+    const member = await account("Moderated member"), moderator = await account("Community moderator"), admin = await account("Moderated host admin");
+    await addMember(host.workspace, admin, "admin");
+    const community = await communityFixture(host, { name: "Moderated Circle" });
+    await joinCommunity(host, community, member);
+    await joinCommunity(host, community, moderator, "moderator");
+    await joinCommunity(host, community, admin);
+    const visible = await plantPost(host, community, member.id, { title: "Visible" });
+    const hidden = await plantPost(host, community, member.id, { title: "Hidden", moderation: "hidden" });
+    const deleted = await plantPost(host, community, member.id, { title: "Deleted", deleted: true });
+    const legacy = await plantPost(host, community, member.id, { title: "Legacy hidden", visibility: "hidden" });
+    const hiddenComment = await plantComment(host, community, visible, member.id, { moderation: "hidden" });
+    const shownComment = await plantComment(host, community, visible, member.id);
+    const deletedComment = await plantComment(host, community, visible, member.id, { deleted: true });
+    const onHiddenPost = await plantComment(host, community, hidden, member.id);
+    for (const who of [null, member, admin]) {
+      expect(await feedIds(who, community)).toEqual([visible]);
+      expect(await postDetail(who, hidden)).toEqual([]);
+      expect((await comments(who, visible)).map((row) => row.id)).toEqual([shownComment]);
+      expect(await commentDetail(who, hiddenComment)).toEqual([]);
+      await expect(comments(who, hidden)).rejects.toMatchObject(postGone);
+      expect(await commentDetail(who, onHiddenPost)).toEqual([]);
+    }
+    for (const who of [moderator, host.owner]) {
+      const rows = await feed(who, community);
+      expect(rows.map((row) => [row.id, row.moderation_status]).sort()).toEqual([[hidden, "hidden"], [visible, "visible"]].sort());
+      expect((await postDetail(who, hidden)).map((row) => [row.moderation_status, row.viewer_can_moderate])).toEqual([["hidden", true]]);
+      expect((await comments(who, visible)).map((row) => [row.id, row.moderation_status]).sort()).toEqual([[hiddenComment, "hidden"], [shownComment, "visible"]].sort());
+      expect((await comments(who, hidden)).map((row) => row.id)).toEqual([onHiddenPost]);
+      expect((await commentDetail(who, hiddenComment)).map((row) => row.moderation_status)).toEqual(["hidden"]);
+    }
+    for (const who of [null, member, moderator, host.owner]) {
+      for (const gone of [deleted, legacy]) {
+        expect(await postDetail(who, gone)).toEqual([]);
+        await expect(comments(who, gone)).rejects.toMatchObject(postGone);
+      }
+      expect(await commentDetail(who, deletedComment)).toEqual([]);
+    }
+    // A host workspace admin gets no moderation from that role; frozen communities stay readable.
+    expect(await canModerate(admin, community)).toBe(false);
+    expect(await canModerate(member, community)).toBe(false);
+    expect(await canModerate(null, community)).toBe(false);
+    expect(await canModerate(moderator, community)).toBe(true);
+    expect(await canModerate(host.owner, community)).toBe(true);
+    await owner.query(`UPDATE ${table("communities")} SET frozen_at=now() WHERE id=$1`, [community]);
+    expect((await postDetail(member, visible)).map((row) => row.community_frozen)).toEqual([true]);
+    expect(await feedIds(member, community)).toEqual([visible]);
+    expect(await canModerate(moderator, community)).toBe(true);
+    await owner.query(`UPDATE ${table("communities")} SET frozen_at=NULL,archived_at=now() WHERE id=$1`, [community]);
+    expect(await canModerate(moderator, community)).toBe(false);
+    expect(await postDetail(moderator, visible)).toEqual([]);
+  });
+
+  it("pages the feed without gaps or duplicates", async () => {
+    const host = await hostWorkspace("Feed paging host");
+    const community = await communityFixture(host, { name: "Paging Circle" });
+    // Newest first with limit 3, the tied pair is rows 3 and 4: the tie splits across pages 1 and 2, so a
+    // cursor comparing created_at alone would skip the second tied row.
+    const times = ["2026-01-01 10:00:00.000001+00", "2026-01-01 10:00:00.000002+00", "2026-01-01 10:00:00.000003+00",
+      "2026-01-02 09:00:00.000004+00", "2026-01-02 09:00:00.000004+00", "2026-01-03 09:00:00+00", "2026-01-04 09:00:00+00"];
+    for (const at of times) await plantPost(host, community, host.owner.id, { createdAt: at });
+    const expected = (await owner.query(`SELECT id FROM ${table("posts")} WHERE community_id=$1 ORDER BY created_at DESC, id DESC`, [community])).rows.map((row) => row.id);
+    expect(expected).toHaveLength(7);
+    const seen: string[] = [];
+    let cursor: [string, string] | null = null;
+    for (let page = 0; page < 5; page++) {
+      const rows: FeedRow[] = await feed(null, community, cursor, 3);
+      const shown = rows.slice(0, 3);
+      seen.push(...shown.map((row) => row.id));
+      if (rows.length <= 3) break;
+      expect(rows).toHaveLength(4);
+      cursor = [shown.at(-1)!.cursor_ts, shown.at(-1)!.id];
+    }
+    expect(seen).toEqual(expected);
+    for (const limit of [0, 51, null]) await expect(feed(null, community, null, limit)).rejects.toMatchObject({ code: "22023", message: "Invalid post limit" });
+    await expect(asSession(null, feedCall, [community, "2026-01-01 00:00:00+00", null, 3])).rejects.toMatchObject({ code: "22023", message: "Invalid post cursor" });
+    await expect(asSession(null, feedCall, [community, null, randomUUID(), 3])).rejects.toMatchObject({ code: "22023", message: "Invalid post cursor" });
+    // The excerpt is the first 400 characters.
+    const long = await plantPost(host, community, host.owner.id, { body: `${"x".repeat(400)}tail` });
+    const [first] = await feed(null, community, null, 1);
+    expect([first!.id, first!.excerpt, first!.truncated]).toEqual([long, "x".repeat(400), true]);
+  });
+
+  it("pages comments oldest first", async () => {
+    const host = await hostWorkspace("Comment paging host");
+    const member = await account("Comment paging member");
+    const community = await communityFixture(host, { name: "Comment Circle", visibility: "private" });
+    await joinCommunity(host, community, member);
+    const post = await plantPost(host, community, host.owner.id);
+    // Oldest first with limit 3, the tied pair is rows 3 and 4: the tie splits across pages 1 and 2.
+    const times = ["2026-02-01 10:00:00.000001+00", "2026-02-01 10:00:00.000002+00", "2026-02-01 10:00:00.000003+00", "2026-02-01 10:00:00.000003+00",
+      "2026-02-02 09:00:00+00", "2026-02-03 09:00:00+00", "2026-02-04 09:00:00+00"];
+    for (const at of times) await plantComment(host, community, post, member.id, { createdAt: at });
+    const expected = (await owner.query(`SELECT id FROM ${table("post_comments")} WHERE post_id=$1 ORDER BY created_at, id`, [post])).rows.map((row) => row.id);
+    expect(expected).toHaveLength(7);
+    const seen: string[] = [];
+    let cursor: [string, string] | null = null;
+    for (let page = 0; page < 5; page++) {
+      const rows: CommentRow[] = await comments(member, post, cursor, 3);
+      const shown = rows.slice(0, 3);
+      seen.push(...shown.map((row) => row.id));
+      if (rows.length <= 3) break;
+      expect(rows).toHaveLength(4);
+      cursor = [shown.at(-1)!.cursor_ts, shown.at(-1)!.id];
+    }
+    expect(seen).toEqual(expected);
+    for (const limit of [0, 51, null]) await expect(comments(member, post, null, limit)).rejects.toMatchObject({ code: "22023", message: "Invalid comment limit" });
+    await expect(asSession(member.token, commentsCall, [post, "2026-01-01 00:00:00+00", null, 3])).rejects.toMatchObject({ code: "22023", message: "Invalid comment cursor" });
+    await expect(asSession(member.token, commentsCall, [post, null, randomUUID(), 3])).rejects.toMatchObject({ code: "22023", message: "Invalid comment cursor" });
+    await expect(comments(member, randomUUID())).rejects.toMatchObject(postGone);
+    // Comments of a post hidden by moderation are unreadable for members.
+    const hiddenPost = await plantPost(host, community, member.id, { moderation: "hidden" });
+    await plantComment(host, community, hiddenPost, member.id);
+    await expect(comments(member, hiddenPost)).rejects.toMatchObject(postGone);
+    expect(await comments(host.owner, hiddenPost)).toHaveLength(1);
+  });
+
+  it("counts and flags for the viewer", async () => {
+    const host = await hostWorkspace("Flags host");
+    const member = await account("Flags member"), reporter = await account("Flags reporter"), gone = await account("Flags leaver");
+    const community = await communityFixture(host, { name: "Flags Circle" });
+    for (const who of [member, reporter, gone]) await joinCommunity(host, community, who);
+    const post = await plantPost(host, community, gone.id, { title: "By a former member" });
+    await plantComment(host, community, post, member.id, { createdAt: "2026-03-01 10:00:00+00" });
+    await plantComment(host, community, post, member.id, { createdAt: "2026-03-01 10:01:00+00" });
+    await plantComment(host, community, post, member.id, { moderation: "hidden" });
+    await plantComment(host, community, post, member.id, { deleted: true });
+    const reported = await plantComment(host, community, post, gone.id, { createdAt: "2026-03-01 10:02:00+00" });
+    await plantReport(host, community, reporter.id, { post });
+    await plantReport(host, community, member.id, { post }, "dismissed");
+    await plantReport(host, community, reporter.id, { comment: reported }, "reviewing");
+    await owner.query(`UPDATE ${table("users")} SET avatar_url='https://example.com/a.png', status='deleted', deleted_at=now() WHERE id=$1`, [gone.id]);
+    const counts = async (who: Account | null) => (await feed(who, community)).map((row) => [row.comment_count, row.viewer_reported, row.author_name, row.author_avatar_url]);
+    expect(await counts(reporter)).toEqual([["3", true, "Former member", null]]);
+    expect(await counts(member)).toEqual([["3", false, "Former member", null]]);
+    expect(await counts(host.owner)).toEqual([["3", false, "Former member", null]]);
+    expect(await counts(null)).toEqual([["3", false, "Former member", null]]);
+    expect((await postDetail(reporter, post)).map((row) => [row.comment_count, row.viewer_reported, row.author_name, row.author_avatar_url])).toEqual([["3", true, "Former member", null]]);
+    expect((await postDetail(member, post)).map((row) => row.viewer_reported)).toEqual([false]);
+    const flagged = (await comments(reporter, post)).map((row) => [row.id === reported, row.viewer_reported, row.author_name]);
+    expect(flagged).toEqual([[false, false, "Flags member"], [false, false, "Flags member"], [true, true, "Former member"]]);
+    expect((await commentDetail(reporter, reported)).map((row) => [row.viewer_reported, row.author_name, row.author_avatar_url])).toEqual([[true, "Former member", null]]);
+    expect((await commentDetail(member, reported)).map((row) => row.viewer_reported)).toEqual([false]);
+    // Projections never carry an email or a reporter column.
+    for (const row of [...await feed(reporter, community), ...await postDetail(reporter, post), ...await comments(reporter, post), ...await commentDetail(reporter, reported)]) {
+      expect(Object.keys(row).some((key) => key.includes("email") || key.includes("reporter"))).toBe(false);
+    }
+  });
+
+  it("adds edited_at and body length checks", async () => {
+    const columns = (await owner.query(`SELECT table_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema=$1 AND column_name='edited_at' AND table_name IN ('posts','post_comments') ORDER BY table_name`, [namespace])).rows;
+    expect(columns).toEqual([{ table_name: "post_comments", data_type: "timestamp with time zone", is_nullable: "YES" }, { table_name: "posts", data_type: "timestamp with time zone", is_nullable: "YES" }]);
+    const checks = (await owner.query(`SELECT conname,convalidated FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND conname IN ('posts_body_length','post_comments_body_length') ORDER BY conname`, [namespace])).rows;
+    expect(checks).toEqual([{ conname: "post_comments_body_length", convalidated: true }, { conname: "posts_body_length", convalidated: true }]);
+    const host = await hostWorkspace("Length host");
+    const community = await communityFixture(host, { name: "Length Circle" });
+    const post = await plantPost(host, community, host.owner.id);
+    for (const body of ["   ", "x".repeat(10001)]) {
+      await reject(`INSERT INTO ${table("posts")} (tenant_id,community_id,author_user_id,title,body) VALUES ($1,$2,$3,'Title',$4)`, [host.workspace, community, host.owner.id, body], "23514");
+    }
+    for (const body of ["   ", "x".repeat(2001)]) {
+      await reject(`INSERT INTO ${table("post_comments")} (tenant_id,community_id,post_id,author_user_id,body) VALUES ($1,$2,$3,$4,$5)`, [host.workspace, community, post, host.owner.id, body], "23514");
+    }
+    await plantPost(host, community, host.owner.id, { body: "x".repeat(10000) });
+    await plantComment(host, community, post, host.owner.id, { body: "x".repeat(2000) });
+  });
+
+  it("keeps the content read functions definers with an empty search_path", async () => {
+    const exposed = ["can_moderate_community", "can_read_post", "community_comment", "community_feed", "community_post", "community_post_comments"];
+    const rows = (await owner.query(`SELECT p.proname, p.prosecdef, p.provolatile, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname COLLATE "C"`, [namespace, exposed])).rows;
+    expect(rows.map((row) => [row.proname, row.prosecdef, row.provolatile, row.proconfig, row.runtime, row.worker, row.auth]))
+      .toEqual(exposed.map((name) => [name, true, "s", ['search_path=""'], true, false, false]));
+  });
+});
+
+type PostWrite = { title?: string | null; body?: string | null; key?: string | null; hash?: Buffer | null };
+type PostCreated = { outcome: string; post_id: string | null };
+type CommentCreated = { outcome: string; comment_id: string | null };
+type ContentUpdated = { outcome: string; version: number | null };
+const createPostCall = `SELECT * FROM ${fn("ws_create_post")}($1,$2,$3,$4,$5)`;
+const postArgs = (community: string, input: PostWrite) => [community, input.title === undefined ? "A post" : input.title, input.body === undefined ? "Post body" : input.body,
+  input.key ?? null, input.hash ?? null];
+const createPost = async (who: Account, community: string, input: PostWrite = {}) => (await asSession(who.token, createPostCall, postArgs(community, input))).rows[0] as PostCreated;
+const createCommentCall = `SELECT * FROM ${fn("ws_create_comment")}($1,$2,$3,$4)`;
+const commentArgs = (post: string, input: PostWrite) => [post, input.body === undefined ? "A comment" : input.body, input.key ?? null, input.hash ?? null];
+const createComment = async (who: Account, post: string, input: PostWrite = {}) => (await asSession(who.token, createCommentCall, commentArgs(post, input))).rows[0] as CommentCreated;
+const updatePost = async (who: Account, post: string, version: number, title: string | null, body: string | null) =>
+  (await asSession(who.token, `SELECT * FROM ${fn("ws_update_post")}($1,$2,$3,$4)`, [post, version, title, body])).rows[0] as ContentUpdated;
+const updateComment = async (who: Account, comment: string, version: number, body: string | null) =>
+  (await asSession(who.token, `SELECT * FROM ${fn("ws_update_comment")}($1,$2,$3)`, [comment, version, body])).rows[0] as ContentUpdated;
+const deletePost = (who: Account, post: string) => outcome(who, "ws_delete_post($1)", [post]);
+const deleteComment = (who: Account, comment: string) => outcome(who, "ws_delete_comment($1)", [comment]);
+const refusedPost = (result: string): PostCreated => ({ outcome: result, post_id: null });
+const refusedComment = (result: string): CommentCreated => ({ outcome: result, comment_id: null });
+const refusedUpdate = (result: string): ContentUpdated => ({ outcome: result, version: null });
+const invalid = (message: string) => ({ code: "22023", message });
+async function postRow(post: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT tenant_id,community_id,author_user_id,title,body,visibility,moderation_status,version,edited_at IS NOT NULL AS edited,deleted_at IS NOT NULL AS deleted
+    FROM ${table("posts")} WHERE id=$1`, [post])).rows[0];
+}
+async function commentRow(comment: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT post_id,author_user_id,body,moderation_status,version,edited_at IS NOT NULL AS edited,deleted_at IS NOT NULL AS deleted
+    FROM ${table("post_comments")} WHERE id=$1`, [comment])).rows[0];
+}
+async function postNotices(post: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT n.tenant_id,n.recipient_user_id,n.kind,n.title,n.body,n.resource_type,o.tenant_id AS outbox_tenant,o.processed_at IS NOT NULL AS processed
+    FROM ${table("notifications")} n JOIN ${table("outbox_events")} o ON o.id=n.outbox_event_id WHERE n.resource_id=$1 ORDER BY n.created_at,n.id`, [post])).rows;
+}
+async function setCommunity(community: string, assignments: string) {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`UPDATE ${table("communities")} SET ${assignments} WHERE id=$1`, [community]);
+}
+async function hideContent(kind: "posts" | "post_comments", id: string) {
+  await owner.query("SET ROLE spark_owner");
+  await owner.query(`UPDATE ${table(kind)} SET moderation_status='hidden',version=version+1 WHERE id=$1`, [id]);
+}
+const postLink = (community: string, post: string) => `/communities/${communitySlug(community)}/posts/${post}`;
+const commentedNotices = async (who: Account) => (await listNotices(who)).filter((row) => row.kind === "post_commented");
+
+describe("Community content writes", () => {
+  it("creates posts for active members only", async () => {
+    const host = await hostWorkspace("Post create host");
+    const member = await account("Post member"), stranger = await account("Post stranger"), suspended = await account("Post suspended");
+    const pub = await communityFixture(host, { name: "Post Open" });
+    const priv = await communityFixture(host, { name: "Post Private", visibility: "private" });
+    const hid = await communityFixture(host, { name: "Post Hidden", visibility: "hidden" });
+    const frozen = await communityFixture(host, { name: "Post Frozen", frozen: true });
+    const archived = await communityFixture(host, { name: "Post Archived" });
+    for (const community of [pub, priv, hid, frozen, archived]) await joinCommunity(host, community, member);
+    await joinCommunity(host, pub, suspended);
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='suspended' WHERE community_id=$1 AND user_id=$2`, [pub, suspended.id]);
+    await setCommunity(archived, "archived_at=now()");
+
+    const created = await createPost(member, pub, { title: "  Hello  ", body: "  Body text  " });
+    expect(created).toEqual({ outcome: "created", post_id: expect.any(String) });
+    expect(await postRow(created.post_id!)).toEqual({ tenant_id: host.workspace, community_id: pub, author_user_id: member.id, title: "Hello", body: "Body text",
+      visibility: "members", moderation_status: "visible", version: 1, edited: false, deleted: false });
+    expect(await feedIds(member, pub)).toEqual([created.post_id]);
+    expect((await createPost(member, priv)).outcome).toBe("created");
+    expect((await createPost(member, hid)).outcome).toBe("created");
+    // Readable without an active membership: not_a_member (the private summary is public); unreadable: not_found.
+    expect(await createPost(stranger, pub)).toEqual(refusedPost("not_a_member"));
+    expect(await createPost(stranger, priv)).toEqual(refusedPost("not_a_member"));
+    expect(await createPost(suspended, pub)).toEqual(refusedPost("not_a_member"));
+    expect(await createPost(stranger, hid)).toEqual(refusedPost("not_found"));
+    expect(await createPost(member, archived)).toEqual(refusedPost("not_found"));
+    expect(await createPost(member, randomUUID())).toEqual(refusedPost("not_found"));
+    expect(await createPost(member, frozen)).toEqual(refusedPost("community_frozen"));
+    // Trimmed limits: title 1-150, body 1-10,000.
+    for (const title of ["x".repeat(151), "   ", null]) await expect(createPost(member, pub, { title })).rejects.toMatchObject(invalid("Invalid post title"));
+    for (const body of ["x".repeat(10001), "   ", null]) await expect(createPost(member, pub, { body })).rejects.toMatchObject(invalid("Invalid post body"));
+    expect((await createPost(member, pub, { title: `  ${"x".repeat(150)}  `, body: "y".repeat(10000) })).outcome).toBe("created");
+    await expect(createPost(member, pub, { key: "bad key", hash: randomBytes(32) })).rejects.toMatchObject(invalid("Invalid idempotency key"));
+    await expect(createPost(member, pub, { key: "good-key", hash: randomBytes(31) })).rejects.toMatchObject(invalid("Invalid idempotency key"));
+    expect(await countRows(`${table("posts")} WHERE community_id=$1`, [pub])).toBe(2);
+  });
+
+  it("replays posts by idempotency key", async () => {
+    const host = await hostWorkspace("Post retry host");
+    const member = await account("Post retry member"), other = await account("Post retry other");
+    const pub = await communityFixture(host, { name: "Retry Circle" });
+    const sibling = await communityFixture(host, { name: "Retry Sibling" });
+    const frozen = await communityFixture(host, { name: "Retry Frozen", frozen: true });
+    for (const community of [pub, sibling, frozen]) for (const who of [member, other]) await joinCommunity(host, community, who);
+    const key = `post:${randomUUID()}`, hash = randomBytes(32);
+    const args = postArgs(pub, { title: "Once", key, hash });
+    const { winner, loser, blocked } = await contend([member, member], createPostCall, [args, args]);
+    expect(blocked).toBe(true);
+    expect([winner.outcome, loser.outcome]).toEqual(["created", "replayed"]);
+    expect(loser.post_id).toBe(winner.post_id);
+    expect(await countRows(`${table("posts")} WHERE community_id=$1`, [pub])).toBe(1);
+    expect(await createPost(member, pub, { title: "Once", key, hash })).toEqual({ outcome: "replayed", post_id: winner.post_id });
+    expect(await createPost(member, pub, { title: "Changed", key, hash: randomBytes(32) })).toEqual(refusedPost("idempotency_conflict"));
+    // The same key in another community of the host workspace never replays a foreign post.
+    expect(await createPost(member, sibling, { title: "Once", key, hash })).toEqual(refusedPost("idempotency_conflict"));
+    // Keys are scoped to the actor.
+    const theirs = await createPost(other, pub, { title: "Once", key, hash });
+    expect(theirs.outcome).toBe("created");
+    expect(theirs.post_id).not.toBe(winner.post_id);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT tenant_id,operation,state,resource_id,response_status FROM ${table("idempotency_requests")} WHERE actor_user_id=$1 AND key=$2`, [member.id, key])).rows)
+      .toEqual([{ tenant_id: host.workspace, operation: "community.post.create", state: "completed", resource_id: winner.post_id, response_status: 201 }]);
+    // A refused create keeps no idempotency row.
+    const frozenKey = `frozen:${randomUUID()}`;
+    expect(await createPost(member, frozen, { key: frozenKey, hash })).toEqual(refusedPost("community_frozen"));
+    expect(await countRows(`${table("idempotency_requests")} WHERE key=$1`, [frozenKey])).toBe(0);
+    // Ruling R2: a replay still answers replayed with the original id after the post is gone; the API maps it to 404.
+    expect(await deletePost(member, winner.post_id!)).toBe("ok");
+    expect(await createPost(member, pub, { title: "Once", key, hash })).toEqual({ outcome: "replayed", post_id: winner.post_id });
+  });
+
+  it("edits own content with versions", async () => {
+    const host = await hostWorkspace("Edit host");
+    const author = await account("Edit author"), other = await account("Edit other"), modAuthor = await account("Edit moderator");
+    const pub = await communityFixture(host, { name: "Edit Circle" });
+    await joinCommunity(host, pub, author);
+    await joinCommunity(host, pub, other);
+    await joinCommunity(host, pub, modAuthor, "moderator");
+    const post = (await createPost(author, pub)).post_id!;
+    expect(await updatePost(author, post, 1, "  New title  ", null)).toEqual({ outcome: "ok", version: 2 });
+    expect(await postRow(post)).toMatchObject({ title: "New title", body: "Post body", version: 2, edited: true });
+    expect(await updatePost(author, post, 2, null, "  New body  ")).toEqual({ outcome: "ok", version: 3 });
+    expect(await postRow(post)).toMatchObject({ title: "New title", body: "New body", version: 3 });
+    expect((await postDetail(author, post)).map((row) => row.edited_at === null)).toEqual([false]);
+    expect(await updatePost(other, post, 3, "Mine", null)).toEqual(refusedUpdate("not_author"));
+    expect(await updatePost(author, post, 2, "Stale", null)).toEqual({ outcome: "version_mismatch", version: 3 });
+    expect(await updatePost(author, randomUUID(), 1, "Nobody", null)).toEqual(refusedUpdate("not_found"));
+    await expect(updatePost(author, post, 3, null, null)).rejects.toMatchObject(invalid("Invalid post patch"));
+    await expect(updatePost(author, post, 3, "x".repeat(151), null)).rejects.toMatchObject(invalid("Invalid post title"));
+    await expect(updatePost(author, post, 3, null, "   ")).rejects.toMatchObject(invalid("Invalid post body"));
+
+    const comment = (await createComment(other, post)).comment_id!;
+    expect(await updateComment(other, comment, 1, "  Edited  ")).toEqual({ outcome: "ok", version: 2 });
+    expect(await commentRow(comment)).toMatchObject({ body: "Edited", version: 2, edited: true });
+    expect(await updateComment(author, comment, 2, "Mine")).toEqual(refusedUpdate("not_author"));
+    expect(await updateComment(other, comment, 1, "Stale")).toEqual({ outcome: "version_mismatch", version: 2 });
+    expect(await updateComment(other, randomUUID(), 1, "Nobody")).toEqual(refusedUpdate("not_found"));
+    for (const body of [null, "   ", "x".repeat(2001)]) await expect(updateComment(other, comment, 2, body)).rejects.toMatchObject(invalid("Invalid comment body"));
+
+    await setCommunity(pub, "frozen_at=now()");
+    expect(await updatePost(author, post, 3, "Frozen", null)).toEqual(refusedUpdate("community_frozen"));
+    expect(await updateComment(other, comment, 2, "Frozen")).toEqual(refusedUpdate("community_frozen"));
+    await setCommunity(pub, "frozen_at=NULL");
+
+    // Hidden by moderation: a moderator author still reads it and gets content_hidden; other authors cannot read it.
+    const modPost = (await createPost(modAuthor, pub)).post_id!;
+    const modComment = (await createComment(modAuthor, post)).comment_id!;
+    await hideContent("posts", modPost);
+    await hideContent("post_comments", modComment);
+    expect(await updatePost(modAuthor, modPost, 2, "Again", null)).toEqual(refusedUpdate("content_hidden"));
+    expect(await updateComment(modAuthor, modComment, 2, "Again")).toEqual(refusedUpdate("content_hidden"));
+    const otherPost = (await createPost(other, pub)).post_id!;
+    await hideContent("posts", otherPost);
+    expect(await updatePost(other, otherPost, 2, "Again", null)).toEqual(refusedUpdate("not_found"));
+
+    // After leaving a public community the content is still readable but no longer editable.
+    const leaverPost = (await createPost(other, pub)).post_id!;
+    expect(await outcome(other, "ws_leave_community($1)", [pub])).toBe("ok");
+    expect(await updatePost(other, leaverPost, 1, "Left", null)).toEqual(refusedUpdate("not_a_member"));
+    expect(await updateComment(other, comment, 2, "Left")).toEqual(refusedUpdate("not_a_member"));
+    expect(await postRow(leaverPost)).toMatchObject({ title: "A post", version: 1, edited: false });
+  });
+
+  it("deletes own content and keeps records", async () => {
+    const host = await hostWorkspace("Delete host");
+    const author = await account("Delete author"), other = await account("Delete other"), reporter = await account("Delete reporter");
+    const pub = await communityFixture(host, { name: "Delete Circle" });
+    for (const who of [author, other, reporter]) await joinCommunity(host, pub, who);
+    const post = (await createPost(author, pub)).post_id!;
+    const comment = (await createComment(other, post)).comment_id!;
+    const own = (await createComment(author, post)).comment_id!;
+    await plantReport(host, pub, reporter.id, { post });
+    await owner.query(`INSERT INTO ${table("moderation_actions")} (tenant_id,community_id,post_id,actor_user_id,action,reason) VALUES ($1,$2,$3,$4,'restore','Looks fine')`,
+      [host.workspace, pub, post, host.owner.id]);
+
+    expect(await deleteComment(author, comment)).toBe("not_author");
+    expect(await deleteComment(other, comment)).toBe("ok");
+    expect(await deleteComment(other, comment)).toBe("ok");
+    expect(await commentRow(comment)).toMatchObject({ version: 2, deleted: true });
+    expect(await commentDetail(other, comment)).toEqual([]);
+    expect(await deleteComment(author, comment)).toBe("not_found");
+
+    expect(await deletePost(other, post)).toBe("not_author");
+    expect(await deletePost(author, post)).toBe("ok");
+    expect(await deletePost(author, post)).toBe("ok");
+    expect(await postRow(post)).toMatchObject({ version: 2, deleted: true });
+    expect(await feedIds(author, pub)).toEqual([]);
+    expect(await postDetail(author, post)).toEqual([]);
+    await expect(comments(author, post)).rejects.toMatchObject(postGone);
+    expect(await commentDetail(author, own)).toEqual([]);
+    expect(await deletePost(other, post)).toBe("not_found");
+    expect(await deletePost(author, randomUUID())).toBe("not_found");
+    expect(await countRows(`${table("content_reports")} WHERE post_id=$1`, [post])).toBe(1);
+    expect(await countRows(`${table("moderation_actions")} WHERE post_id=$1`, [post])).toBe(1);
+
+    // The author takes content back after leaving, in a frozen community and while it is hidden.
+    const later = (await createPost(other, pub)).post_id!;
+    const hidden = (await createPost(other, pub)).post_id!;
+    const laterComment = (await createComment(other, later)).comment_id!;
+    await hideContent("posts", hidden);
+    expect(await outcome(other, "ws_leave_community($1)", [pub])).toBe("ok");
+    await setCommunity(pub, "frozen_at=now()");
+    expect(await deleteComment(other, laterComment)).toBe("ok");
+    expect(await deletePost(other, later)).toBe("ok");
+    expect(await deletePost(other, hidden)).toBe("ok");
+    expect(await postRow(hidden)).toMatchObject({ version: 3, deleted: true });
+    // An archived community answers not_found, even to the author.
+    await setCommunity(pub, "frozen_at=NULL");
+    const last = (await createPost(author, pub)).post_id!;
+    await setCommunity(pub, "archived_at=now()");
+    expect(await deletePost(author, last)).toBe("not_found");
+    expect(await postRow(last)).toMatchObject({ deleted: false });
+  });
+
+  it("comments and notifies the post author", async () => {
+    const host = await hostWorkspace("Comment host");
+    const author = await account("Comment author"), commenter = await account("Comment writer"), moderator = await account("Comment moderator");
+    const stranger = await account("Comment stranger"), gone = await account("Comment gone");
+    const pub = await communityFixture(host, { name: "Comment Circle" });
+    const priv = await communityFixture(host, { name: "Comment Private", visibility: "private" });
+    for (const who of [author, commenter, gone]) await joinCommunity(host, pub, who);
+    await joinCommunity(host, pub, moderator, "moderator");
+    await joinCommunity(host, priv, author);
+    const post = (await createPost(author, pub)).post_id!;
+    const first = await createComment(commenter, post, { body: "  Nice post  " });
+    expect(first).toEqual({ outcome: "created", comment_id: expect.any(String) });
+    expect(await commentRow(first.comment_id!)).toEqual({ post_id: post, author_user_id: commenter.id, body: "Nice post", moderation_status: "visible", version: 1,
+      edited: false, deleted: false });
+    const notice = { tenant_id: host.workspace, recipient_user_id: author.id, kind: "post_commented", title: "Comment writer commented on your post in Comment Circle",
+      body: null, resource_type: "post", outbox_tenant: host.workspace, processed: true };
+    expect(await postNotices(post)).toEqual([notice]);
+    expect((await commentedNotices(author)).map((row) => [row.resource_id, row.link, row.body])).toEqual([[post, postLink(pub, post), null]]);
+    // The author's own comment notifies nobody.
+    expect((await createComment(author, post)).outcome).toBe("created");
+    expect(await postNotices(post)).toHaveLength(1);
+    // Membership and readability.
+    expect(await createComment(stranger, post)).toEqual(refusedComment("not_a_member"));
+    const privPost = (await createPost(author, priv)).post_id!;
+    expect(await createComment(stranger, privPost)).toEqual(refusedComment("not_found"));
+    expect(await createComment(commenter, randomUUID())).toEqual(refusedComment("not_found"));
+    for (const body of ["   ", null, "x".repeat(2001)]) await expect(createComment(commenter, post, { body })).rejects.toMatchObject(invalid("Invalid comment body"));
+    expect((await createComment(commenter, post, { body: "x".repeat(2000) })).outcome).toBe("created");
+    // Idempotent replay as for posts: one comment, one notification.
+    const key = `comment:${randomUUID()}`, hash = randomBytes(32);
+    const args = commentArgs(post, { body: "Once", key, hash });
+    const { winner, loser, blocked } = await contend([commenter, commenter], createCommentCall, [args, args]);
+    expect(blocked).toBe(true);
+    expect([winner.outcome, loser.outcome, loser.comment_id]).toEqual(["created", "replayed", winner.comment_id]);
+    expect(await createComment(commenter, post, { body: "Once", key, hash })).toEqual({ outcome: "replayed", comment_id: winner.comment_id });
+    expect(await createComment(commenter, post, { body: "Twice", key, hash: randomBytes(32) })).toEqual(refusedComment("idempotency_conflict"));
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT tenant_id,operation,state,resource_id FROM ${table("idempotency_requests")} WHERE actor_user_id=$1 AND key=$2`, [commenter.id, key])).rows)
+      .toEqual([{ tenant_id: host.workspace, operation: "community.comment.create", state: "completed", resource_id: winner.comment_id }]);
+    expect(await countRows(`${table("post_comments")} WHERE post_id=$1 AND body='Once'`, [post])).toBe(1);
+    expect(await postNotices(post)).toEqual([notice, notice, notice]);
+    // No notification for a deleted post author.
+    const orphan = (await createPost(gone, pub)).post_id!;
+    await owner.query(`UPDATE ${table("users")} SET status='deleted', deleted_at=now() WHERE id=$1`, [gone.id]);
+    expect((await createComment(commenter, orphan)).outcome).toBe("created");
+    expect(await postNotices(orphan)).toEqual([]);
+    // Frozen communities refuse comments.
+    await setCommunity(pub, "frozen_at=now()");
+    expect(await createComment(commenter, post)).toEqual(refusedComment("community_frozen"));
+    await setCommunity(pub, "frozen_at=NULL");
+    // A post hidden by moderation: moderators read it and get content_hidden; members cannot read it.
+    await hideContent("posts", post);
+    expect(await createComment(moderator, post)).toEqual(refusedComment("content_hidden"));
+    expect(await createComment(commenter, post)).toEqual(refusedComment("not_found"));
+    expect(await postNotices(post)).toHaveLength(3);
+  });
+
+  it("revokes content access when membership ends", async () => {
+    const host = await hostWorkspace("Revoke host");
+    const author = await account("Revoke author"), commenter = await account("Revoke commenter");
+    const priv = await communityFixture(host, { name: "Revoke Circle", visibility: "private" });
+    await joinCommunity(host, priv, author);
+    await joinCommunity(host, priv, commenter);
+    const post = (await createPost(author, priv)).post_id!;
+    const comment = (await createComment(commenter, post)).comment_id!;
+    expect((await commentedNotices(author)).map((row) => row.link)).toEqual([postLink(priv, post)]);
+    expect(await outcome(author, "ws_leave_community($1)", [priv])).toBe("ok");
+    expect(await postDetail(author, post)).toEqual([]);
+    await expect(comments(author, post)).rejects.toMatchObject(postGone);
+    expect(await commentDetail(author, comment)).toEqual([]);
+    expect((await commentedNotices(author)).map((row) => [row.resource_id, row.link, row.title])).toEqual([[post, null, "Revoke commenter commented on your post in Revoke Circle"]]);
+    // A later comment still reaches the author who left, without a link; deletion still works.
+    expect((await createComment(commenter, post)).outcome).toBe("created");
+    expect((await commentedNotices(author)).map((row) => row.link)).toEqual([null, null]);
+    expect(await deletePost(author, post)).toBe("ok");
+  });
+
+  it("shows post notifications outside the host workspace", async () => {
+    const host = await hostWorkspace("Outside host");
+    const author = await account("Outside author"), commenter = await account("Outside commenter");
+    const pub = await communityFixture(host, { name: "Outside Circle" });
+    await joinCommunity(host, pub, author);
+    await joinCommunity(host, pub, commenter);
+    const post = (await createPost(author, pub)).post_id!;
+    expect((await createComment(commenter, post)).outcome).toBe("created");
+    const inbox = await listNotices(author);
+    expect(inbox).toEqual([{ id: inbox[0]!.id, tenant_id: host.workspace, workspace_slug: await slugOf(host.workspace), workspace_name: "Outside host", kind: "post_commented",
+      title: "Outside commenter commented on your post in Outside Circle", body: null, resource_type: "post", resource_id: post, link: postLink(pub, post),
+      created_at: inbox[0]!.created_at, read_at: null }]);
+    expect(await unreadCount(author)).toBe(1);
+    expect(await markOne(commenter, inbox[0]!.id)).toBe("not_found");
+    expect(await markOne(author, inbox[0]!.id)).toBe("ok");
+    expect(await unreadCount(author)).toBe(0);
+    expect((await createComment(commenter, post)).outcome).toBe("created");
+    expect(await unreadCount(author)).toBe(1);
+    expect(await markAll(author, new Date(Date.now() + 60_000))).toBe(1);
+    expect(await unreadCount(author)).toBe(0);
+    // An archived community keeps the notification but drops its link.
+    await setCommunity(pub, "archived_at=now()");
+    expect((await listNotices(author)).map((row) => row.link)).toEqual([null, null]);
+  });
+
+  it("keeps the content write functions definers with an empty search_path", async () => {
+    const exposed = ["ws_create_comment", "ws_create_post", "ws_delete_comment", "ws_delete_post", "ws_list_notifications", "ws_mark_notification_read",
+      "ws_mark_notifications_read", "ws_unread_notification_count", "ws_update_comment", "ws_update_post"];
+    await owner.query("SET ROLE spark_owner");
+    const rows = (await owner.query(`SELECT p.proname, p.prosecdef, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname COLLATE "C"`, [namespace, exposed])).rows;
+    expect(rows.map((row) => [row.proname, row.prosecdef, row.proconfig, row.runtime, row.worker, row.auth])).toEqual(exposed.map((name) => [name, true, ['search_path=""'], true, false, false]));
+    const kinds = (await owner.query(`SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.conname='notifications_kind_allowed'`, [namespace])).rows[0].def as string;
+    for (const kind of ["post_commented", "community_request_rejected", "event_cancelled", "issue_assigned"]) expect(kinds).toContain(kind);
+  });
+});
+
+type Reported = { outcome: string; report_id: string | null };
+type Moderated = { outcome: string; moderation_status: string | null; reports_closed: number | null };
+const reportCall = `SELECT * FROM ${fn("ws_report_content")}($1,$2,$3,$4)`;
+const moderateCall = `SELECT * FROM ${fn("ws_moderate_content")}($1,$2,$3,$4)`;
+const reportContent = async (who: Account, kind: string, target: string, reason: unknown = "spam", details: unknown = null) =>
+  (await asSession(who.token, reportCall, [kind, target, reason, details])).rows[0] as Reported;
+const moderateContent = async (who: Account, kind: string, target: string, action: unknown, reason: unknown = "Breaks the guidelines") =>
+  (await asSession(who.token, moderateCall, [kind, target, action, reason])).rows[0] as Moderated;
+const refusedReport = (result: string): Reported => ({ outcome: result, report_id: null });
+const refusedModeration = (result: string): Moderated => ({ outcome: result, moderation_status: null, reports_closed: null });
+async function reportsOn(target: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT id,reporter_user_id,reason_code,details,status,resolved_at IS NOT NULL AS closed FROM ${table("content_reports")}
+    WHERE post_id=$1 OR comment_id=$1 ORDER BY created_at,id`, [target])).rows as { id: string; reporter_user_id: string; reason_code: string; details: string | null; status: string; closed: boolean }[];
+}
+async function moderationOn(target: string) {
+  await owner.query("SET ROLE spark_owner");
+  return (await owner.query(`SELECT report_id,actor_user_id,action,reason,post_id,comment_id FROM ${table("moderation_actions")}
+    WHERE post_id=$1 OR comment_id=$1 ORDER BY created_at,report_id NULLS LAST`, [target])).rows;
+}
+// Runs two different statements on two sessions: the second must block on the first's locks until it commits.
+async function contendBoth(accounts: [Account, Account], first: [string, unknown[]], second: [string, unknown[]]) {
+  const clients = await sessionPair(accounts);
+  try {
+    const winner = (await clients[0].query(first[0], first[1])).rows[0];
+    const pid = await backendPid(clients[1]);
+    const pending = clients[1].query(second[0], second[1]);
+    const blocked = await waitUntilBlocked(pid);
+    await clients[0].query("COMMIT");
+    const loser = (await pending).rows[0];
+    await clients[1].query("COMMIT");
+    return { winner, loser, blocked };
+  } finally { await closePair(clients); }
+}
+const queueCall = `SELECT * FROM ${fn("community_report_queue")}($1)`;
+const accessDenied = { code: "42501", message: "Community access denied" };
+
+describe("Community reports and moderation", () => {
+  it("reports visible content once per reporter", async () => {
+    const host = await hostWorkspace("Report host");
+    const author = await account("Report author"), outsider = await account("Report outsider"), member = await account("Report member");
+    const pub = await communityFixture(host, { name: "Report Open" });
+    const priv = await communityFixture(host, { name: "Report Private", visibility: "private" });
+    for (const community of [pub, priv]) for (const who of [author, member]) await joinCommunity(host, community, who);
+    const pubPost = await plantPost(host, pub, author.id);
+    const privPost = await plantPost(host, priv, author.id);
+    const comment = await plantComment(host, pub, pubPost, author.id);
+    const hiddenPost = await plantPost(host, pub, author.id, { moderation: "hidden" });
+    const deletedPost = await plantPost(host, pub, author.id, { deleted: true });
+
+    // Two concurrent reports by one reporter: one row, the second answers with the first's id.
+    const { winner, loser, blocked } = await contendBoth([outsider, outsider], [reportCall, ["post", pubPost, "spam", null]], [reportCall, ["post", pubPost, "harassment", "Again"]]);
+    expect(blocked).toBe(true);
+    expect([winner.outcome, loser.outcome]).toEqual(["reported", "already_reported"]);
+    expect(loser.report_id).toBe(winner.report_id);
+    expect(await reportsOn(pubPost)).toEqual([{ id: winner.report_id, reporter_user_id: outsider.id, reason_code: "spam", details: null, status: "open", closed: false }]);
+    expect(await reportContent(outsider, "post", pubPost, "off_topic")).toEqual({ outcome: "already_reported", report_id: winner.report_id });
+
+    // Readability decides: a private post is not_found to a non-member, as are hidden, deleted and unknown targets.
+    expect(await reportContent(outsider, "post", privPost)).toEqual(refusedReport("not_found"));
+    expect((await reportContent(member, "post", privPost)).outcome).toBe("reported");
+    for (const target of [hiddenPost, deletedPost, randomUUID()]) expect(await reportContent(member, "post", target)).toEqual(refusedReport("not_found"));
+    expect(await reportContent(member, "comment", pubPost)).toEqual(refusedReport("not_found"));
+    expect(await reportContent(author, "post", pubPost)).toEqual(refusedReport("own_content"));
+    expect(await reportContent(author, "comment", comment)).toEqual(refusedReport("own_content"));
+    // `other` with blank details stores NULL; details are trimmed.
+    const onComment = await reportContent(outsider, "comment", comment, "other", "   ");
+    expect(onComment).toEqual({ outcome: "reported", report_id: expect.any(String) });
+    expect((await reportContent(member, "comment", comment, "misinformation", `  ${"d".repeat(1000)}  `)).outcome).toBe("reported");
+    expect((await reportsOn(comment)).map((row) => [row.reporter_user_id, row.reason_code, row.details])).toEqual([[outsider.id, "other", null], [member.id, "misinformation", "d".repeat(1000)]]);
+
+    // Input checks.
+    await expect(reportContent(member, "user", pubPost)).rejects.toMatchObject(invalid("Invalid report target"));
+    await expect(reportContent(member, "post", pubPost, "abuse")).rejects.toMatchObject(invalid("Invalid report reason"));
+    await expect(reportContent(member, "post", pubPost, null)).rejects.toMatchObject(invalid("Invalid report reason"));
+    await expect(reportContent(member, "post", pubPost, "spam", "x".repeat(1001))).rejects.toMatchObject(invalid("Invalid report details"));
+    await expect(asSession(null, reportCall, ["post", pubPost, "spam", null])).rejects.toMatchObject({ code: "28000" });
+    // The reason check binds the table too.
+    await reject(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,reason_code) VALUES ($1,$2,$3,$4,'abuse')`, [host.workspace, pub, member.id, pubPost], "23514");
+
+    // Once the report is closed the same reporter can report again.
+    expect((await moderateContent(host.owner, "post", pubPost, "dismiss")).outcome).toBe("ok");
+    const again = await reportContent(outsider, "post", pubPost, "harassment");
+    expect(again).toEqual({ outcome: "reported", report_id: expect.any(String) });
+    expect(again.report_id).not.toBe(winner.report_id);
+    expect((await reportsOn(pubPost)).map((row) => [row.reporter_user_id, row.status])).toEqual([[outsider.id, "dismissed"], [outsider.id, "open"]]);
+  });
+
+  it("moderates community content with a record", async () => {
+    const host = await hostWorkspace("Moderation host");
+    const moderator = await account("Moderation moderator"), member = await account("Moderation member"), author = await account("Moderation author");
+    const first = await account("Moderation reporter one"), second = await account("Moderation reporter two"), hostAdmin = await account("Moderation host admin");
+    await addMember(host.workspace, hostAdmin, "admin");
+    const priv = await communityFixture(host, { name: "Moderated Private", visibility: "private" });
+    await joinCommunity(host, priv, moderator, "moderator");
+    for (const who of [member, author, first, second]) await joinCommunity(host, priv, who);
+    const post = await plantPost(host, priv, author.id);
+    const reports = [(await reportContent(first, "post", post, "spam")).report_id, (await reportContent(second, "post", post, "harassment", "Rude")).report_id];
+    const reason = "Breaks the guidelines";
+
+    await expect(moderateContent(moderator, "post", post, "delete")).rejects.toMatchObject(invalid("Invalid moderation action"));
+    for (const bad of ["  ab  ", null, "x".repeat(501)]) await expect(moderateContent(moderator, "post", post, "hide", bad)).rejects.toMatchObject(invalid("Invalid moderation reason"));
+    await expect(moderateContent(moderator, "user", post, "hide")).rejects.toMatchObject(invalid("Invalid report target"));
+    await expect(asSession(null, moderateCall, ["post", post, "hide", reason])).rejects.toMatchObject({ code: "28000" });
+    expect(await moderateContent(member, "post", post, "hide")).toEqual(refusedModeration("forbidden"));
+    // Host workspace admins get no content rights from that role: the private post is not found.
+    expect(await moderateContent(hostAdmin, "post", post, "hide")).toEqual(refusedModeration("not_found"));
+    expect(await moderateContent(moderator, "post", randomUUID(), "hide")).toEqual(refusedModeration("not_found"));
+    expect(await moderationOn(post)).toEqual([]);
+
+    expect(await moderateContent(moderator, "post", post, "hide", `  ${reason}  `)).toEqual({ outcome: "ok", moderation_status: "hidden", reports_closed: 2 });
+    expect(await postRow(post)).toMatchObject({ moderation_status: "hidden", version: 2, edited: false });
+    expect((await reportsOn(post)).map((row) => [row.id, row.status, row.closed])).toEqual([[reports[0], "resolved", true], [reports[1], "resolved", true]]);
+    const hideRows = await moderationOn(post);
+    expect(hideRows).toHaveLength(2);
+    expect(hideRows).toEqual(expect.arrayContaining(reports.map((report) => ({ report_id: report, actor_user_id: moderator.id, action: "hide", reason, post_id: post, comment_id: null }))));
+    // Hidden content is readable only by moderators: the member now gets not_found.
+    expect(await moderateContent(member, "post", post, "restore")).toEqual(refusedModeration("not_found"));
+    expect(await moderateContent(moderator, "post", post, "hide")).toEqual({ outcome: "unchanged", moderation_status: "hidden", reports_closed: 0 });
+    expect(await moderateContent(moderator, "post", post, "dismiss")).toEqual({ outcome: "unchanged", moderation_status: "hidden", reports_closed: 0 });
+
+    expect(await moderateContent(host.owner, "post", post, "restore", "Reviewed again")).toEqual({ outcome: "ok", moderation_status: "visible", reports_closed: 0 });
+    expect(await moderateContent(host.owner, "post", post, "restore", "Reviewed again")).toEqual({ outcome: "unchanged", moderation_status: "visible", reports_closed: 0 });
+    expect(await postRow(post)).toMatchObject({ moderation_status: "visible", version: 3, edited: false });
+    expect((await moderationOn(post)).slice(2)).toEqual([{ report_id: null, actor_user_id: host.owner.id, action: "restore", reason: "Reviewed again", post_id: post, comment_id: null }]);
+
+    // Dismiss closes the open reports and keeps the content visible; nothing open: unchanged.
+    const reopened = (await reportContent(first, "post", post, "off_topic")).report_id;
+    expect(await moderateContent(moderator, "post", post, "dismiss", "Within guidelines")).toEqual({ outcome: "ok", moderation_status: "visible", reports_closed: 1 });
+    expect((await reportsOn(post)).at(-1)).toMatchObject({ id: reopened, status: "dismissed", closed: true });
+    expect((await moderationOn(post)).at(-1)).toEqual({ report_id: reopened, actor_user_id: moderator.id, action: "dismiss_report", reason: "Within guidelines", post_id: post, comment_id: null });
+    expect(await moderateContent(moderator, "post", post, "dismiss")).toEqual({ outcome: "unchanged", moderation_status: "visible", reports_closed: 0 });
+    expect(await postRow(post)).toMatchObject({ moderation_status: "visible", version: 3 });
+    expect(await moderationOn(post)).toHaveLength(4);
+
+    // A hide with no open reports writes one row without a report; it works while the community is frozen.
+    await setCommunity(priv, "frozen_at=now()");
+    expect(await moderateContent(moderator, "post", post, "hide")).toEqual({ outcome: "ok", moderation_status: "hidden", reports_closed: 0 });
+    expect((await moderationOn(post)).at(-1)).toEqual({ report_id: null, actor_user_id: moderator.id, action: "hide", reason, post_id: post, comment_id: null });
+    expect(await moderateContent(moderator, "post", post, "restore")).toMatchObject({ outcome: "ok", moderation_status: "visible" });
+    await setCommunity(priv, "frozen_at=NULL");
+
+    // Comments: only the comment changes.
+    const comment = await plantComment(host, priv, post, author.id);
+    const onComment = (await reportContent(member, "comment", comment, "spam")).report_id;
+    expect(await moderateContent(member, "comment", comment, "hide")).toEqual(refusedModeration("forbidden"));
+    expect(await moderateContent(moderator, "comment", comment, "hide")).toEqual({ outcome: "ok", moderation_status: "hidden", reports_closed: 1 });
+    expect(await commentRow(comment)).toMatchObject({ moderation_status: "hidden", version: 2, edited: false });
+    expect(await postRow(post)).toMatchObject({ moderation_status: "visible", version: 5 });
+    expect(await moderationOn(comment)).toEqual([{ report_id: onComment, actor_user_id: moderator.id, action: "hide", reason, post_id: null, comment_id: comment }]);
+    expect(await moderateContent(moderator, "post", comment, "hide")).toEqual(refusedModeration("not_found"));
+
+    // A deleted target and an archived community are not found.
+    const gone = await plantPost(host, priv, author.id, { deleted: true });
+    expect(await moderateContent(moderator, "post", gone, "hide")).toEqual(refusedModeration("not_found"));
+    await setCommunity(priv, "archived_at=now()");
+    expect(await moderateContent(moderator, "post", post, "hide")).toEqual(refusedModeration("not_found"));
+  });
+
+  it("forbids a moderator from dismissing reports on their own content", async () => {
+    const host = await hostWorkspace("Own dismiss host");
+    const moderator = await account("Own dismiss moderator"), other = await account("Own dismiss other moderator"), reporter = await account("Own dismiss reporter");
+    const pub = await communityFixture(host, { name: "Own Dismiss Circle" });
+    await joinCommunity(host, pub, moderator, "moderator");
+    await joinCommunity(host, pub, other, "moderator");
+    await joinCommunity(host, pub, reporter);
+    const post = await plantPost(host, pub, moderator.id);
+    const comment = await plantComment(host, pub, post, moderator.id);
+    const postReport = (await reportContent(reporter, "post", post, "spam")).report_id;
+    const commentReport = (await reportContent(reporter, "comment", comment, "spam")).report_id;
+    expect(await moderateContent(moderator, "post", post, "dismiss")).toEqual(refusedModeration("forbidden"));
+    expect(await moderateContent(moderator, "comment", comment, "dismiss")).toEqual(refusedModeration("forbidden"));
+    expect((await reportsOn(post)).map((row) => [row.id, row.status])).toEqual([[postReport, "open"]]);
+    expect((await reportsOn(comment)).map((row) => [row.id, row.status])).toEqual([[commentReport, "open"]]);
+    expect(await moderationOn(post)).toEqual([]);
+    // Hide and restore of one's own content stay allowed.
+    expect((await moderateContent(moderator, "post", post, "hide")).outcome).toBe("ok");
+    expect((await moderateContent(moderator, "post", post, "restore")).outcome).toBe("ok");
+    // Another moderator can dismiss.
+    expect((await moderateContent(other, "comment", comment, "dismiss")).outcome).toBe("ok");
+    expect((await reportsOn(comment)).map((row) => row.status)).toEqual(["dismissed"]);
+  });
+
+  it("joins a public community from a pending request and closes the request", async () => {
+    const host = await hostWorkspace("Pending join host");
+    const requester = await account("Pending join requester");
+    const priv = await communityFixture(host, { name: "Pending Join Circle", visibility: "private" });
+    const requested = await requestAccess(requester, priv, "Let me in");
+    expect(requested.outcome).toBe("requested");
+    await setCommunity(priv, "visibility='public',frozen_at=now()");
+    expect(await joinAs(requester, priv)).toEqual({ outcome: "community_frozen", status: null });
+    expect((await requestRows(priv)).map((row) => row.status)).toEqual(["pending"]);
+    await setCommunity(priv, "frozen_at=NULL");
+    expect(await joinAs(requester, priv)).toEqual({ outcome: "joined", status: "active" });
+    expect((await requestRows(priv)).map((row) => row.status)).toEqual(["withdrawn"]);
+    expect((await memberships(priv)).filter((row) => row.user_id === requester.id)).toEqual([{ user_id: requester.id, role: "member", status: "active" }]);
+  });
+
+  it("serializes concurrent moderation", async () => {
+    const host = await hostWorkspace("Race host");
+    const moderator = await account("Race moderator"), editor = await account("Race moderator author"), author = await account("Race author"), reporter = await account("Race reporter");
+    const pub = await communityFixture(host, { name: "Race Circle" });
+    await joinCommunity(host, pub, moderator, "moderator");
+    await joinCommunity(host, pub, editor, "moderator");
+    for (const who of [author, reporter]) await joinCommunity(host, pub, who);
+    const post = await plantPost(host, pub, author.id);
+    const report = (await reportContent(reporter, "post", post)).report_id;
+
+    const hide = (target: string): [string, unknown[]] => [moderateCall, ["post", target, "hide", "Spam link"]];
+    const race = await contendBoth([host.owner, moderator], hide(post), hide(post));
+    expect(race.blocked).toBe(true);
+    expect([race.winner.outcome, race.loser.outcome]).toEqual(["ok", "unchanged"]);
+    expect(race.winner.reports_closed).toBe(1);
+    expect(await moderationOn(post)).toEqual([{ report_id: report, actor_user_id: host.owner.id, action: "hide", reason: "Spam link", post_id: post, comment_id: null }]);
+    expect(await postRow(post)).toMatchObject({ moderation_status: "hidden", version: 2 });
+
+    // An author edit with the version read before a concurrent hide never lands.
+    const updateCall = `SELECT * FROM ${fn("ws_update_post")}($1,$2,$3,$4)`;
+    const own = await plantPost(host, pub, editor.id);
+    const edit = await contendBoth([moderator, editor], hide(own), [updateCall, [own, 1, "Edited title", null]]);
+    expect(edit.blocked).toBe(true);
+    expect(edit.winner.outcome).toBe("ok");
+    expect(["content_hidden", "version_mismatch"]).toContain(edit.loser.outcome);
+    // A plain member author no longer reads the hidden post at all.
+    const plain = await plantPost(host, pub, author.id);
+    const plainEdit = await contendBoth([moderator, author], hide(plain), [updateCall, [plain, 1, "Edited title", null]]);
+    expect(plainEdit.blocked).toBe(true);
+    expect(plainEdit.loser.outcome).not.toBe("ok");
+    for (const target of [own, plain]) expect(await postRow(target)).toMatchObject({ title: "A post", moderation_status: "hidden", version: 2, edited: false });
+
+    // A report racing a hide waits for it and then no longer reads the hidden post.
+    const raced = await plantPost(host, pub, author.id);
+    const reportRace = await contendBoth([moderator, reporter], hide(raced), [reportCall, ["post", raced, "spam", null]]);
+    expect(reportRace.blocked).toBe(true);
+    expect(reportRace.loser).toEqual(refusedReport("not_found"));
+    expect(await reportsOn(raced)).toEqual([]);
+  });
+
+  it("lists the community report queue without reporters", async () => {
+    const host = await hostWorkspace("Queue host");
+    const moderator = await account("Queue moderator"), member = await account("Queue member"), author = await account("Queue author"), stranger = await account("Queue stranger");
+    const hostAdmin = await account("Queue host admin");
+    await addMember(host.workspace, hostAdmin, "admin");
+    const reporters: Account[] = [];
+    for (let index = 1; index <= 5; index++) reporters.push(await account(`Queue reporter ${index}`));
+    const pub = await communityFixture(host, { name: "Queue Circle" });
+    const hid = await communityFixture(host, { name: "Queue Hidden", visibility: "hidden" });
+    await joinCommunity(host, pub, moderator, "moderator");
+    await joinCommunity(host, pub, member);
+    await joinCommunity(host, pub, author);
+    const post = await plantPost(host, pub, author.id, { title: "Reported post", body: "b".repeat(420) });
+    const other = await plantPost(host, pub, member.id, { title: "Other post" });
+    const comment = await plantComment(host, pub, other, author.id, { body: "Reported comment" });
+    const deleted = await plantPost(host, pub, author.id);
+    const doomed = await plantPost(host, pub, author.id);
+    const orphan = await plantComment(host, pub, doomed, author.id);
+    const closed = await plantPost(host, pub, author.id);
+
+    const plan: [Account, string, string | null][] = [[reporters[0]!, "spam", "First detail"], [reporters[1]!, "spam", null], [reporters[2]!, "harassment", "Third detail"],
+      [reporters[3]!, "spam", "Fourth detail"], [reporters[4]!, "harassment", "Fifth detail"]];
+    for (const [who, reason, details] of plan) expect((await reportContent(who, "post", post, reason, details)).outcome).toBe("reported");
+    expect((await reportContent(reporters[0]!, "post", deleted)).outcome).toBe("reported");
+    expect((await reportContent(reporters[0]!, "comment", orphan)).outcome).toBe("reported");
+    expect((await reportContent(reporters[0]!, "post", closed)).outcome).toBe("reported");
+    expect((await moderateContent(moderator, "post", closed, "dismiss")).outcome).toBe("ok");
+    expect((await reportContent(reporters[1]!, "comment", comment, "off_topic", "Not about the post")).outcome).toBe("reported");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("posts")} SET deleted_at=now(),version=version+1 WHERE id = ANY($1::uuid[])`, [[deleted, doomed]]);
+
+    const result = await asSession(moderator.token, queueCall, [pub]);
+    const columns = result.fields.map((field) => field.name);
+    expect(columns).toEqual(["target_kind", "target_id", "post_id", "post_title", "excerpt", "author_name", "moderation_status", "open_reports", "reasons", "latest_details",
+      "first_reported_at", "last_reported_at"]);
+    expect(columns.some((name) => name.includes("reporter"))).toBe(false);
+    for (const who of reporters) expect(JSON.stringify(result.rows)).not.toContain(who.id);
+    const timeless = (rows: Record<string, unknown>[]) => rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => !key.endsWith("_reported_at"))));
+    expect(timeless(result.rows)).toEqual([
+      { target_kind: "comment", target_id: comment, post_id: other, post_title: "Other post", excerpt: "Reported comment", author_name: "Queue author", moderation_status: "visible",
+        open_reports: "1", reasons: [{ reason: "off_topic", count: 1 }], latest_details: ["Not about the post"] },
+      { target_kind: "post", target_id: post, post_id: post, post_title: "Reported post", excerpt: "b".repeat(400), author_name: "Queue author", moderation_status: "visible",
+        open_reports: "5", reasons: [{ reason: "spam", count: 3 }, { reason: "harassment", count: 2 }], latest_details: ["Fifth detail", "Fourth detail", "Third detail"] },
+    ]);
+    const [newest, oldest] = result.rows as { first_reported_at: Date; last_reported_at: Date }[];
+    expect(newest!.last_reported_at.getTime()).toBeGreaterThan(oldest!.last_reported_at.getTime());
+    expect(oldest!.first_reported_at.getTime()).toBeLessThan(oldest!.last_reported_at.getTime());
+    // Hidden content stays listed for moderators with its status; a deleted author shows as a former member.
+    expect((await reportContent(reporters[2]!, "post", other)).outcome).toBe("reported");
+    await hideContent("posts", other);
+    await owner.query(`UPDATE ${table("users")} SET deleted_at=now() WHERE id=$1`, [member.id]);
+    const after = (await asSession(host.owner.token, queueCall, [pub])).rows;
+    expect(after.map((row) => [row.target_kind, row.target_id, row.author_name, row.moderation_status])).toEqual([
+      ["post", other, "Former member", "hidden"], ["comment", comment, "Queue author", "visible"], ["post", post, "Queue author", "visible"]]);
+
+    // Owners and moderators only, with the C1 messages.
+    for (const who of [author, stranger, hostAdmin]) await expect(asSession(who.token, queueCall, [pub])).rejects.toMatchObject(accessDenied);
+    await expect(asSession(null, queueCall, [pub])).rejects.toMatchObject(accessDenied);
+    await expect(asSession(stranger.token, queueCall, [hid])).rejects.toMatchObject(notFound);
+    await expect(asSession(moderator.token, queueCall, [randomUUID()])).rejects.toMatchObject(notFound);
+    expect((await asSession(host.owner.token, queueCall, [hid])).rows).toEqual([]);
+    await setCommunity(pub, "archived_at=now()");
+    await expect(asSession(moderator.token, queueCall, [pub])).rejects.toMatchObject(notFound);
+  });
+
+  it("closes legacy reports and keeps staff and community moderation deadlock-free", async () => {
+    const host = await hostWorkspace("Staff lock host");
+    const moderator = await account("Lock moderator"), author = await account("Lock author"), reporter = await account("Lock reporter"), staff = await account("Lock staff");
+    const other = await account("Lock other reporter");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("platform_role_assignments")} (user_id,role,granted_by_user_id) VALUES ($1,'content_moderator',$1)`, [staff.id]);
+    const pub = await communityFixture(host, { name: "Staff Lock Circle" });
+    await joinCommunity(host, pub, moderator, "moderator");
+    for (const who of [author, reporter, other]) await joinCommunity(host, pub, who);
+    const staffResolve = (report: string): [string, unknown[]] => [`SELECT ${fn("staff_resolve_report")}($1,'hide','Policy violation') AS outcome`, [report]];
+    const hide = (target: string): [string, unknown[]] => [moderateCall, ["post", target, "hide", "Spam link"]];
+
+    // 0036 normalizes legacy free-text reason codes to 'other' and validates the check, so such rows can be closed.
+    const state = async () => (await owner.query(`SELECT c.convalidated FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace
+      WHERE n.nspname=$1 AND c.conname='content_reports_reason_allowed'`, [namespace])).rows[0].convalidated as boolean;
+    expect(await state()).toBe(true);
+    // A pre-0034 row cannot be inserted now, so the check is dropped, a legacy row planted, the migration's
+    // backfill statement run and the check restored (validated).
+    const legacyPost = await plantPost(host, pub, author.id);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`ALTER TABLE ${table("content_reports")} DROP CONSTRAINT content_reports_reason_allowed`);
+    let legacy: string;
+    try {
+      legacy = (await owner.query(`INSERT INTO ${table("content_reports")} (tenant_id,community_id,reporter_user_id,post_id,reason_code)
+        VALUES ($1,$2,$3,$4,'Potential spam / solicitation') RETURNING id`, [host.workspace, pub, reporter.id, legacyPost])).rows[0].id;
+      await owner.query(`UPDATE ${table("content_reports")} SET reason_code='other'
+        WHERE reason_code NOT IN ('spam','harassment','off_topic','misinformation','self_promotion','other')`);
+    } finally {
+      await owner.query(`ALTER TABLE ${table("content_reports")} ADD CONSTRAINT content_reports_reason_allowed
+        CHECK (reason_code IN ('spam','harassment','off_topic','misinformation','self_promotion','other'))`);
+    }
+    expect(await state()).toBe(true);
+    expect((await reportsOn(legacyPost))[0]).toMatchObject({ id: legacy, reason_code: "other" });
+    expect((await asSession(staff.token, ...staffResolve(legacy))).rows[0].outcome).toBe("ok");
+    expect((await reportsOn(legacyPost))[0]).toMatchObject({ status: "resolved" });
+
+    // Moderator first, staff second: staff waits on the post, then finds the report closed.
+    const first = await plantPost(host, pub, author.id);
+    const firstReport = (await reportContent(reporter, "post", first)).report_id!;
+    const a = await contendBoth([moderator, staff], hide(first), staffResolve(firstReport));
+    expect(a.blocked).toBe(true);
+    expect(a.winner.outcome).toBe("ok");
+    expect(a.loser.outcome).toBe("already_closed");
+    // Staff first, moderator second: the moderator waits, then has nothing left to change.
+    const second = await plantPost(host, pub, author.id);
+    const secondReport = (await reportContent(other, "post", second)).report_id!;
+    const b = await contendBoth([staff, moderator], staffResolve(secondReport), hide(second));
+    expect(b.blocked).toBe(true);
+    expect(b.winner.outcome).toBe("ok");
+    expect(b.loser).toEqual({ outcome: "unchanged", moderation_status: "hidden", reports_closed: 0 });
+    for (const target of [first, second]) expect(await postRow(target)).toMatchObject({ moderation_status: "hidden", version: 2 });
+  });
+
+  it("keeps the report and moderation functions definers with an empty search_path", async () => {
+    const exposed = ["community_report_queue", "staff_resolve_report", "ws_moderate_content", "ws_report_content"];
+    await owner.query("SET ROLE spark_owner");
+    const rows = (await owner.query(`SELECT p.proname, p.prosecdef, p.proconfig, has_function_privilege('spark_app',p.oid,'EXECUTE') AS runtime,
+      has_function_privilege('spark_worker',p.oid,'EXECUTE') AS worker, has_function_privilege('spark_auth',p.oid,'EXECUTE') AS auth
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=$1 AND p.proname = ANY($2) ORDER BY p.proname COLLATE "C"`, [namespace, exposed])).rows;
+    expect(rows.map((row) => [row.proname, row.prosecdef, row.proconfig, row.runtime, row.worker, row.auth])).toEqual(exposed.map((name) => [name, true, ['search_path=""'], true, false, false]));
+    const check = (await owner.query(`SELECT pg_get_constraintdef(c.oid) AS def FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace
+      WHERE n.nspname=$1 AND c.conname='content_reports_reason_allowed'`, [namespace])).rows[0].def as string;
+    for (const reason of ["spam", "harassment", "off_topic", "misinformation", "self_promotion", "other"]) expect(check).toContain(`'${reason}'`);
+  });
+});
+
+describe("Community leftovers", () => {
+  it("counts members without deleted users", async () => {
+    const host = await hostWorkspace("Count host");
+    const member = await account("Count member"), gone = await account("Count gone");
+    const community = await communityFixture(host, { name: "Count Open" });
+    await joinCommunity(host, community, member);
+    await joinCommunity(host, community, gone);
+    expect((await bySlug(null, communitySlug(community)))[0]!.member_count).toBe("3");
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("users")} SET status='deleted', deleted_at=now() WHERE id=$1`, [gone.id]);
+    expect((await bySlug(null, communitySlug(community)))[0]!.member_count).toBe("2");
+    const found = await discover(null, { query: "Count Open" });
+    expect(cardIds(found)).toEqual([community]);
+    expect(found[0]!.member_count).toBe("2");
+  });
+
+  it("counts weekly activity on live content only", async () => {
+    const host = await hostWorkspace("Weekly host");
+    const author = await account("Weekly author");
+    const community = await communityFixture(host, { name: "Weekly Open" });
+    await joinCommunity(host, community, author);
+    const live = await plantPost(host, community, author.id);
+    const deleted = await plantPost(host, community, author.id, { deleted: true });
+    const moderated = await plantPost(host, community, author.id, { moderation: "hidden" });
+    const legacyHidden = await plantPost(host, community, author.id, { visibility: "hidden" });
+    await plantPost(host, community, author.id, { createdAt: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString() });
+    // Counted: the live post and two comments on it. Not counted: dead comments and comments on dead posts.
+    await plantComment(host, community, live, author.id);
+    await plantComment(host, community, live, author.id);
+    await plantComment(host, community, live, author.id, { deleted: true });
+    await plantComment(host, community, live, author.id, { moderation: "hidden" });
+    for (const post of [deleted, moderated, legacyHidden]) await plantComment(host, community, post, author.id);
+    expect((await bySlug(null, communitySlug(community)))[0]!.weekly_posts).toBe("3");
+  });
+
+  it("lists hidden communities for their host admins", async () => {
+    const host = await hostWorkspace("Hidden host");
+    const admin = await account("Hidden admin"), plain = await account("Hidden plain"), removed = await account("Hidden removed"), outsider = await account("Hidden outsider");
+    await addMember(host.workspace, admin, "admin");
+    await addMember(host.workspace, plain, "member");
+    await addMember(host.workspace, removed, "admin");
+    await leave(host.workspace, removed);
+    const hid = await communityFixture(host, { name: "Hidden Roster", visibility: "hidden" });
+    expect(cardIds(await discover(host.owner.token, { query: "Hidden Roster" }))).toEqual([hid]);
+    expect(cardIds(await discover(admin.token, { query: "Hidden Roster" }))).toEqual([hid]);
+    for (const who of [plain, removed, outsider]) expect(cardIds(await discover(who.token, { query: "Hidden Roster" }))).toEqual([]);
+    expect(cardIds(await discover(null, { query: "Hidden Roster" }))).toEqual([]);
+  });
+
+  it("notifies when adding a member approves their request", async () => {
+    const host = await hostWorkspace("Added host");
+    const requester = await account("Added requester");
+    await addMember(host.workspace, requester, "member");
+    const priv = await communityFixture(host, { name: "Added Private", visibility: "private" });
+    const request = (await requestAccess(requester, priv)).request_id!;
+    expect(await outcome(host.owner, "ws_add_community_member($1,$2)", [priv, requester.id])).toBe("ok");
+    expect((await requestRows(priv))[0]).toMatchObject({ id: request, status: "approved", reviewed_by_user_id: host.owner.id });
+    const inbox = (await listNotices(requester)).filter((row) => row.kind === "community_request_approved");
+    expect(inbox).toMatchObject([{ title: "Your request to join Added Private was approved", resource_type: "community", resource_id: priv }]);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT o.event_type,o.aggregate_id,o.processed_at IS NOT NULL AS processed FROM ${table("notifications")} n JOIN ${table("outbox_events")} o ON o.id=n.outbox_event_id
+      WHERE n.recipient_user_id=$1 AND n.kind='community_request_approved'`, [requester.id])).rows).toEqual([{ event_type: "community_join_request.approved", aggregate_id: request, processed: true }]);
+    // Adding someone without a request creates no notification.
+    const plain = await account("Added plain");
+    await addMember(host.workspace, plain, "member");
+    expect(await outcome(host.owner, "ws_add_community_member($1,$2)", [priv, plain.id])).toBe("ok");
+    expect((await listNotices(plain)).filter((row) => row.kind === "community_request_approved")).toEqual([]);
+  });
+
+  it("approves pending requests when a community becomes public", async () => {
+    const host = await hostWorkspace("Opening host");
+    const fresh = await account("Opening fresh"), returning = await account("Opening returning"), suspended = await account("Opening suspended"), rejected = await account("Opening rejected");
+    const priv = await communityFixture(host, { name: "Opening Private", visibility: "private" });
+    await joinCommunity(host, priv, returning);
+    await joinCommunity(host, priv, suspended);
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='left', left_at=now() WHERE community_id=$1 AND user_id=$2`, [priv, returning.id]);
+    await owner.query(`UPDATE ${table("community_memberships")} SET status='suspended' WHERE community_id=$1 AND user_id=$2`, [priv, suspended.id]);
+    for (const who of [fresh, returning, suspended]) {
+      await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id) VALUES ($1,$2,$3)`, [host.workspace, priv, who.id]);
+    }
+    await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id,status,reviewed_by_user_id,reviewed_at) VALUES ($1,$2,$3,'rejected',$4,now())`,
+      [host.workspace, priv, rejected.id, host.owner.id]);
+    // Changing something else keeps the requests pending.
+    expect(await updateCommunity(host.owner, priv, 1, { tagline: "New line" })).toEqual({ outcome: "ok", settings_version: 2 });
+    expect((await requestRows(priv)).filter((row) => row.status === "pending")).toHaveLength(3);
+    expect(await updateCommunity(host.owner, priv, 2, { visibility: "public" })).toEqual({ outcome: "ok", settings_version: 3 });
+    const rows = await requestRows(priv);
+    for (const who of [fresh, returning, suspended]) {
+      expect(rows.find((row) => row.user_id === who.id)).toMatchObject({ status: "approved", reviewed_by_user_id: host.owner.id, reviewed_at: expect.any(Date) });
+    }
+    expect(rows.find((row) => row.user_id === rejected.id)).toMatchObject({ status: "rejected" });
+    const roster = await memberships(priv);
+    expect(roster.find((row) => row.user_id === fresh.id)).toEqual({ user_id: fresh.id, role: "member", status: "active" });
+    expect(roster.find((row) => row.user_id === returning.id)).toEqual({ user_id: returning.id, role: "member", status: "active" });
+    expect(roster.find((row) => row.user_id === suspended.id)).toEqual({ user_id: suspended.id, role: "member", status: "suspended" });
+    expect(roster.map((row) => row.user_id)).not.toContain(rejected.id);
+    for (const who of [fresh, returning, suspended]) {
+      expect((await listNotices(who)).filter((row) => row.kind === "community_request_approved")).toMatchObject([{ title: "Your request to join Opening Private was approved", resource_id: priv }]);
+    }
+    expect((await listNotices(rejected)).filter((row) => row.kind === "community_request_approved")).toEqual([]);
+    // Only private to public approves: a request made while private survives a detour through hidden.
+    expect(await updateCommunity(host.owner, priv, 3, { visibility: "private" })).toMatchObject({ outcome: "ok" });
+    const late = await account("Opening late");
+    expect((await requestAccess(late, priv)).outcome).toBe("requested");
+    expect(await updateCommunity(host.owner, priv, 4, { visibility: "hidden" })).toMatchObject({ outcome: "ok" });
+    expect(await updateCommunity(host.owner, priv, 5, { visibility: "public" })).toMatchObject({ outcome: "ok" });
+    expect((await requestRows(priv)).find((row) => row.user_id === late.id)).toMatchObject({ status: "pending" });
+  });
+  it("keeps requests pending when a frozen community becomes public", async () => {
+    const host = await hostWorkspace("Frozen opening host");
+    const waiting = await account("Frozen waiting");
+    const priv = await communityFixture(host, { name: "Frozen Opening", visibility: "private", frozen: true });
+    await owner.query("SET ROLE spark_owner");
+    await owner.query(`INSERT INTO ${table("community_join_requests")} (tenant_id,community_id,user_id) VALUES ($1,$2,$3)`, [host.workspace, priv, waiting.id]);
+    const before = {
+      members: (await memberships(priv)).length,
+      notices: (await owner.query(`SELECT count(*)::integer AS n FROM ${table("notifications")} WHERE resource_id=$1`, [priv])).rows[0].n as number,
+      events: (await owner.query(`SELECT count(*)::integer AS n FROM ${table("outbox_events")} WHERE tenant_id=$1 AND aggregate_type='community_join_request'`, [host.workspace])).rows[0].n as number,
+    };
+    expect(await updateCommunity(host.owner, priv, 1, { visibility: "public" })).toEqual({ outcome: "ok", settings_version: 2 });
+    expect((await requestRows(priv))[0]).toMatchObject({ user_id: waiting.id, status: "pending", reviewed_by_user_id: null, reviewed_at: null });
+    expect(await memberships(priv)).toHaveLength(before.members);
+    await owner.query("SET ROLE spark_owner");
+    expect((await owner.query(`SELECT visibility FROM ${table("communities")} WHERE id=$1`, [priv])).rows[0].visibility).toBe("public");
+    expect((await owner.query(`SELECT count(*)::integer AS n FROM ${table("notifications")} WHERE resource_id=$1`, [priv])).rows[0].n).toBe(before.notices);
+    expect((await owner.query(`SELECT count(*)::integer AS n FROM ${table("outbox_events")} WHERE tenant_id=$1 AND aggregate_type='community_join_request'`, [host.workspace])).rows[0].n).toBe(before.events);
   });
 });

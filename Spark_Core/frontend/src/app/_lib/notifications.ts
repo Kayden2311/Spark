@@ -62,6 +62,7 @@ const COMMUNITY_KINDS: Record<string, string> = {
   community_request_received: "Join request",
   community_request_approved: "Request approved",
   community_request_rejected: "Request declined",
+  post_commented: "New comment",
 };
 
 /**

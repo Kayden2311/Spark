@@ -225,6 +225,55 @@
       "when": 1792450000000,
       "tag": "0031_community_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792460000000,
+      "tag": "0032_community_content_reads",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792470000000,
+      "tag": "0033_community_content_writes",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792556400000,
+      "tag": "0034_content_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792642800000,
+      "tag": "0035_community_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792729200000,
+      "tag": "0036_report_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792815600000,
+      "tag": "0037_community_frozen_open",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792902000000,
+      "tag": "0038_c2_final_fixes",
+      "breakpoints": true
     }
   ]
 }

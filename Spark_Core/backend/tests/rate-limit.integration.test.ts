@@ -1,8 +1,11 @@
+import { randomBytes } from "node:crypto";
+
 import Redis from "ioredis";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
+import { fakePool, principalRow } from "./fake-pool.js";
 
 const redisUrl = process.env.TEST_REDIS_URL;
 const integration = redisUrl ? describe : describe.skip;
@@ -50,5 +53,20 @@ integration("Redis rate limiting", () => {
     expect(unavailable.statusCode).toBe(500);
     expect(unavailable.json()).toMatchObject({ code: "internal_error", status: 500 });
     await Promise.all([first.close(), second.close()]);
+  });
+
+  it("keys community create limits on the session, not the address", async () => {
+    const { pool } = fakePool([["auth_session_principal", () => [principalRow]]]);
+    const app = await buildApp({ config: loadConfig({ NODE_ENV: "test" }), pool, logger: false, redis: await redisClient() });
+    const url = "/api/v1/communities/11111111-1111-4111-8111-111111111111/posts";
+    const post = async (token: string) => (await app.inject({
+      method: "POST", url, remoteAddress: "10.9.8.7", headers: { cookie: `spark_session=${token}` }, payload: { title: "T", body: "B" },
+    })).statusCode;
+    const first = randomBytes(32).toString("hex"), second = randomBytes(32).toString("hex");
+    for (let i = 0; i < 10; i += 1) expect(await post(first)).not.toBe(429);
+    expect(await post(first)).toBe(429);
+    // Another session from the same address has its own bucket.
+    expect(await post(second)).not.toBe(429);
+    await app.close();
   });
 });
