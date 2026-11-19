@@ -267,6 +267,13 @@
       "when": 1792815600000,
       "tag": "0037_community_frozen_open",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792902000000,
+      "tag": "0038_c2_final_fixes",
+      "breakpoints": true
     }
   ]
 }

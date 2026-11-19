@@ -527,7 +527,7 @@ describe("Local PostgreSQL schema", () => {
     await applyMigrations(owner, folder, namespace, journal);
     await owner.query("SET ROLE spark_owner");
     const result = await owner.query(`SELECT count(*)::integer AS count FROM "${journal}".__drizzle_migrations`);
-    expect(result.rows[0].count).toBe(38);
+    expect(result.rows[0].count).toBe(39);
     const file = join(folder,"0001_integrity.sql"), original = await readFile(file,"utf8");
     try {
       await writeFile(file,original+"\n-- changed\n");
@@ -6400,7 +6400,7 @@ describe("Community content reads", () => {
     const columns = (await owner.query(`SELECT table_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema=$1 AND column_name='edited_at' AND table_name IN ('posts','post_comments') ORDER BY table_name`, [namespace])).rows;
     expect(columns).toEqual([{ table_name: "post_comments", data_type: "timestamp with time zone", is_nullable: "YES" }, { table_name: "posts", data_type: "timestamp with time zone", is_nullable: "YES" }]);
     const checks = (await owner.query(`SELECT conname,convalidated FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND conname IN ('posts_body_length','post_comments_body_length') ORDER BY conname`, [namespace])).rows;
-    expect(checks).toEqual([{ conname: "post_comments_body_length", convalidated: false }, { conname: "posts_body_length", convalidated: false }]);
+    expect(checks).toEqual([{ conname: "post_comments_body_length", convalidated: true }, { conname: "posts_body_length", convalidated: true }]);
     const host = await hostWorkspace("Length host");
     const community = await communityFixture(host, { name: "Length Circle" });
     const post = await plantPost(host, community, host.owner.id);
@@ -6918,6 +6918,45 @@ describe("Community reports and moderation", () => {
     expect(await moderateContent(moderator, "post", gone, "hide")).toEqual(refusedModeration("not_found"));
     await setCommunity(priv, "archived_at=now()");
     expect(await moderateContent(moderator, "post", post, "hide")).toEqual(refusedModeration("not_found"));
+  });
+
+  it("forbids a moderator from dismissing reports on their own content", async () => {
+    const host = await hostWorkspace("Own dismiss host");
+    const moderator = await account("Own dismiss moderator"), other = await account("Own dismiss other moderator"), reporter = await account("Own dismiss reporter");
+    const pub = await communityFixture(host, { name: "Own Dismiss Circle" });
+    await joinCommunity(host, pub, moderator, "moderator");
+    await joinCommunity(host, pub, other, "moderator");
+    await joinCommunity(host, pub, reporter);
+    const post = await plantPost(host, pub, moderator.id);
+    const comment = await plantComment(host, pub, post, moderator.id);
+    const postReport = (await reportContent(reporter, "post", post, "spam")).report_id;
+    const commentReport = (await reportContent(reporter, "comment", comment, "spam")).report_id;
+    expect(await moderateContent(moderator, "post", post, "dismiss")).toEqual(refusedModeration("forbidden"));
+    expect(await moderateContent(moderator, "comment", comment, "dismiss")).toEqual(refusedModeration("forbidden"));
+    expect((await reportsOn(post)).map((row) => [row.id, row.status])).toEqual([[postReport, "open"]]);
+    expect((await reportsOn(comment)).map((row) => [row.id, row.status])).toEqual([[commentReport, "open"]]);
+    expect(await moderationOn(post)).toEqual([]);
+    // Hide and restore of one's own content stay allowed.
+    expect((await moderateContent(moderator, "post", post, "hide")).outcome).toBe("ok");
+    expect((await moderateContent(moderator, "post", post, "restore")).outcome).toBe("ok");
+    // Another moderator can dismiss.
+    expect((await moderateContent(other, "comment", comment, "dismiss")).outcome).toBe("ok");
+    expect((await reportsOn(comment)).map((row) => row.status)).toEqual(["dismissed"]);
+  });
+
+  it("joins a public community from a pending request and closes the request", async () => {
+    const host = await hostWorkspace("Pending join host");
+    const requester = await account("Pending join requester");
+    const priv = await communityFixture(host, { name: "Pending Join Circle", visibility: "private" });
+    const requested = await requestAccess(requester, priv, "Let me in");
+    expect(requested.outcome).toBe("requested");
+    await setCommunity(priv, "visibility='public',frozen_at=now()");
+    expect(await joinAs(requester, priv)).toEqual({ outcome: "community_frozen", status: null });
+    expect((await requestRows(priv)).map((row) => row.status)).toEqual(["pending"]);
+    await setCommunity(priv, "frozen_at=NULL");
+    expect(await joinAs(requester, priv)).toEqual({ outcome: "joined", status: "active" });
+    expect((await requestRows(priv)).map((row) => row.status)).toEqual(["withdrawn"]);
+    expect((await memberships(priv)).filter((row) => row.user_id === requester.id)).toEqual([{ user_id: requester.id, role: "member", status: "active" }]);
   });
 
   it("serializes concurrent moderation", async () => {
