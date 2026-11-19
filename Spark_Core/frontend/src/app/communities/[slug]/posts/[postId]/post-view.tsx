@@ -12,7 +12,7 @@ import { ModerationDialog } from "../../../_components/moderation-dialog";
 import { ReportDialog } from "../../../_components/report-dialog";
 import { TextField } from "../../../_components/text-field";
 import { SiteFooter, SiteHeader } from "../../../site-chrome";
-import { ApiError, loginPath, messageOf } from "../../../_lib/api";
+import { ApiError, messageOf } from "../../../_lib/api";
 import {
   asReported,
   CHANGED_ELSEWHERE,
@@ -26,7 +26,6 @@ import {
 } from "../../../_lib/content-api";
 import { setFlash } from "../../../_lib/flash";
 import { useCommunity } from "../../../_lib/use-communities";
-import { MEMBERS_ONLY_MESSAGE } from "../../feed";
 import { Comments } from "./comments";
 
 interface PostViewProps {
@@ -72,33 +71,29 @@ export function PostView({ slug, postId, initial = null, startEditing = false }:
   const base = `/communities/${encodeURIComponent(slug)}`;
   if (loadError?.status === 404 || communityStatus === "not_found") notFound();
 
+  // Leaving the editor also drops ?edit=1, so a reload does not reopen it.
+  const closeEditor = () => {
+    setEditing(false);
+    if (startEditing) router.replace(`${base}/posts/${encodeURIComponent(postId)}`);
+  };
+
   let content: React.ReactNode;
   if (loadError) {
-    const denied = loadError.status === 401 || loadError.status === 403;
+    // The API answers 404 (never 401 or 403) for a post the visitor cannot read, so only real failures land here.
     content = (
       <section className="circleSectionCard circleStateCard">
-        <h1 className="circleMainTitle">{denied ? "Discussion unavailable" : "This post could not load"}</h1>
-        {loadError.status === 401 ? (
-          <p>
-            <Link href={loginPath(`${base}/posts/${encodeURIComponent(postId)}`)}>Sign in to read this discussion</Link>
-          </p>
-        ) : denied ? (
-          <p role="alert">{MEMBERS_ONLY_MESSAGE}</p>
-        ) : (
-          <>
-            <p role="alert">{loadError.message}</p>
-            <button
-              className="circleCtaBtn"
-              onClick={() => {
-                setLoadError(null);
-                setAttempt((value) => value + 1);
-              }}
-              type="button"
-            >
-              Try again
-            </button>
-          </>
-        )}
+        <h1 className="circleMainTitle">This post could not load</h1>
+        <p role="alert">{loadError.message}</p>
+        <button
+          className="circleCtaBtn"
+          onClick={() => {
+            setLoadError(null);
+            setAttempt((value) => value + 1);
+          }}
+          type="button"
+        >
+          Try again
+        </button>
       </section>
     );
   } else if (!post) {
@@ -125,22 +120,23 @@ export function PostView({ slug, postId, initial = null, startEditing = false }:
                 }}
                 onModerate={setModerating}
                 onReport={() => setReporting(true)}
+                subject={post.title}
                 viewer={post.viewer}
               />
             )}
           </div>
           {showEditor ? (
             <PostEditor
-              onCancel={() => setEditing(false)}
+              onCancel={closeEditor}
               onSaved={(saved) => {
                 setPost(saved);
-                setEditing(false);
+                closeEditor();
               }}
               onStale={(latest) => {
                 if (latest) setPost(latest);
                 else setAttempt((value) => value + 1);
                 setNotice(CHANGED_ELSEWHERE);
-                setEditing(false);
+                closeEditor();
               }}
               post={post}
             />
@@ -183,7 +179,7 @@ export function PostView({ slug, postId, initial = null, startEditing = false }:
             id={post.id}
             kind="post"
             onClose={() => setModerating(null)}
-            onDone={(result) => setPost((current) => (current ? { ...current, moderation: result.moderation, version: result.changed ? current.version + 1 : current.version } : current))}
+            onDone={(result) => setPost((current) => (current ? { ...current, moderation: result.moderation, version: result.version } : current))}
           />
         )}
 

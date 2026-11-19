@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { contentErrorMessage } from "../_lib/content-api";
 import { trapDialogKeys, useDialogFocus } from "./dialog-shell";
 
@@ -23,6 +23,11 @@ export function ConfirmDialog({ message, confirmLabel, onConfirm, onClose, fallb
   const messageId = useId();
 
   useDialogFocus(cancel, fallbackFocus);
+
+  // Disabling the buttons while sending drops focus; after a failure put it back on Cancel.
+  useEffect(() => {
+    if (error) cancel.current?.focus();
+  }, [error]);
 
   const confirm = async () => {
     if (busy) return;

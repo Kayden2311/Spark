@@ -185,7 +185,7 @@ export function Feed({ community, notify }: FeedProps) {
           id={moderating.post.id}
           kind="post"
           onClose={() => setModerating(null)}
-          onDone={(result) => patch(moderating.post.id, (item) => ({ ...item, moderation: result.moderation, version: result.changed ? item.version + 1 : item.version }))}
+          onDone={(result) => patch(moderating.post.id, (item) => ({ ...item, moderation: result.moderation, version: result.version }))}
         />
       )}
       {deleting && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   contentApi,
   contentErrorMessage,
@@ -70,6 +70,11 @@ export function ModerationDialog({ kind, id, action, hidden = false, onClose, on
   const trimmed = reason.trim();
   const valid = trimmed.length >= MODERATION_REASON_MIN;
   useDialogFocus(field, fallbackFocus);
+
+  // After a failed request put focus back on the reason field (the buttons were disabled while sending).
+  useEffect(() => {
+    if (error) field.current?.focus();
+  }, [error]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();

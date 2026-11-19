@@ -12,8 +12,9 @@ interface PostPageProps {
 
 /**
  * Resolves the post on the server so an unreadable post, a post of another community and a malformed id answer
- * a real HTTP 404. Any other failure (the API down, a private community) renders the client view, which shows
- * its own state, so a brief API blip never becomes a 404.
+ * a real HTTP 404 (the API answers 404 for every post the visitor cannot read, signed out or not a member
+ * included; not-found.tsx never says which). Any other failure (the API down, a rate limit) renders the client
+ * view, which shows its own state, so a brief API blip never becomes a 404.
  */
 export default async function PostPage({ params, searchParams }: PostPageProps) {
   const [{ slug, postId }, { edit }] = await Promise.all([params, searchParams]);

@@ -211,7 +211,7 @@ describe("post page", () => {
       });
       renderPost();
       await screen.findByText("Mine");
-      const trigger = screen.getByRole("button", { name: "More actions" });
+      const trigger = screen.getByRole("button", { name: /^More actions/u });
       await userEvent.click(trigger);
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       await userEvent.keyboard("{Escape}");
@@ -286,7 +286,7 @@ describe("post page", () => {
       await screen.findByText("Mine");
       const [mine, theirs] = within(screen.getByRole("list", { name: "Comments" })).getAllByRole("listitem");
 
-      await userEvent.click(within(mine!).getByRole("button", { name: "More actions" }));
+      await userEvent.click(within(mine!).getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
       const editor = within(mine!).getByLabelText("Edit comment");
       expect(editor).toHaveValue("Mine");
@@ -299,7 +299,7 @@ describe("post page", () => {
       expect(patch.headers["if-match"]).toBe('"v4"');
       expect(patch.body).toEqual({ body: "Mine, edited" });
 
-      await userEvent.click(within(mine!).getByRole("button", { name: "More actions" }));
+      await userEvent.click(within(mine!).getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(within(screen.getByRole("dialog")).getByText("Delete this comment? This can't be undone.")).toBeInTheDocument();
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete comment" }));
@@ -319,7 +319,7 @@ describe("post page", () => {
       });
       renderPost();
       await screen.findByText("Mine");
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
       await userEvent.type(screen.getByLabelText("Edit comment"), "!");
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -342,7 +342,7 @@ describe("post page", () => {
       });
       renderPost();
       await screen.findByRole("heading", { level: 1, name: "Old title" });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
       const title = screen.getByLabelText("Title");
       expect(title).toHaveValue("Old title");
@@ -399,7 +399,7 @@ describe("post page", () => {
       serve({ post: postDetail({ viewer: { ...MINE, canEdit: false } }) });
       renderPost();
       await screen.findByRole("heading", { level: 1 });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       expect(screen.queryByRole("menuitem", { name: "Edit" })).not.toBeInTheDocument();
       expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
     });
@@ -413,7 +413,7 @@ describe("post page", () => {
       });
       renderPost();
       await screen.findByRole("heading", { level: 1 });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       const dialog = screen.getByRole("dialog");
       expect(within(dialog).getByText("Delete this post? This can't be undone.")).toBeInTheDocument();
@@ -431,7 +431,7 @@ describe("post page", () => {
       });
       renderPost();
       await screen.findByRole("heading", { level: 1 });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       await userEvent.click(screen.getByRole("button", { name: "Delete post" }));
       await waitFor(() => expect(router.push).toHaveBeenCalledWith("/communities/northstar-founders"));
@@ -445,7 +445,7 @@ describe("post page", () => {
       });
       renderPost();
       await screen.findByRole("heading", { level: 1 });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete post" }));
       expect(await within(screen.getByRole("dialog")).findByRole("alert")).toBeInTheDocument();

@@ -143,10 +143,13 @@ export function Comments({ postId, community, signedIn, postHidden, returnTo, co
           <CommentRow
             comment={item}
             key={item.id}
+            postHidden={postHidden}
             onChanged={(next) => change((all) => all.map((existing) => (existing.id === next.id ? next : existing)))}
+            onCountChange={onCountChange}
             onDeleted={() => {
               change((all) => all.filter((existing) => existing.id !== item.id));
-              onCountChange(-1);
+              // The visible count leaves hidden comments out, so deleting one changes nothing.
+              if (item.moderation !== "hidden") onCountChange(-1);
             }}
             onGone={() => setGone(true)}
           />
@@ -218,7 +221,7 @@ function CommentComposer({ postId, onCreated }: { postId: string; onCreated: (co
 
   return (
     <form className="circleComposer" onSubmit={(event) => void submit(event)}>
-      <TextField label="Add a comment" max={COMMENT_BODY_MAX} onChange={setBody} rows={3} value={body} />
+      <TextField disabled={sending} label="Add a comment" max={COMMENT_BODY_MAX} onChange={setBody} rows={3} value={body} />
       {error && (
         <p className="circleNotice circleNoticeError circleFormError" role="alert">
           {error}
@@ -235,13 +238,17 @@ function CommentComposer({ postId, onCreated }: { postId: string; onCreated: (co
 
 interface RowProps {
   comment: CommentItem;
+  /** A hidden post takes no comment edits, whatever the loaded flags say. */
+  postHidden: boolean;
+  /** Hide and restore move the visible count by one. */
+  onCountChange: (delta: number) => void;
   onChanged: (comment: CommentItem) => void;
   onDeleted: () => void;
   /** The comment was already gone when the delete ran. */
   onGone: () => void;
 }
 
-function CommentRow({ comment, onChanged, onDeleted, onGone }: RowProps) {
+function CommentRow({ comment, postHidden, onCountChange, onChanged, onDeleted, onGone }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
   const [saving, setSaving] = useState(false);
@@ -291,7 +298,8 @@ function CommentRow({ comment, onChanged, onDeleted, onGone }: RowProps) {
             }}
             onModerate={setModerating}
             onReport={() => setReporting(true)}
-            viewer={comment.viewer}
+            subject={`${comment.author.displayName}'s comment`}
+            viewer={postHidden ? { ...comment.viewer, canEdit: false } : comment.viewer}
           />
         )}
       </div>
@@ -336,7 +344,10 @@ function CommentRow({ comment, onChanged, onDeleted, onGone }: RowProps) {
           id={comment.id}
           kind="comment"
           onClose={() => setModerating(null)}
-          onDone={(result) => onChanged({ ...comment, moderation: result.moderation, version: result.changed ? comment.version + 1 : comment.version })}
+          onDone={(result) => {
+            if (result.moderation !== comment.moderation) onCountChange(result.moderation === "hidden" ? -1 : 1);
+            onChanged({ ...comment, moderation: result.moderation, version: result.version });
+          }}
         />
       )}
       {confirming && (

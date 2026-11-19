@@ -39,8 +39,8 @@ export function Composer({ communityId, onCreated }: ComposerProps) {
 
   return (
     <form className="circleComposer" onSubmit={(event) => void submit(event)}>
-      <TextField label="Title" max={POST_TITLE_MAX} onChange={setTitle} value={title} />
-      <TextField label="Body" max={POST_BODY_MAX} onChange={setBody} rows={4} value={body} />
+      <TextField disabled={sending} label="Title" max={POST_TITLE_MAX} onChange={setTitle} value={title} />
+      <TextField disabled={sending} label="Body" max={POST_BODY_MAX} onChange={setBody} rows={4} value={body} />
       {error && (
         <p className="circleNotice circleNoticeError circleFormError" role="alert">
           {error}

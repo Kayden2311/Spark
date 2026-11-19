@@ -47,7 +47,7 @@ function servePost(community: CommunityDetail, postBody: PostDetail, comments: C
 
 const member = (overrides: Partial<CommunityDetail> = {}) => detail({ viewerStatus: "member", ...overrides });
 const moderator = () => detail({ viewerStatus: "moderator" });
-const openMenu = async (scope: HTMLElement) => userEvent.click(within(scope).getByRole("button", { name: "More actions" }));
+const openMenu = async (scope: HTMLElement) => userEvent.click(within(scope).getByRole("button", { name: /^More actions/u }));
 
 describe("ReportDialog", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -110,7 +110,7 @@ describe("ModerationDialog", () => {
   });
 
   it("blocks reasons under 3 characters and posts the action with the reason", async () => {
-    const { calls } = stubFetch((url, init) => (url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST" ? json({ moderation: "hidden", reportsClosed: 2, changed: true }) : undefined));
+    const { calls } = stubFetch((url, init) => (url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST" ? json({ moderation: "hidden", reportsClosed: 2, changed: true, version: 2 }) : undefined));
     const onDone = vi.fn();
     render(<ModerationDialog action="hide" id="p1" kind="post" onClose={vi.fn()} onDone={onDone} />);
     const send = screen.getByRole("button", { name: "Hide post" });
@@ -121,7 +121,7 @@ describe("ModerationDialog", () => {
     await userEvent.type(screen.getByLabelText("Reason"), "c");
     expect(screen.getByText("3/500")).toBeInTheDocument();
     await userEvent.click(send);
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith({ moderation: "hidden", reportsClosed: 2, changed: true }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith({ moderation: "hidden", reportsClosed: 2, changed: true, version: 2 }));
     expect(calls.at(-1)?.body).toEqual({ action: "hide", reason: "abc" });
   });
 
@@ -163,7 +163,7 @@ describe("report and moderation in the feed", () => {
     expect(await screen.findByText(THANKS)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    const trigger = within(card).getByRole("button", { name: "More actions" });
+    const trigger = within(card).getByRole("button", { name: /^More actions/u });
     expect(trigger).toHaveFocus();
     await userEvent.click(trigger);
     expect(screen.getByRole("menuitem", { name: "You reported this" })).toHaveAttribute("aria-disabled", "true");
@@ -186,12 +186,12 @@ describe("report and moderation in the feed", () => {
     expect(dialog).toContainElement(document.activeElement as HTMLElement);
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(within(card).getByRole("button", { name: "More actions" })).toHaveFocus();
+    expect(within(card).getByRole("button", { name: /^More actions/u })).toHaveFocus();
   });
 
   it("hides a post in place for a moderator, badges it, and offers Restore", async () => {
     const { calls } = serveFeed(moderator(), [post({ id: "p1", viewer: { canModerate: true, canReport: true } })], (url, init) =>
-      url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST" ? json({ moderation: "hidden", reportsClosed: 0, changed: true }) : undefined,
+      url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST" ? json({ moderation: "hidden", reportsClosed: 0, changed: true, version: 2 }) : undefined,
     );
     render(<CommunityView slug="northstar-founders" />);
     const card = await screen.findByRole("article");
@@ -210,7 +210,7 @@ describe("report and moderation in the feed", () => {
 
   it("restores a hidden post and drops the badge", async () => {
     serveFeed(moderator(), [post({ id: "p1", moderation: "hidden", viewer: { canModerate: true } })], (url, init) =>
-      url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST" ? json({ moderation: "visible", reportsClosed: 0, changed: true }) : undefined,
+      url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST" ? json({ moderation: "visible", reportsClosed: 0, changed: true, version: 2 }) : undefined,
     );
     render(<CommunityView slug="northstar-founders" />);
     const card = await screen.findByRole("article");
@@ -243,17 +243,17 @@ describe("report and moderation on the post page", () => {
     expect(await screen.findByText(THANKS)).toBeInTheDocument();
     expect(calls.at(-1)).toMatchObject({ path: "/api/v1/comments/m1/reports", body: { reason: "off_topic" } });
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
-    await userEvent.click(within(first).getByRole("button", { name: "More actions" }));
+    await userEvent.click(within(first).getByRole("button", { name: /^More actions/u }));
     expect(screen.getByRole("menuitem", { name: "You reported this" })).toBeInTheDocument();
     const second = screen.getByText("Other").closest("li")!;
     await userEvent.keyboard("{Escape}");
-    await userEvent.click(within(second).getByRole("button", { name: "More actions" }));
+    await userEvent.click(within(second).getByRole("button", { name: /^More actions/u }));
     expect(screen.getByRole("menuitem", { name: "Report" })).toBeInTheDocument();
   });
 
   it("hides the post and a comment in place for a moderator", async () => {
     const { calls } = servePost(moderator(), postDetail({ viewer: { canModerate: true } }), [comment({ id: "m1", viewer: { canModerate: true } })], (url, init) =>
-      init.method === "POST" && url.pathname.endsWith("/moderation") ? json({ moderation: "hidden", reportsClosed: 1, changed: true }) : undefined,
+      init.method === "POST" && url.pathname.endsWith("/moderation") ? json({ moderation: "hidden", reportsClosed: 1, changed: true, version: 2 }) : undefined,
     );
     render(<PostView postId="p1" slug="northstar-founders" />);
     const article = (await screen.findByRole("heading", { level: 1, name: "Hello founders" })).closest("article")!;
@@ -321,7 +321,7 @@ describe("moderation states", () => {
   it("raises the local version after a changed moderation so the next edit sends the new If-Match", async () => {
     const mine = { isAuthor: true, canEdit: true, canDelete: true, canReport: false, canModerate: true };
     const { calls } = servePost(moderator(), postDetail({ version: 1, viewer: mine }), [], (url, init) => {
-      if (url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST") return json({ moderation: "hidden", reportsClosed: 0, changed: true });
+      if (url.pathname === "/api/v1/posts/p1/moderation" && init.method === "POST") return json({ moderation: "hidden", reportsClosed: 0, changed: true, version: 2 });
       if (url.pathname === "/api/v1/posts/p1" && init.method === "PATCH") return json(postDetail({ version: 3, title: "New title", viewer: mine }));
       return undefined;
     });

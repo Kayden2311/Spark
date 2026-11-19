@@ -253,7 +253,7 @@ describe("community feed", () => {
       render(<CommunityView slug="northstar-founders" />);
       await screen.findByRole("link", { name: "Mine" });
       const card = screen.getAllByRole("article")[0]!;
-      await userEvent.click(within(card).getByRole("button", { name: "More actions" }));
+      await userEvent.click(within(card).getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
       const dialog = screen.getByRole("dialog");
@@ -271,7 +271,7 @@ describe("community feed", () => {
       serve(member(), [post({ viewer: AUTHOR })]);
       render(<CommunityView slug="northstar-founders" />);
       await screen.findByRole("link", { name: "Hello founders" });
-      const trigger = screen.getByRole("button", { name: "More actions" });
+      const trigger = screen.getByRole("button", { name: /^More actions/u });
       const openDialog = async () => {
         await userEvent.click(trigger);
         await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -302,7 +302,7 @@ describe("community feed", () => {
       );
       render(<CommunityView slug="northstar-founders" />);
       await screen.findByRole("link", { name: "Hello founders" });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       await userEvent.click(screen.getByRole("button", { name: "Delete post" }));
       await waitFor(() => expect(screen.queryByRole("article")).not.toBeInTheDocument());
@@ -315,7 +315,7 @@ describe("community feed", () => {
       );
       render(<CommunityView slug="northstar-founders" />);
       await screen.findByRole("link", { name: "Hello founders" });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       await userEvent.click(screen.getByRole("button", { name: "Delete post" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -327,7 +327,7 @@ describe("community feed", () => {
       const { calls } = serve(member(), [post({ viewer: AUTHOR })]);
       render(<CommunityView slug="northstar-founders" />);
       await screen.findByRole("link", { name: "Hello founders" });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -338,7 +338,7 @@ describe("community feed", () => {
       serve(member(), [post({ id: "p1", viewer: AUTHOR })]);
       render(<CommunityView slug="northstar-founders" />);
       await screen.findByRole("link", { name: "Hello founders" });
-      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
       await userEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
       expect(router.push).toHaveBeenCalledWith("/communities/northstar-founders/posts/p1?edit=1");
     });
@@ -353,7 +353,7 @@ describe("community feed", () => {
 
 describe("More actions menu", () => {
   const viewer = (overrides: object = {}) => ({ isAuthor: false, reported: false, canEdit: false, canDelete: false, canReport: true, canModerate: false, ...overrides });
-  const open = async () => userEvent.click(screen.getByRole("button", { name: "More actions" }));
+  const open = async () => userEvent.click(screen.getByRole("button", { name: /^More actions/u }));
   const items = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
 
   it("offers Edit and Delete to the author, not Report", async () => {
@@ -384,7 +384,7 @@ describe("More actions menu", () => {
     expect(items()).toEqual(["You reported this"]);
     expect(screen.getByRole("menuitem", { name: "You reported this" })).toHaveAttribute("aria-disabled", "true");
     rerender(<ContentMenu hidden={false} onReport={vi.fn()} viewer={viewer({ canReport: false })} />);
-    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^More actions/u })).not.toBeInTheDocument();
   });
 
   it("offers Hide or Restore only with canModerate", async () => {
@@ -402,7 +402,7 @@ describe("More actions menu", () => {
     expect(onModerate).toHaveBeenLastCalledWith("restore");
 
     rerender(<ContentMenu hidden={false} onModerate={onModerate} viewer={viewer({ canReport: false })} />);
-    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^More actions/u })).not.toBeInTheDocument();
   });
 
   it("focuses the first item on open and moves with the arrow, Home and End keys", async () => {

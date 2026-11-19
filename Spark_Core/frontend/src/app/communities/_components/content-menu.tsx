@@ -15,6 +15,8 @@ interface ContentMenuProps {
   /** Hooks for the report and moderation dialogs. An item is offered only when its hook is passed. */
   onReport?: () => void;
   onModerate?: (action: ModerateAction) => void;
+  /** What the menu acts on, for its accessible name: "More actions for <subject>". */
+  subject?: string;
 }
 
 interface Item {
@@ -26,7 +28,7 @@ interface Item {
 export const REPORTED_LABEL = "You reported this";
 
 /** The "More actions" menu of a post or comment; what it offers follows the viewer flags the API sent. */
-export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onModerate }: ContentMenuProps) {
+export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onModerate, subject }: ContentMenuProps) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -90,7 +92,7 @@ export function ContentMenu({ viewer, hidden, onEdit, onDelete, onReport, onMode
         aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label="More actions"
+        aria-label={subject ? `More actions for ${subject}` : "More actions"}
         className="circleMenuTrigger"
         onClick={() => setOpen((value) => !value)}
         ref={trigger}

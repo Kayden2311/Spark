@@ -149,11 +149,18 @@ function MembershipActions({ community, onChange, notify }: ActionsProps) {
       </>
     );
   } else if (status === "pending") {
+    // A private community made public keeps its pending requests: those people can join at once.
+    const joinable = community.visibility === "public";
     control = (
       <>
         <span className="circleStatePill">Request pending</span>
+        {joinable && (
+          <button className="circleCtaBtn" disabled={busy || paused} onClick={() => void join()} type="button">
+            {busy ? "Joining…" : "Join"}
+          </button>
+        )}
         <button className="circleGhostBtn" disabled={busy || paused} onClick={() => void withdraw()} type="button">
-          Withdraw
+          {joinable ? "Withdraw request" : "Withdraw"}
         </button>
       </>
     );

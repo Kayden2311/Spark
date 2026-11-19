@@ -30,6 +30,7 @@ export function PostCard({ post, slug, onEdit, onDelete, onReport, onModerate }:
           onEdit={onEdit && (() => onEdit(post))}
           onModerate={onModerate && ((action) => onModerate(post, action))}
           onReport={onReport && (() => onReport(post))}
+          subject={post.title}
           viewer={post.viewer}
         />
       </div>

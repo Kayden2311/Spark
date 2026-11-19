@@ -73,6 +73,8 @@ export interface ModerationResult {
   moderation: string;
   reportsClosed: number;
   changed: boolean;
+  /** The target's version after the call: send it as the next If-Match. */
+  version: number;
 }
 
 /** One reported post or comment in the manage page queue. The API never says who reported. */
