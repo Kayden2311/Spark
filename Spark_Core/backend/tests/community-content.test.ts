@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
+import { memberRateKey } from "../src/routes/communities/content.js";
 import { encodeCursor } from "../src/routes/pagination.js";
 import { dbError, fakePool, principalRow, type QueryHandler } from "./fake-pool.js";
 
@@ -601,5 +602,17 @@ describe("content writes need a session and a same-origin caller", () => {
     expect(response.statusCode).toBe(403);
     expect(response.json().code).toBe("origin_not_allowed");
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("member rate limit key", () => {
+  it("keys on the session token hash and falls back to the address", () => {
+    const a = memberRateKey({ headers: { cookie: "spark_session=aaaa" }, ip: "1.2.3.4" });
+    const b = memberRateKey({ headers: { cookie: "spark_session=bbbb" }, ip: "1.2.3.4" });
+    expect(a).toMatch(/^[0-9a-f]{64}$/u);
+    expect(a).not.toBe(b);
+    expect(memberRateKey({ headers: { cookie: "spark_session=aaaa" }, ip: "9.9.9.9" })).toBe(a);
+    expect(a).not.toContain("aaaa");
+    expect(memberRateKey({ headers: {}, ip: "1.2.3.4" })).toBe("1.2.3.4");
   });
 });

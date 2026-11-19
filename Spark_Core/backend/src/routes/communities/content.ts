@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Pool, PoolClient } from "pg";
 
+import { readSessionTokenHash } from "../../infrastructure/database/session.js";
 import { parseIdempotencyKey } from "../../modules/work/domain/idempotency.js";
 import { problem } from "../responses.js";
 import { type Member, type MemberGuard } from "../workspace/guard.js";
@@ -12,9 +13,16 @@ import { NO_NUL, readAs, type Viewer } from "./discovery.js";
 export const PAGE_LIMIT = 20;
 export { NO_NUL };
 
-// Create limits are per member and shorter than the 60 s mutation window.
-export const POST_CREATE_RATE_LIMIT = { rateLimit: { max: 10, timeWindow: 10 * 60 * 1000 } } as const;
-export const COMMENT_CREATE_RATE_LIMIT = { rateLimit: { max: 30, timeWindow: 10 * 60 * 1000 } } as const;
+// Create limits are per member: the bucket is keyed on the session token hash (the request address when
+// there is no session cookie) and the window is longer than the 60 s mutation window.
+export function memberRateKey(request: Pick<FastifyRequest, "headers" | "ip">): string {
+  const hash = readSessionTokenHash(request.headers.cookie);
+  return hash ? hash.toString("hex") : request.ip;
+}
+const memberLimit = (max: number) => ({ rateLimit: { max, timeWindow: 10 * 60 * 1000, keyGenerator: memberRateKey } }) as const;
+export const POST_CREATE_RATE_LIMIT = memberLimit(10);
+export const COMMENT_CREATE_RATE_LIMIT = memberLimit(30);
+export const REPORT_RATE_LIMIT = memberLimit(20);
 
 const uuid = { type: "string", format: "uuid" } as const;
 const nullableString = { type: ["string", "null"] } as const;

@@ -35,6 +35,9 @@ const report = (outcome: string, id: string | null = reportId): [string, QueryHa
 const moderate = (outcome: string, status: string | null, closed: number | null = 0): [string, QueryHandler] =>
   ["spark.ws_moderate_content", () => [{ outcome, moderation_status: status, reports_closed: closed }]];
 
+// The route re-reads the target after the call to return its new version.
+const reread: Array<[string, QueryHandler]> = [["spark.community_post(", () => [{ version: 7 }]], ["spark.community_comment(", () => [{ version: 7 }]]];
+
 const postReports = `/api/v1/posts/${postId}/reports`;
 const commentReports = `/api/v1/comments/${commentId}/reports`;
 const postModeration = `/api/v1/posts/${postId}/moderation`;
@@ -141,17 +144,18 @@ describe("POST /posts/{id}/reports and /comments/{id}/reports", () => {
 
 describe("POST /posts/{id}/moderation and /comments/{id}/moderation", () => {
   it.each([["post", postModeration, postId], ["comment", commentModeration, commentId]])("hides a %s", async (_name, url, target) => {
-    const { response, calls } = await send({ method: "POST", url, payload: { action: "hide", reason: "spam ad" } }, [moderate("ok", "hidden", 2)]);
+    const { response, calls } = await send({ method: "POST", url, payload: { action: "hide", reason: "spam ad" } }, [moderate("ok", "hidden", 2), ...reread]);
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ moderation: "hidden", reportsClosed: 2, changed: true });
+    expect(response.json()).toEqual({ moderation: "hidden", reportsClosed: 2, changed: true, version: 7 });
+    expect(find(calls, url.includes("/posts/") ? "spark.community_post(" : "spark.community_comment(")?.params).toEqual([target]);
     expect(response.headers["cache-control"]).toBe("private, no-store");
     expect(find(calls, "spark.ws_moderate_content")?.params).toEqual([url.includes("/posts/") ? "post" : "comment", target, "hide", "spam ad"]);
   });
 
   it("answers unchanged with 200 and changed: false", async () => {
-    const { response } = await send({ method: "POST", url: postModeration, payload: { action: "restore", reason: "already fine" } }, [moderate("unchanged", "visible", 0)]);
+    const { response } = await send({ method: "POST", url: postModeration, payload: { action: "restore", reason: "already fine" } }, [moderate("unchanged", "visible", 0), ...reread]);
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ moderation: "visible", reportsClosed: 0, changed: false });
+    expect(response.json()).toEqual({ moderation: "visible", reportsClosed: 0, changed: false, version: 7 });
   });
 
   it.each([

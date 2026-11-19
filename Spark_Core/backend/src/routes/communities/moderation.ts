@@ -4,13 +4,11 @@ import { problem } from "../responses.js";
 import { MUTATION_RATE_LIMIT } from "../session-guard.js";
 import type { MemberGuard } from "../workspace/guard.js";
 import { accessDenied, communityParams, mapOutcome, noQuery, runCommunity, type Mapped } from "./access.js";
-import { NO_NUL, commentNotFound, commentParams, postNotFound, postParams, runWrite } from "./content.js";
+import { NO_NUL, REPORT_RATE_LIMIT, commentNotFound, commentParams, postNotFound, postParams, runWrite } from "./content.js";
 
 // Reports and moderation: every route needs a session and answers private, no-store (the guard sets it,
 // the error handler repeats it). No response ever carries a reporter: reporters have no endpoint to read
 // a report back, and the queue shows none.
-
-export const REPORT_RATE_LIMIT = { rateLimit: { max: 20, timeWindow: 10 * 60 * 1000 } } as const;
 
 const REASONS = ["spam", "harassment", "off_topic", "misinformation", "self_promotion", "other"] as const;
 const ACTIONS = ["hide", "dismiss", "restore"] as const;
@@ -45,7 +43,7 @@ const reportResponse = {
 
 const moderationResponse = {
   type: "object",
-  properties: { moderation: { type: "string" }, reportsClosed: { type: "integer" }, changed: { type: "boolean" } },
+  properties: { moderation: { type: "string" }, reportsClosed: { type: "integer" }, changed: { type: "boolean" }, version: { type: "integer" } },
 } as const;
 
 const queueResponse = {
@@ -159,7 +157,7 @@ export function registerModerationRoutes(app: FastifyInstance, guard: MemberGuar
       {
         config: MUTATION_RATE_LIMIT,
         schema: {
-          description: `Hides or restores a ${kind}, or dismisses its open reports. Needs an owner or moderator role in the community.`,
+          description: `Hides or restores a ${kind}, or dismisses its open reports. Needs an owner or moderator role in the community. The answer carries the target's new version.`,
           params,
           querystring: noQuery,
           body: moderationBody,
@@ -179,7 +177,14 @@ export function registerModerationRoutes(app: FastifyInstance, guard: MemberGuar
           const mapped = mapOutcome(moderateOutcomes[kind], row?.outcome, "ok", "unchanged");
           if (mapped) return { mapped };
           if (!row?.moderation_status) throw new Error("Moderation outcome has no status");
-          return { moderation: row.moderation_status, reportsClosed: Number(row.reports_closed ?? 0), changed: row.outcome === "ok" };
+          // The status change bumped the version: read it back so clients can send a correct If-Match next.
+          const current = await client.query<{ version: number }>(
+            `SELECT version FROM spark.community_${kind}($1::uuid)`,
+            [request.params[idParam]],
+          );
+          const version = current.rows[0]?.version;
+          if (version === undefined) throw new Error("Moderated target is not readable");
+          return { moderation: row.moderation_status, reportsClosed: Number(row.reports_closed ?? 0), changed: row.outcome === "ok", version };
         });
         if (reply.sent || !result) return reply;
         if (result.mapped) return problem(request, reply, ...result.mapped);
